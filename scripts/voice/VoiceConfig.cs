@@ -53,4 +53,25 @@ public static class VoiceConfig
     /// playback uses. Do not fork these.</summary>
     public const float ProximityUnitSize = 6.0f;
     public const float ProximityMaxDistance = 24.0f;
+
+    /// <summary>The PA bus reverb's shipped wet mix — "the building answers back", the third of
+    /// the three effects in <c>VoiceManager.EnsurePaBusName</c>. Named rather than inline because
+    /// <see cref="IntercomWetDb"/> is a trim ON it and the two have to agree by construction; see
+    /// <c>VoiceRouting.WetFromDb</c>.</summary>
+    public const float PaReverbWet = 0.25f;
+
+    /// <summary>
+    /// <b>THE ONE INTERCOM KNOB</b> (VOICE-1). A dB trim on the PA reverb's wet mix, applied when
+    /// the bus is built and re-applied whenever this is written.
+    ///
+    /// <para><b>0 = ship.</b> The default reproduces <see cref="PaReverbWet"/> exactly, so the
+    /// knob's existence cannot have changed the intercom's character. Negative pulls the room off
+    /// the voice for a taunt that has to be understood (-6 dB halves the wet mix, -60 dB is
+    /// effectively dry); positive is clamped at fully wet.</para>
+    ///
+    /// <para>Settable at runtime so <c>--intercom-wet-db</c> can A/B it inside one playtest
+    /// instead of one value per build. Process-scoped, like every other launch-flag override:
+    /// the bus outlives a match.</para>
+    /// </summary>
+    public static float IntercomWetDb { get; set; }
 }

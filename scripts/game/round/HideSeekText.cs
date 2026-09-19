@@ -56,6 +56,28 @@ public static class HideSeekText
         _ => string.Empty,
     };
 
+    /// <summary>
+    /// <b>The intercom lamp's line</b> (VOICE-1): who is talking to you through the PA right now.
+    /// Called only when somebody IS — "is anyone on the intercom" is a peer id the caller already
+    /// holds (<c>VoiceManager.PaSpeakerNow</c>), not a string this function would have to make
+    /// empty to express.
+    ///
+    /// <para><b>It is a redundant channel, not decoration</b> — <c>INTERACTION-BIBLE.md</c> §8.2.
+    /// A cross-room voice is deliberately filtered and quiet (overdrive, a 2.2 kHz lowpass and a
+    /// boxy reverb), and the one thing a hider must never be unsure of is whether the seeker is
+    /// talking at all, because what they SAY is a bluff and the bluff is the mechanic. An
+    /// audio-only cue for that is the defect §8.2 is about.</para>
+    ///
+    /// <para>A peer whose display name has not replicated yet gets the word SOMEONE rather than
+    /// an empty gap: "the intercom is live and I cannot tell you who" is the true statement, and
+    /// it is still the half of the message that matters.</para>
+    /// </summary>
+    public static string IntercomLine(string speakerName)
+    {
+        string name = speakerName?.Trim() ?? string.Empty;
+        return name.Length == 0 ? "INTERCOM: SOMEONE" : $"INTERCOM: {name.ToUpperInvariant()}";
+    }
+
     /// <summary>The strip's whole line, in one function, so the HUD never assembles copy of its
     /// own. <paramref name="role"/> is dropped when empty rather than leaving a stray separator —
     /// a spectator gets "SEEKING · 2:41 · ROUND 2", not "SEEKING · 2:41 ·  · ROUND 2".</summary>

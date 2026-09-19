@@ -43,9 +43,19 @@ public partial class RoundStripWidget : PanelContainer
     /// eight words under pressure, short enough that the next press's answer is unambiguous.</summary>
     public const double RefusalHoldSec = 2.0;
 
+    /// <summary>How long the intercom lamp stays lit after the last PA frame from that speaker.
+    /// The voice envelope already has a ~120 ms release, so this is not de-bounce — it is the gap
+    /// between two sentences of the same taunt, which a lamp that went out in between would read
+    /// as two different people talking.</summary>
+    public const double IntercomHoldSec = 0.8;
+
     private VBoxContainer _rows = null!;
     private Label _line = null!;
     private Label _refusal = null!;
+    private Label _intercom = null!;
+
+    private string _intercomText = string.Empty;
+    private double _intercomLeft;
 
     private string _lastLine = string.Empty;
     private HideSeekPhase _lastPhase = HideSeekPhase.Holding;
@@ -73,6 +83,15 @@ public partial class RoundStripWidget : PanelContainer
         _refusal = HudTheme.MakeLabel(string.Empty, HudTheme.RoleCaption, HorizontalAlignment.Center);
         _refusal.Visible = false;
         _rows.AddChild(_refusal);
+
+        // The intercom lamp (VOICE-1), under the refusal row rather than beside the phase line:
+        // it appears and disappears mid-round, and a row that grows and shrinks inside the line
+        // the eye returns to would make the phase readout jump. Its own row simply pushes the
+        // strip a caption taller while somebody is talking, and GameHud re-publishes the column
+        // off the measured height, so nothing below it has to know.
+        _intercom = HudTheme.MakeLabel(string.Empty, HudTheme.RoleCaption, HorizontalAlignment.Center);
+        _intercom.Visible = false;
+        _rows.AddChild(_intercom);
 
         // Nothing is painted until the round is synced, so the strip starts out of the frame's way
         // entirely rather than showing a plausible default.
@@ -126,6 +145,8 @@ public partial class RoundStripWidget : PanelContainer
             }
         }
 
+        TickIntercom(delta);
+
         int self = (int)Multiplayer.GetUniqueId();
         string text = HideSeekText.StripLine(view.Phase, view.RemainingSec,
             view.RoleTextFor(self), view.Round);
@@ -149,5 +170,51 @@ public partial class RoundStripWidget : PanelContainer
         // event follows for a joiner's first message.
         if (phaseChanged && !first)
             HudMotion.FlashText(_line, HudTheme.AccentPrimary);
+    }
+
+    /// <summary>
+    /// <b>The intercom lamp</b> (VOICE-1): "INTERCOM: &lt;name&gt;" while a voice from another
+    /// room is coming through the PA.
+    ///
+    /// <para><b>The non-audio half of a consequence whose primary channel is audio</b> —
+    /// <c>INTERACTION-BIBLE.md</c> §8.2. The PA route is a filtered, quiet, deliberately distant
+    /// voice, and the seeker taunting the hider through a wall is the bluff the whole startle
+    /// hangs on. A hider who cannot tell whether anything was said is missing the mechanic, not
+    /// missing flavour. It carries the NAME rather than just lighting, because with more than two
+    /// players in a later cut "somebody is lying to you" and "that one is lying to you" are
+    /// different pieces of information.</para>
+    ///
+    /// <para><b>It is deliberately not a mute control and deliberately not a warning.</b> Voice
+    /// is always on (Talon, 2026-09-19); this reports, it does not gate.</para>
+    ///
+    /// <para><b>Read from the route, not from the round.</b> It asks <c>VoiceManager</c> who is
+    /// actually being played on the PA bus right now, so a lamp that lit while the resolver was
+    /// unwired would be lying about the one thing it exists to confirm.</para>
+    /// </summary>
+    private void TickIntercom(double delta)
+    {
+        (int id, string name) = MpFoundation.Voice.VoiceManager.Instance.PaSpeakerNow();
+        if (id != 0)
+        {
+            string line = HideSeekText.IntercomLine(name);
+            if (line != _intercomText)
+            {
+                _intercomText = line;
+                _intercom.Text = line;
+                HudMotion.FlashText(_intercom, HudTheme.AccentPrimary);
+            }
+            _intercom.Visible = true;
+            _intercomLeft = IntercomHoldSec;
+            return;
+        }
+
+        if (_intercomLeft <= 0.0)
+            return;
+        _intercomLeft -= delta;
+        if (_intercomLeft > 0.0)
+            return;
+        _intercom.Visible = false;
+        _intercom.Text = string.Empty;
+        _intercomText = string.Empty;
     }
 }

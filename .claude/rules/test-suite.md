@@ -656,3 +656,48 @@ the same distance as the body to three decimals.** Proved able to fail with `Top
 planted on `FirstPersonCamera.Attach`: spread 73.999 m, `lens moved 0.00 m` against body jumps of
 40.63 / 42.09 / 80.16 m — while the epoch-bump half stayed green, which is what shows the two
 halves are independent.
+
+## The intercom's suite, the port grep done up front, and what its two windows discriminate (VOICE-1, measured 2026-09-19)
+
+`Run-VoiceRoomTest.ps1` (port **7899**) joins the registry. Server plus two bots on
+`--world supermarket`, driven by `--round-script "start@8,confirm@14"`; it asserts the voice
+ROUTE each peer resolved for the other in two windows of one run.
+
+**The port was grepped, not computed.** INT-0's entry above records three lanes off one base all
+picking 7896 from the same stale snapshot. 7893–7898 were already claimed by the carry/round/
+first-person ladder and a sibling lane in this wave had claimed 7901, so the grep — one line over
+`tests/` — chose 7899. **Do this whenever a wave lands more than one suite, and record the claim
+here in the same commit as the suite**, which is the half INT-0 could not do retroactively.
+
+**Its windows are selected by `roundPhase` in the bots' own samples, never by a typed second.**
+Holding = same room, Seeking = cross room. There is not one wall-clock guess in the assertions.
+
+### The two failures it discriminates, both planted and measured
+
+| Plant | Same-room window | Cross-room window | Relay counters | What it proves |
+|---|---|---|---|---|
+| *(none — the shipped tree)* | proximity / proximity, rooms `holding`/`holding` | pa / pa, rooms `task`/`search`, bodies **42.1 m** apart | relayed 1628, **PA-exempt 1301, gated 0**, listener 1614 packets / **248 in the final 6 s** | PASS |
+| **client-only wiring** (`PaPairResolver = null`, server `PaResolver = _ => false`) | **still green** | **still green** | relayed 639, **PA-exempt 0, gated 1001**, listener 384 packets / **0 in the final 6 s** | FAIL — 4 assertions |
+| **everything exempt** (`PaPairResolver = (_,_) => true`, client `PaResolver = _ => true`) | **pa / pa** — FAIL | still green | relayed 1637, PA-exempt 1637, gated 0 | FAIL — 2 assertions |
+
+**Read the middle row.** That is the hazard `VoiceProximityGate`'s header names — a relay that
+does not know who is on the PA silently mutes the intercom — and **both clients' routing verdicts
+read perfectly correct while it was happening.** Every route said `pa`, every room was right, and
+not one packet arrived. A suite that asserted only the route would have passed that build, which
+is why the server's own `paExempt`/`gated` counters and the listener's final-window delta are
+asserted beside it. The bottom row is the converse and is why the same-room window exists at all:
+an intercom that "worked" by exempting everything puts a reverb on two people standing face to
+face, and the cross-room half stays green through it.
+
+**So the three quantities to compare across runs are:** the listener's packets in the final 6 s
+(248 green / 0 muted), the server's `paExempt` (1301 green / 0 muted) and the measured body
+separation (42.1 m — if that drops under the gate's 30 m enter radius the window proves nothing
+and the suite says so in its own words).
+
+**One piece of noise to expect in a FRESH worktree:** the first `godot --import` prints
+`Cannot open file 'res://.godot/imported/Sora.woff2-….fontdata'` and four following font/theme
+errors, then imports them. It is a first-run artifact of an empty `.godot/imported`, appears on
+stderr above a suite that then passes, and is not this suite's.
+
+**Baseline after VOICE-1: `dotnet test` Failed: 0, Passed: 1342, Skipped: 0, Total: 1342.**
+INT-0's was 1317; the 25 new ones are `VoiceRoutingTests.cs`.

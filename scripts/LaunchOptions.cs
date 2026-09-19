@@ -670,6 +670,14 @@ public sealed class LaunchOptions
     /// PaResolver has no production assignment), so without this hook the exemption branch would
     /// be untested code. Every real launch path leaves it off.</summary>
     public bool VoicePaAll { get; private set; }
+
+    /// <summary>--intercom-wet-db &lt;db&gt;: the one intercom knob (VOICE-1), a dB trim on the
+    /// PA bus reverb's wet mix. <b>0 (the default) is exactly what ships</b>; negative pulls the
+    /// room off the voice when the intercom is too muddy for a taunt to be understood, positive
+    /// clamps at fully wet. See <c>VoiceConfig.IntercomWetDb</c> and
+    /// <c>VoiceRouting.WetFromDb</c>. Client-side — the PA bus is where audio is mixed, and a
+    /// dedicated server mixes none.</summary>
+    public float IntercomWetDb { get; private set; }
     // --- end perf followups ---------------------------------------------------------------------
     /// <summary>--authored-clips: drive the played body's base pose from the fourteen hand-keyed
     /// clips in <c>Greybox.glb</c> instead of from the shipped procedural gait (ANIM-M3).
@@ -1333,6 +1341,20 @@ public sealed class LaunchOptions
                 case "--voice-pa-all":
                     options.VoicePaAll = true;
                     break;
+                case "--intercom-wet-db":
+                {
+                    // A malformed value is IGNORED rather than defaulted to 0, which is the
+                    // shipped character: "--intercom-wet-db verydry" must not read as a
+                    // deliberate request for exactly what ships. Invariant culture, like every
+                    // other numeric flag here — a comma decimal separator is a locale, not a
+                    // second syntax.
+                    if (float.TryParse(Next(args, ref i), NumberStyles.Float,
+                            CultureInfo.InvariantCulture, out float intercomWetDb))
+                    {
+                        options.IntercomWetDb = intercomWetDb;
+                    }
+                    break;
+                }
                 // --- end perf followups ------------------------------------------------------
                 case "--authored-clips":
                     options.AuthoredClips = true;

@@ -108,6 +108,18 @@ try {
         # in the join-index spawn dealing -- which is the other reason it goes at the end.
         @{ Name = "First person: rig + cull (FP-1)";     Script = "Run-FirstPersonTest.ps1" }
 
+        # --- VOICE-1 (2026-09-19): the intercom ---
+        # Last, per the standing rule, and headless again. It runs a server plus two bots on its
+        # OWN port (7899 — grepped free against every port in tests/ before it was claimed, which
+        # is the check INT-0's entry in .claude/rules/test-suite.md exists to make routine), so it
+        # takes part in the join-index spawn dealing and belongs at the end of the network suites.
+        #
+        # It deliberately does NOT pass --voice-gate: the property under test is that the gate is
+        # on here because VoiceProximityGate.DefaultForWorld says so for the supermarket, and the
+        # cross-room intercom survives it. Forcing the gate on by flag would hide a regression
+        # that turned that per-world default off.
+        @{ Name = "Voice: intercom by room (VOICE-1)";   Script = "Run-VoiceRoomTest.ps1" }
+
         # WHAT WAS REMOVED HERE AT THE FORK (BASE-1, 2026-09-19), so a reader of an old handoff
         # can tell "deleted" from "lost": the bubble-test world, the shared bubble counter and the
         # last-bubble celebration, the TV portal, the Puffin Lab, the watcher's night gate, the
