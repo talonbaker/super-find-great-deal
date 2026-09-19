@@ -155,6 +155,18 @@ try {
         # unavoidable; the alternative was four suites on four ports.
         @{ Name = "Reach: placement integrity (REACH-1)"; Script = "Run-ReachTest.ps1" }
 
+        # --- CLOCK-1 (2026-09-19): the diegetic countdown ---
+        # Last, per the standing rule, and BELOW the windowed suite deliberately: this one is
+        # headless again, so a marathon driven from a shell with no desktop reports the FP suite
+        # red and then still runs this one, rather than the display failure taking the tail of
+        # the registry with it.
+        #
+        # A server and THREE bots on udp/7904 -- its own port, stated rather than computed, for
+        # the reason INT-0 wrote into .claude/rules/test-suite.md (three lanes off one base all
+        # computed 7896). It takes part in the join-index spawn dealing, which is the other
+        # reason it goes at the end.
+        @{ Name = "Round: wall clock + cues (CLOCK-1)";  Script = "Run-RoundClockTest.ps1" }
+
         # WHAT WAS REMOVED HERE AT THE FORK (BASE-1, 2026-09-19), so a reader of an old handoff
         # can tell "deleted" from "lost": the bubble-test world, the shared bubble counter and the
         # last-bubble celebration, the TV portal, the Puffin Lab, the watcher's night gate, the

@@ -316,4 +316,129 @@ public static class HideSeekText
             ? match
             : StripLine(view.Phase, view.RemainingSec, view.RoleTextFor(selfPeerId), view.Round);
     }
+
+    /// <summary>
+    /// <b>The second line of a <c>RoundClock</c> on the wall</b> (CLOCK-1, 2026-09-19). The first
+    /// line is <see cref="PhaseName"/>; this is what sits under it.
+    ///
+    /// <para><b>It is not <see cref="StripLine"/> with the role removed, and it must not become
+    /// that.</b> The strip is one line read from two metres away by the person it belongs to; this
+    /// is read across a room from eight metres by both players at once, so it carries one value
+    /// and never a sentence. Everything else the round has to say is already on the strip.</para>
+    ///
+    /// <list type="bullet">
+    /// <item><b>Holding</b> — empty. The phase has no clock, and a frozen <c>0:00</c> on a wall
+    /// reads as expired rather than as not-started; the same call <see cref="StripLine"/> makes
+    /// for the same reason.</item>
+    /// <item><b>Hiding / Seeking</b> — <see cref="TimerText"/>, the identical floored value the
+    /// strip shows, from the identical replicated field. Two readouts of one number: that is the
+    /// whole point of the clock existing, and reimplementing the format here is how they would
+    /// come to disagree by a second.</item>
+    /// <item><b>Together</b> — what the hider got done before the door. <b>The live
+    /// <c>TowersCompleted</c> off the wire</b>, which is the only count that is on the wire at
+    /// all; the frozen <c>TowersAtFound</c> is server bookkeeping. The word is SORTED because the
+    /// task room sorts objects into bins (Talon, 2026-09-19); the FIELD keeps its name until
+    /// TASK-1 renames it, and this line is copy, not a rename.</item>
+    /// <item><b>Tally</b> — the card, as two numbers. <c>HID</c> is the hider's sorts and
+    /// <c>SEEK</c> is the seeker's seconds; they are not comparable and the card does not pretend
+    /// they are (proposal §3.3). A card that ended on a disconnect says so in words instead,
+    /// because two zeroes look like two people who tried.</item>
+    /// </list>
+    ///
+    /// <para><b>Every arm is short on purpose.</b> <see cref="RoundClockLayout.FitPixelSize"/>
+    /// shrinks the label to keep a long line inside the panel, so a wordy arm here does not
+    /// overflow the clock — it makes the clock unreadable at eight metres, which is worse.</para>
+    /// </summary>
+    public static string ClockLine(HideSeekPhase phase, float remainingSec, int towersCompleted,
+        HideSeekTally? tally) => phase switch
+    {
+        HideSeekPhase.Holding => string.Empty,
+        HideSeekPhase.Hiding or HideSeekPhase.Seeking => TimerText(remainingSec),
+        HideSeekPhase.Together => $"{Math.Max(towersCompleted, 0)} SORTED",
+        HideSeekPhase.Tally => tally is not { } card
+            ? string.Empty
+            : card.EndedByDisconnect
+                ? "ENDED EARLY"
+                : $"HID {Math.Max(card.HiderGained, 0)} · SEEK {Math.Max(card.SeekerGained, 0)}",
+        _ => string.Empty,
+    };
+}
+
+/// <summary>
+/// <b>How big the clock's second line is drawn</b> (CLOCK-1, 2026-09-19) — engine-free, so the
+/// arithmetic that decides whether a player can read the wall is a unit test rather than a
+/// screenshot.
+///
+/// <para><b>The problem it solves.</b> The line is <c>0:30</c> for almost the whole round and
+/// <c>HID 3 · SEEK 172</c> for six seconds of it. A Label3D does not reflow, so a panel sized for
+/// the timer has the tally hanging off both ends of it, and a panel sized for the tally has a
+/// timer you cannot read from an aisle.</para>
+///
+/// <para><b>Why character count and not font metrics.</b> <c>Font.GetStringSize</c> would be
+/// exact and would also drag a font resource, a theme lookup and a rendering server into a
+/// number that has to be identical on a headless bot and on Talon's machine. This is a pure
+/// function of an int, and it is the only reason the clock's legibility is a unit test.</para>
+///
+/// <para><b>What that costs, said plainly, because the first draft got it wrong.</b> A character
+/// count is an AVERAGE, so it is not conservative in either direction: a line of wide glyphs is
+/// wider than the estimate and a line of digits and colons is much narrower. The first cut
+/// assumed the textbook 0.55-of-height advance, and the capture of the <c>Together</c> line
+/// showed <c>3 SORTED</c> hanging off both ends of the panel. <see cref="ReferenceChars"/> now
+/// carries the ratio measured off that render. <b>The render is the instrument here</b> — this
+/// class can hold the arithmetic honest but it cannot tell you the constant is wrong, so a
+/// change to the panel or the label size owes a new capture, not just a green suite.</para>
+/// </summary>
+public static class RoundClockLayout
+{
+    /// <summary>
+    /// How many characters fit across the panel at the authored size — the width everything here
+    /// is measured against.
+    ///
+    /// <para><b>Derived from the panel, and the advance ratio in it was MEASURED off a render
+    /// rather than assumed.</b> <c>RoundClock.tscn</c>'s panel is 2.4 m wide and the timer's
+    /// glyphs are 0.48 m tall (font_size 96 at pixel_size 0.005). The first cut of this number
+    /// assumed the usual "a proportional sans averages 0.55 of its height per advance" and got
+    /// 8 — and the capture of the <c>Together</c> line showed <c>3 SORTED</c> hanging off both
+    /// ends of the panel. Measured on that frame (the panel spans 275 px, the eight-character
+    /// line spans 283), this font's average advance is <b>0.64</b> of the glyph height, so the
+    /// panel holds 2.4 / (0.48 × 0.64) ≈ 7.8 characters. Seven is that with a margin.</para>
+    ///
+    /// <para>Change the panel's width or the label's size and this number moves with them — and
+    /// re-take the capture, because that is the only instrument that can see it. The unit test
+    /// below bounds the copy against this number, but it cannot tell you the number is
+    /// wrong.</para>
+    ///
+    /// <para><b>The two lines that matter are well inside it</b> — <c>0:30</c> is four and
+    /// <c>10:00</c> is five — which is the point: the clock is at full size for the whole round
+    /// and only the six-second tally card is ever shrunk.</para>
+    /// </summary>
+    public const int ReferenceChars = 7;
+
+    /// <summary>
+    /// Never shrink past this fraction of the authored size — below it the line is present but
+    /// unreadable, which is a worse failure than an overhang because nothing looks broken. A line
+    /// long enough to hit this floor is a copy defect, not a layout one.
+    ///
+    /// <para><b>0.35 is set by the longest line the wire can produce</b>, not by taste:
+    /// <c>HID 255 · SEEK 255</c>, eighteen characters, both gains clamped at the byte ceiling
+    /// <see cref="HideSeekWire.ClampByte"/> imposes. <see cref="ReferenceChars"/> / 18 = 0.389,
+    /// so anything above that leaves a line the fit cannot rescue, and 0.35 is that with room.
+    /// At this floor the glyphs are 0.17 m and subtend about 16 px of a 1152-line frame at 8 m —
+    /// legible for the six seconds a tally card is up, and a good deal smaller than anything the
+    /// clock shows for the rest of the round.</para></summary>
+    public const float MinScale = 0.35f;
+
+    /// <summary>
+    /// The pixel size to draw a line of <paramref name="lineLength"/> characters at, given the
+    /// authored <paramref name="basePixelSize"/>. Never larger than the authored value — a short
+    /// line is not an invitation to grow, because the panel is also a fixed size and the two
+    /// labels have to stay in proportion to each other.
+    /// </summary>
+    public static float FitPixelSize(float basePixelSize, int lineLength)
+    {
+        if (lineLength <= ReferenceChars)
+            return basePixelSize;
+        float scale = ReferenceChars / (float)lineLength;
+        return basePixelSize * Math.Max(scale, MinScale);
+    }
 }

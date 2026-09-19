@@ -56,11 +56,34 @@ public sealed partial class SupermarketWorldSelfTest : Node3D
     /// a wall by a centimetre.</para></summary>
     public const float MinRoomSeparationM = 30f;
 
+    /// <summary>
+    /// Every scene <see cref="CheckAuthored"/> counts. The three rooms, and — since CLOCK-1,
+    /// 2026-09-19 — every prefab the rooms instance that is part of the LEVEL rather than of a
+    /// gameplay system.
+    ///
+    /// <para><b>Why the prefab has to be in this list, measured rather than reasoned.</b>
+    /// <see cref="CountNodes"/> stops at an instance boundary, because a room's packed state
+    /// lists an instanced sub-scene as one node and does not describe its insides. That is
+    /// correct for the room — and it means a prefab whose own script builds a child in
+    /// <c>_Ready</c> is INVISIBLE to the room's count. Planted exactly that
+    /// (<c>AddChild(new Node3D())</c> in <c>RoundClock._Ready</c>) and all three rooms stayed at
+    /// packed == live: 27/27, 38/38, 44/44, suite green. The hole predates this lane — a
+    /// <c>Carryable</c> was stopped at by type for the same structural reason — but CLOCK-1 is
+    /// the first LEVEL prefab, so it is the first time the hole lets a level defect through.
+    /// The fix is to check the prefab against ITS OWN scene file, which is exactly the rule
+    /// (<c>.claude/rules/godot-scenes.md</c>) applied one level down.</para>
+    ///
+    /// <para><c>Crate.tscn</c> is deliberately NOT here. It is a gameplay prop, not level
+    /// geometry, and its script builds its own outline shell and blob shadow at runtime by
+    /// design — that is the documented exception <see cref="CountNodes"/> exists for, and
+    /// listing it would assert the opposite of what CARRY-1 decided.</para>
+    /// </summary>
     private static readonly string[] SectionScenes =
     {
         "res://scenes/game/world/supermarket/HoldingRoom.tscn",
         "res://scenes/game/world/supermarket/SearchRoom.tscn",
         "res://scenes/game/world/supermarket/TaskRoom.tscn",
+        "res://scenes/game/world/supermarket/RoundClock.tscn",
     };
 
     private readonly List<string> _failures = new();
@@ -201,8 +224,8 @@ public sealed partial class SupermarketWorldSelfTest : Node3D
     }
 
     /// <summary>
-    /// Live nodes in a section, with <b>one deliberate stop</b>: a prop's body counts as one node
-    /// and its insides are not walked.
+    /// Live nodes in a section, with <b>one deliberate stop</b>: an instanced sub-scene counts as
+    /// one node and its insides are not walked.
     ///
     /// <para><b>Why the exception exists</b> (CARRY-1, 2026-09-19). The rule this check enforces is
     /// "every part of a LEVEL is authored in its scene file". A prop is not a part of the level in
@@ -213,19 +236,35 @@ public sealed partial class SupermarketWorldSelfTest : Node3D
     /// authored node list against the room's nodes PLUS a prop's private furniture, and reports a
     /// level defect that is not one.</para>
     ///
-    /// <para><b>What it deliberately does NOT weaken.</b> The prop node and its body still count,
-    /// so a room that SPAWNS a prop in <c>_Ready</c> still turns this red — which is the case the
-    /// rule is actually about. Everything that is scenery (walls, floors, lights, markers,
-    /// bounds volumes, the pillar) is still walked to the leaf.</para>
+    /// <para><b>Why the stop is now the INSTANCE BOUNDARY rather than the <c>Carryable</c> type</b>
+    /// (CLOCK-1, 2026-09-19, and it is a generalisation, not a loosening). A room's
+    /// <see cref="SceneState"/> lists an instanced sub-scene as ONE node and does not list that
+    /// sub-scene's own children at all — that is what an instance is. So the packed side already
+    /// counts every instanced prefab as one, and a live walk that descended into any of them was
+    /// always going to over-count; <c>Carryable</c> was simply the only prefab in the tree when
+    /// that was written. CLOCK-1 instances <c>RoundClock.tscn</c> into all three rooms, which is
+    /// the second one, and naming a second type here would have started a list. The honest rule
+    /// is the one the packed side is already using: <b>a node with its own
+    /// <see cref="Node.SceneFilePath"/> is authored in THAT file, and is that file's business.</b>
+    /// The <c>Carryable</c> case is subsumed by it exactly — <c>Crate.tscn</c>'s root carries its
+    /// own scene path — so nothing it used to catch is let through.</para>
+    ///
+    /// <para><b>What it deliberately does NOT weaken.</b> The instance node itself still counts,
+    /// so a room that SPAWNS a prop or a clock in <c>_Ready</c> still turns this red — which is
+    /// the case the rule is actually about, and is what the planted fault that proved this check
+    /// was re-run against. Everything that is scenery (walls, floors, lights, markers, bounds
+    /// volumes, the pillar) is still walked to the leaf, because scenery has no scene path of its
+    /// own. The section root is walked unconditionally: it has a scene path — its own — and
+    /// stopping there would count every room as exactly one node and pass forever.</para>
     /// </summary>
     private static int CountNodes(Node from)
     {
         int n = 1;
         foreach (Node child in from.GetChildren())
         {
-            if (child is MpFoundation.Game.Sandbox.Carryable)
+            if (!string.IsNullOrEmpty(child.SceneFilePath))
             {
-                n += 1;          // the prop's body; its insides are the prop's business
+                n += 1;          // an instanced prefab; its insides are that prefab's business
                 continue;
             }
             n += CountNodes(child);

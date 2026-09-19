@@ -1004,3 +1004,49 @@ This run queued **~390 s** behind `C:\repos\sfgd-reach1`'s suite and then `C:\re
 which the lock's own waiting lines name by pid and worktree. No process this lane did not start was
 investigated or killed. Worth recording as the ordinary case: the wait is not a mutex timeout and
 it is not a red — read the waiting lines, which say who holds it and for how long.
+
+## The wave-2 port ladder, and why 7904 is stated rather than computed (CLOCK-1, 2026-09-19)
+
+INT-0's entry above is the reason this section exists rather than a grep. **A "next free port"
+computed from a snapshot of `tests/` is not free while five lanes are branched off one base and
+none can see the others**, which is exactly the shape of wave 2. So the orchestrator hands the
+numbers out and each lane WRITES DOWN the one it was given, here and in its own script's header:
+
+| Port | Suite | Lane |
+|---|---|---|
+| 7893 / 7894 / 7895 | `Run-CarryNetTest.ps1` (three phases) | CARRY-1 |
+| 7896 | `Run-RoundLoopSmoke.ps1` | ROUND-1 |
+| 7897 | `Run-FirstPersonTest.ps1` | FP-1 (moved off 7896 by INT-0) |
+| 7898 | `Run-PlaceTest.ps1` | CARRY-1 (moved off 7896 by INT-0) |
+| 7899–7903 | claimed by wave-2 lanes | REACH-1, DOOR-1, VOICE-1, SFX-1, BTN-1 |
+| **7904** | **`Run-RoundClockTest.ps1`** | **CLOCK-1** |
+
+**A collision at RUN time on one of these is another lane's live process, not a defect.** That is
+the distinction INT-0 drew and it is worth restating from the other side: a registry collision
+fails identically on every marathon and is fixed by moving a number; contention with a sibling
+worktree's Godot clears on a re-run. If 7904 is genuinely taken by a registered suite after the
+merge, CLOCK-1's next is **7905** and nothing else in its script depends on the value.
+
+## A 1 Hz log from three processes needs a stamp, not an ordering (CLOCK-1, 2026-09-19)
+
+`Run-RoundClockTest.ps1` compares what three independent clients painted on a wall against what
+the server believed, and the comparison is the suite. Two things made it an assertion rather than
+a tolerance, and both generalise to any multi-peer readout check:
+
+- **Every line carries a Unix millisecond stamp and the suite pairs each client line with the
+  server line NEAREST IT IN TIME**, not with "the last server line before it". Three independent
+  1 Hz timers drift into and out of phase with each other within a period, so "the last one
+  before" is between 0 and 1000 ms stale at random — which is the entire tolerance the check is
+  trying to spend. `BotHarness`'s `Wall` field made the same point for JSONL in FIX-1's entry
+  above; this is the same fact for `GD.Print`.
+- **The client's PHASE WORD is read off the Label3D and the server's off `ServerState`.** Neither
+  side is recomputed from a folded view: a client line built from `driver.View` would still pass
+  with a blank panel on the wall, and a server line built from the server's own folded view would
+  let a fold bug make both sides wrong in the same direction.
+
+**One sample class is skipped rather than compared**, and saying which is part of the check: a
+client line within 1.2 s of a server phase transition. At 1 Hz logging over a 10 Hz wire a client
+can legitimately still be showing the phase it had when the server has already moved, and that is
+the wire's latency rather than a wrong clock. The suite counts the skips and the unpaired lines
+and **fails if fewer than 30 pairs were actually compared**, so a guard that swallowed everything
+cannot read as green.

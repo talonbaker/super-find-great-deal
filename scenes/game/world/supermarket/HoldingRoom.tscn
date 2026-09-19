@@ -1,4 +1,4 @@
-[gd_scene load_steps=10 format=3]
+[gd_scene load_steps=11 format=3]
 
 ; BASE-1 (2026-09-19) — THE HOLDING ROOM. 10 x 10 x 3.5 m interior box: floor, four walls,
 ; ceiling, one light, four spawn markers. Every session starts here and every late joiner lands
@@ -18,6 +18,8 @@
 ;
 ; THE TINT IS FUNCTIONAL. Each room is a different flat grey so a capture, a bug report or a
 ; playtest video says which room it was taken in without a caption. Do not unify them.
+
+[ext_resource type="PackedScene" path="res://scenes/game/world/supermarket/RoundClock.tscn" id="9_clock"]
 
 [sub_resource type="StandardMaterial3D" id="Mat_floor"]
 resource_name = "holding room floor (cool grey)"
@@ -153,3 +155,24 @@ collision_mask = 0
 
 [node name="Collision" type="CollisionShape3D" parent="RoomBounds"]
 shape = SubResource("BoxShape3D_bounds")
+
+; CLOCK-1 (2026-09-19) — THE ROUND CLOCK. One instance of RoundClock.tscn, high on the -Z wall's
+; inner face (the wall is at z = -5.2 and is 0.4 m thick, so its inner face is z = -5.0) looking
+; at the centre of the room. Identity basis: a Label3D faces +Z with no rotation, which is into
+; the room from this wall.
+;
+; y = 2.35 puts the panel's centre 1.31 m above the 1.04 m eyeline and its top 0.55 m clear of the
+; ceiling, so it is looked UP at from anywhere in the room and is not something a body walks into
+; -- it carries no collision at all (see RoundClock.tscn).
+;
+; WHICH ROOM THE CLOCK THINKS IT IS IN IS NOT AUTHORED HERE, and that is not an oversight.
+; It was, on the first cut -- a `room = "..."` line on the instance below, against an [Export] on
+; RoundClock -- and it read back EMPTY on all three clocks. Godot does not apply a nested
+; PackedScene instance's exported C# script properties on this project's Godot/Mono build; the
+; native properties on the same line (transform, mesh, mass) are unaffected, which is why this
+; fails silently. PropManager.AuthoredKindOf and Carryable.LoadLiftM record the same trap from
+; 2026-07 and 2026-09. RoundClock derives the room by walking up to THIS scene's root name, which
+; is a native property and survives instancing.
+
+[node name="RoundClock" parent="." instance=ExtResource("9_clock")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.35, -4.94)

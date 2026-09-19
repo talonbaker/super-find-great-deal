@@ -357,6 +357,19 @@ public partial class Gameplay : Node3D
                 });
             }
         }
+
+        // The round's diegetic half (CLOCK-1, 2026-09-19): one 10 Hz poll that paints every
+        // RoundClock on every wall and fires the round's audio cues off the same two views.
+        //
+        // NOT inside the !IsHeadless block above, and that is the load-bearing difference. This
+        // is not chrome — it is the world saying the time out loud, and every client in tests/ is
+        // headless, so a poll gated on a renderer would be a feature no suite in this repo can
+        // reach. Attach() makes the narrower decision itself: never on a dedicated server unless
+        // --log-clock asked for the suite's reference line, and playback off on any headless peer
+        // while the cue DERIVATION still runs and logs.
+        //
+        // After the driver, because its very first poll reads HideSeekDriver.Instance.
+        Round.RoundAudio.Attach(this);
         // WHAT USED TO BE HERE, in one line each, because every one of these blocks carried a
         // "THIS IS THE ONLY CONSTRUCTION SITE" warning and deleting them is exactly the move those
         // warnings were written against: the lake (WaterService plus the chill overlays and the
