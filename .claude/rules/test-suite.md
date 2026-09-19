@@ -34,7 +34,8 @@ paths:
 - **Stage by path. Never `git add -A` after a suite run** — Godot regenerates `.import`/`.uid`
   sidecars with zero content diff (`.claude/rules/imports-and-encoding.md`).
 - **`user://` resolves by project NAME, so every checkout on a machine shares ONE profile**
-  (`%APPDATA%/Godot/app_userdata/Watis World/`). `settings.cfg` there is the player's real
+  (`%APPDATA%/Godot/app_userdata/Super Find Great Deal/` — renamed at the fork, BASE-1 2026-09-19,
+  precisely so this game's bots can never reach Watis World's profile). `settings.cfg` there is the player's real
   profile: a suite bot has already spent a real achievement into it once. Gate any persisted
   per-player fact on `IIntentSource.IsHumanInput`, and before adding one, ask whether a bot can
   trigger it.
@@ -164,7 +165,9 @@ check is the real thing.
 
 ## Baseline after the extraction (2026-09-02, Linux cloud container)
 
-- `dotnet test tests/unit/SailNet.Tests.csproj`: see `DECISION-LOG.md` §3 for the raw line.
+- `dotnet test tests/unit/SailNet.Tests.csproj`: the raw line lived in `Watis_Game`'s
+  `DECISION-LOG.md` §3, which did not come over. This repo's own baseline is the BASE-1 section
+  at the end of this file.
 - The scene marathon needs Windows PowerShell and was NOT run in the cloud; the headless
   self-tests that do not need PowerShell were run directly (same section).
 
@@ -433,3 +436,57 @@ with three orders of magnitude of headroom.
 The 1.5 s tolerance is comparing two live clients' wall clocks; a scheduling hiccup of ~25 ms past
 it is the entire failure. **Read the divergence and compare it to the base's** — the verdict alone
 carries almost no information for this suite.
+
+## The fork's own baseline, and a NEW teardown-crash symptom (BASE-1, measured 2026-09-19)
+
+**This file came over from `Watis_Game` whole, and every dated section above it was measured
+there.** Keep them: the suites they name (`Carry: server-authoritative`, `Carry: throw + loose`,
+`Reconnect: grace window`, `Netcode: anti-cheat`, `Netcode: net-sim`, `World: tidal-cycle phase`,
+`World: run driver`) all still exist here, unchanged, and their discriminators still apply. The
+entries that name suites this repo no longer has (`Bike: handling model`, `Run-BubbleSyncTest`,
+the LD-2/MOVE-1 env-var trap in `Run-MovementPlayground`) are kept as reasoning rather than as
+live guidance — the env-var trap in particular generalises to any suite that sets a variable for
+its child process, and the next one to do that will be one of ours.
+
+**Baseline after the fork.** `tests/Run-AllTests.ps1` on `feat/2026-09-19-base-1`: **31 suites,
+27 PASS / 4 FAIL**. `dotnet test tests/unit/SailNet.Tests.csproj`: **Failed: 0, Passed: 1254,
+Skipped: 0, Total: 1254**.
+
+All four marathon reds are on the load-flaky list above and all four were discriminated the
+documented way — re-run standalone with `-SkipBuild` on a machine with zero Godot and zero dotnet
+processes running (checked by process listing first):
+
+| Suite | Standalone | The quantity |
+|---|---|---|
+| `Carry: server-authoritative` | 2/3 PASS | the red printed `C's grab never converged, so the disconnect-release was never staged` — the STAGING half, in its own words |
+| `Reconnect: grace window` | 2/3 PASS | marathon red was the byte-identical `post-resume avatarCount = 1, expected 2`; the standalone red was NOT (see below) |
+| `World: tidal-cycle phase` | 2/3 PASS | the red was cross-view `1.85416632s` against a 1.5 s tolerance — inside the 1.52–2.38 s band already measured twice above |
+| `World: run driver` | **3/3 PASS** | marathon `2.7356483s`, standalone `0.2312500s` — an order of magnitude, the BUBBLE-2 discriminator exactly |
+
+### The new thing: a bot client dying with `-1073741795` AFTER it finished its work
+
+**Two different suites, two different runs, the same exit code on a `--bot` client process:**
+`CycleRejoin exited with code -1073741795` in the marathon, and `BotA exited -1073741795` in one
+standalone `Run-ReconnectTest.ps1`. `-1073741795` is `0xC000001D`, `STATUS_ILLEGAL_INSTRUCTION`.
+
+**It is a TEARDOWN artifact, and the log says so.** `tests/logs/reconnect-botA.out.log` ends:
+
+```
+[client] connected as peer 790196959
+[bot] BotA done
+```
+
+The bot connected, ran its full duration, printed its own completion line, and *then* the process
+died on the way out. This is the same class as the `Bike: handling model` entry above — "a 20/20
+PASS line above an `exited -1` is a teardown artifact, not a check" — one exit code further along.
+
+**How to read it.** The runners gate on the child's exit code, so this presents as a suite red
+with no failing assertion in it. Before treating one as a regression: open the bot's `.out.log`
+and look for its completion line. If the work finished, the red is about process shutdown and not
+about the thing under test. **Nothing in BASE-1's diff can reach either suite** — it touched no
+file under `scripts/net/**`, no `CycleDriver`, and no part of the reconnect path.
+
+**Not chased further here, and it should be.** Two occurrences in one afternoon on one machine is
+a rate worth knowing, and an illegal-instruction crash is a different animal from a scheduling
+flake. Whoever picks it up: capture the Windows fault log alongside the bot's stdout, and check
+whether it only ever happens to a bot that has already printed `done`.

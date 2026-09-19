@@ -1,11 +1,11 @@
-# How Watis World Fits Together
+# How Super Find Great Deal Fits Together
 
 The high-level mental model — how the pieces connect and what flows where.
 For the feature list, build/run commands, and the full test matrix, see [README.md](README.md).
 
 ## The one-sentence model
 
-Watis World is a **client-hosted, server-authoritative** small-session multiplayer stack: the player who
+Super Find Great Deal is a **client-hosted, server-authoritative** small-session multiplayer stack: the player who
 hosts runs the real game server as a hidden child process, **Steam's lobby directory is the only
 "matchmaking"** (no backend to run, ever), and everything a player sees in the world is an
 **authored scene the runtime loads** — never geometry built in code.
@@ -26,8 +26,9 @@ hosts runs the real game server as a hidden child process, **Steam's lobby direc
                                    ▼
    Gameplay.tscn  ── loads on every peer BEFORE connecting (so replication can't race setup)
                    │
-                   │  loads the WORLD  ─►  bubbletest/BubbleTest.tscn  (seven authored
-                   │  Gameplay.BuildWorld     section scenes, props, spawn markers)
+                   │  loads the WORLD  ─►  supermarket/Supermarket.tscn  (a seam file
+                   │  Gameplay.BuildWorld     instancing three authored room scenes,
+                   │                          40 m apart, with named spawn markers)
                    ▼
    In match:  server spawns avatars + owns movement & props   ·   clients predict + render
 ```
@@ -41,6 +42,7 @@ hosts runs the real game server as a hidden child process, **Steam's lobby direc
 | **Replication** | who-spawns-what + state sync — `MultiplayerSpawner` + reliable/unreliable RPCs | `scripts/net`, `Gameplay.cs` |
 | **Authority** | server simulates avatars & owns the prop registry; owning client predicts + reconciles | `AvatarMotor`, `PropManager` |
 | **Gameplay** | avatar, camera, carry/props, proximity voice, the world | `scripts/game`, `scripts/voice` |
+| **Round** | *(not wired yet)* the engine-free hide/seek loop, its wire and its teleports | `scripts/game/round`, `RoomTeleport` |
 | **Presentation** | menus, room-code HUD, personal pause overlay | `scripts/ui` |
 
 Each layer only knows the one below it. A game built on this foundation touches only **Gameplay** and
@@ -83,9 +85,10 @@ This is the rule the whole content side is built on:
   construction. The server therefore only syncs their **state**, never spawns their **existence**.
 - The one deliberate exception is genuinely dynamic content — **each player's avatar** — which is
   spawned at runtime because it can't exist until that player joins.
-- **The bubble test enforces this mechanically:** `BubbleTestSelfTest` counts meshes, colliders
-  and bodies in each section's *packed* state and again in the live tree, and fails on any
-  difference — a section that builds geometry in `_Ready` turns the suite red.
+- **The level enforces this mechanically:** `SupermarketWorldSelfTest` counts each room scene's
+  nodes in its *packed* state (`SceneState` — nothing instantiated, nothing run) and again in the
+  live tree, and fails on any difference — a room that builds geometry in `_Ready` turns the suite
+  red. `tests/Run-SupermarketWorldTest.ps1` is the gate.
 - **Scope note (so nobody "fixes" the wrong thing):** two CI-only worlds sit outside the
   contract on purpose. `--world open` and `--world propsync` load `GameWorld.cs`, a code-built
   slab with a spawn ring that the scene suites run their replication, carry and cheat proofs
@@ -96,9 +99,11 @@ This is the rule the whole content side is built on:
 ## Where your game plugs in
 
 - **New world:** author a `.tscn` (floor + props + `Spawn*` markers) with a small `IGameWorld`
-  script, and add it to `Gameplay.BuildWorldScene`. (`BubbleTest.tscn` and its sections are the
-  worked example; `LaunchOptions.DefaultWorld` picks which one a bare launch gets.)
+  script, and add it to `Gameplay.BuildWorldScene`. (`Supermarket.tscn` and its three rooms are
+  the worked example; `LaunchOptions.DefaultWorld` picks which one a bare launch gets.)
 - **New objects:** author a prop prefab (`MeshInstance3D` + `CollisionShape3D` + `Carryable`),
   then drop instances into your world scene where you want them.
 - **Everything else** — transport, client-local hosting, the security boundary, movement
-  authority, proximity voice, the menu shell, the run spine — you get unchanged.
+  authority, networked carry, proximity voice, the menu shell — you get unchanged. That is what
+  this repo was forked out of `Watis_Game` to keep; `docs/PRUNE-BACKLOG.md` says what came with
+  it that nobody wants.

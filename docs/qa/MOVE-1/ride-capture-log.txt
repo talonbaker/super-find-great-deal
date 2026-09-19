@@ -1,8 +1,0 @@
-01-mounted-still-BEFORE: speed 0.00 m/s, MOUNTED, blend 1.00, ride weight POSED 0.00, mode Coast, cranks 0.000 rev/s at phase 0.000, gear Idle, gait cadence 2.03 steps/s, body tilt 0.000 rad, grounded True
-01-mounted-still-AFTER: speed 0.00 m/s, MOUNTED, blend 1.00, ride weight POSED 1.00, mode Coast, cranks 0.000 rev/s at phase 0.000, gear Idle, gait cadence 0.00 steps/s, body tilt -0.105 rad, grounded True
-02-ride-at-cap-pedal-BEFORE: speed 9.42 m/s, MOUNTED, blend 1.00, ride weight POSED 0.00, mode Coast, cranks 0.000 rev/s at phase 0.524, gear Sprint, gait cadence 3.90 steps/s, body tilt -0.000 rad, grounded True
-02-ride-at-cap-pedal-AFTER: speed 9.42 m/s, MOUNTED, blend 1.00, ride weight POSED 1.00, mode Pedal, cranks 1.604 rev/s at phase 0.222, gear Idle, gait cadence 0.00 steps/s, body tilt -0.210 rad, grounded True
-03-coasting-at-speed-BEFORE: speed 5.55 m/s, MOUNTED, blend 1.00, ride weight POSED 0.00, mode Coast, cranks 0.000 rev/s at phase 0.500, gear Sprint, gait cadence 3.55 steps/s, body tilt 0.050 rad, grounded True
-03-coasting-at-speed-AFTER: speed 3.67 m/s, MOUNTED, blend 1.00, ride weight POSED 1.00, mode Coast, cranks 0.000 rev/s at phase 0.500, gear Idle, gait cadence 0.00 steps/s, body tilt -0.055 rad, grounded True
-04-mounted-airborne-BEFORE: speed 9.42 m/s, MOUNTED, blend 1.00, ride weight POSED 0.00, mode Coast, cranks 0.000 rev/s at phase 0.500, gear Sprint, gait cadence 3.90 steps/s, body tilt -0.057 rad, grounded False
-04-mounted-airborne-AFTER: speed 9.42 m/s, MOUNTED, blend 1.00, ride weight POSED 1.00, mode Pedal, cranks 0.000 rev/s at phase 0.000, gear Idle, gait cadence 0.00 steps/s, body tilt -0.233 rad, grounded False

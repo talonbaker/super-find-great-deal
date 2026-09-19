@@ -1,99 +1,102 @@
-# Watis World — project instructions
+# Super Find Great Deal — project instructions
 
-Godot 4.7 (C#/mono, .NET 8), PC/Steam. This repository is the **MVP extraction** of the `Sail`
-development repository (2026-09-02): it carries only what the current playable build reaches.
-`MVP-SCOPE.md` says what is in and out and why; `DECISION-LOG.md` records how each call was
-made. Sail stays as the historical record — read it, never build against it.
+Godot 4.7 (C#/mono, .NET 8), Windows, PC/Steam. Seeded 2026-09-19 from `Watis_Game@93bef3d`
+(BASE-1): the multiplayer foundation kept, the old game removed. History for anything that came
+over lives in `Watis_Game` — `git log -L` archaeology is done there, and a link into it is
+provenance, not rot.
 
-## Canon
+## The game
 
-**This repo is an MVP about movement, flow, feel and mechanics. It has no premise** (Talon,
-2026-09-02). There is no setting, no player noun, no story and no threat here — do not infer one,
-and do not carry one over from `Sail`. Read [`docs/CANON.md`](docs/CANON.md) for the full
-statement and the durable §0 tenets; it is short now, on purpose.
+Two players, three rooms, one round.
 
-The level does have **one mechanical objective — collect all the bubbles** (Talon, 2026-09-04;
-said once on entry, restated in HOW TO PLAY). That is an objective, not a premise: nothing is at
-stake, nothing happens when it is met, and no setting may be inferred from it. Both this line and
-`docs/CANON.md` said "and no goal" until that date — the direction changed, not the rule.
+1. **Holding room.** Both players. The hider picks one object off a rack of near-misses — same
+   colour, same size class, a shape apart. Press Start.
+2. **Hiding (30 s).** The hider is in the search room with the object, among aisles of identical
+   red cubes. The seeker is shut in the holding room and cannot see or hear them.
+3. **Seeking.** The hider is moved to the task room and stacks blocks for score; the seeker hunts
+   the search room for the one object that does not belong and drops it in a bin.
+4. **The payoff.** The moment the object lands in the bin, the door to the task room bursts open
+   and the seeker walks in. The hider's tower is mid-stack and gets knocked over. Score freezes at
+   that tick.
+5. Tally, roles swap, again.
 
-**Never tell Talon that something "contradicts canon."** The premise churns faster than any
-document tracks it, so when his direction and a document disagree, the document is what is wrong —
-update it or say nothing. If a task genuinely cannot proceed without a premise decision, ask him
-one plain question rather than guessing.
+**The game is anticipation with an unknowable instant, paid off physically.** Both players know
+the door is the only way this ends; neither knows when. The seeker's progress is invisible except
+through what they say on the intercom — and they can lie. Voice is always on: same room is
+proximity, cross-room is a filtered PA/intercom. Bluffing is the design, not a side effect.
 
-A retired player noun still lurking in an old document, an identifier or a test fixture (`camper`,
-`child`, `-uffling`, `caveman`, `KidQuarters`, `IsInCampfireWarmth`…) is **residue, not evidence of
-a setting**. Read it as "the player", keep working, and don't sweep it — the mechanical rename is
-its own deliberate pass.
+First person. Hands-on carry (R.E.P.O.-style: the object is held by a spring, not parented to a
+socket). Nothing is a cutscene and nobody ever loses input.
 
-**A dead link into `Sail` is provenance, not rot.** Documents carried over from `Sail` cite paths
-that were deliberately left there — `docs/superpowers/**`, the dated `docs/agents/` briefs and
-`outbox/`/`archive/` reports, `tools/dev/**`, and the cut asset contracts (`BLENDER-EXPORT.md`,
-`ENVIRONMENT-ASSET-CONTRACT.md`). Measured 2026-09-02: 78 such references across 38 documents.
-They record where a decision came from; read them in `Sail` and do not "fix" them by inventing a
-local file. A reference to a path that should exist *here* and does not is a different thing, and
-worth reporting.
-
-Reference documents in `docs/`:
-
-| Doc | Governs |
-|---|---|
-| `BEHAVIOR-BIBLE.md` | autonomous entities — AI, movement, chase/attack/flee/patrol |
-| `MECHANICS-BIBLE.md` | game-system logic — state machines, boundaries, races, idempotency |
-| `INTERACTION-BIBLE.md` | anything the player directly acts on — buttons, doors, pickups |
-| `LEVEL-BIBLE.md` | composition — zones, spawns, paths, pacing, extraction, ambient legibility |
-| `THRILL-BIBLE.md` | affect — what the player should *feel*. Applied via `/direct` |
-| `DESIGN-BIBLE.md` | tiebreakers for ambiguous design calls |
-| `ART-BIBLE.md`, `PROPORTION-STYLE.md` | colour, shading, silhouette, materials, stylization dials |
-| `UI-DESIGN-SYSTEM.md` | the interface substrate — tokens, recipes, states, the layer ladder. Nothing in the UI holds its own appearance |
-| `ANIMATION-CONTRACT.md` | the avatar clip library and its rest-pose contract |
-| `STATE-CASCADE-TABLE.md` | every system a **player**-state change must update |
-| `ATMOSPHERIC-VFX-INTEGRATION.md` | the map for the `vfx-*` skills |
+The full plan, including what the core opens up later, is
+[`docs/design/2026-09-19-supermarket-mvp.md`](docs/design/2026-09-19-supermarket-mvp.md).
 
 ## Where things are
 
 ```
-scenes/Boot.tscn            the main scene; Boot.cs routes by launch flags
-scenes/ui/                  splash, main menu, host/join/settings, first-run panels, pause
-scenes/game/Gameplay.tscn   the match; Gameplay.cs is the hub node
-scenes/game/world/bubbletest/   the playable level (seven authored sections + the seam)
-scripts/net/                transport, handshake, snapshots, AvatarMotor, MotorTuning, Steam, hosting
-scripts/game/               avatar, carry, bubbles, TV portals, water, failure, run spine, achievements
-scripts/ui/                 the design system and every screen
-scripts/voice/, scripts/telemetry/, scripts/controls/
-tests/unit/                 the Godot-free xUnit suite (dotnet test)
-tests/Run-*.ps1             the Godot scene suites (Windows PowerShell)
-deploy/                     export scripts and SteamPipe templates
+scenes/Boot.tscn                     the main scene; Boot.cs routes by launch flags
+scenes/ui/                           splash, main menu, host/join/settings, first-run panels, pause
+scenes/game/Gameplay.tscn            the match; Gameplay.cs is the hub node
+scenes/game/world/supermarket/       the level: a seam file + three room scenes
+scripts/net/                         transport, handshake, snapshots, AvatarMotor, Steam, hosting
+scripts/game/props/, sandbox/feel/   networked carry authority + the hand-held carry feel
+scripts/game/round/                  the engine-free round loop (imported, not yet wired)
+scripts/game/world/                  SupermarketWorld, RoomTeleport, the cycle/audio plumbing
+scripts/ui/                          the design system and every screen
+scripts/voice/, telemetry/, controls/
+tests/unit/                          the Godot-free xUnit suite (dotnet test)
+tests/Run-*.ps1                      the Godot scene suites (Windows PowerShell)
+deploy/                              export scripts and SteamPipe templates
 ```
 
-`ARCHITECTURE.md` is the mental model; `README.md` has the run commands.
+`docs/PRUNE-BACKLOG.md` lists what the fork left behind on purpose and why.
+
+## The two suite commands
+
+**"The full suite" is TWO commands. Neither one alone is the full suite.**
+
+```
+powershell -File tests/Run-AllTests.ps1                 # the Godot scene suites (Windows)
+dotnet test tests/unit/SailNet.Tests.csproj             # the Godot-free xUnit suite
+```
+
+Run both before every commit. Report RAW COUNTS from each run's own `=== summary ===` block,
+never a verdict and never a number remembered from last time. Run the scene suite in the
+FOREGROUND, redirected to a file (`> suite.txt 2>&1`), and read the file — a pipe reports the last
+element's exit code and hides the runner's.
 
 ## Rules that bind
 
-Hard invariants live in `.claude/rules/` (`godot-scenes`, `imports-and-encoding`, `test-suite`)
-and bind whether or not anyone read them. In particular: stage by path, never `git add -A`
-(engine runs regenerate `.import`/`.uid` sidecars); engine flags before `--`, game flags after;
-run both halves of the suite before a commit and quote raw counts.
+Hard invariants live in `.claude/rules/` and bind whether or not anyone read them:
 
-Single-writer surfaces carried from Sail: `OutdoorAtmosphere.cs` is the sole writer of
-sky/sun/moon/ambient (`SunShadowEnabled` stays false — Talon, 2026-08-07, closed);
-`NightAidDriver.cs` is the sole writer of the `bt_darkness` shader global; `AvatarMotor.Step` is
-the only thing that writes a player's velocity.
+- [`.claude/rules/test-suite.md`](.claude/rules/test-suite.md) — the two commands, foreground,
+  raw counts, one suite per machine, the measured load-flaky list and how to discriminate a flake
+  from a regression.
+- [`.claude/rules/godot-scenes.md`](.claude/rules/godot-scenes.md) — **every part of a level is
+  authored in its scene file, never built in code**; `Transform3D`'s twelve floats are basis ROWS;
+  groups go in the `[node]` header.
+- [`.claude/rules/imports-and-encoding.md`](.claude/rules/imports-and-encoding.md) — `.import`
+  churn is line-endings, not content; never `git checkout -- '*.import'`; never round-trip a file
+  through PowerShell `Get-Content`/`Set-Content` (5.1 mangles UTF-8).
 
-## Agent workflow
+In particular, three that cost a session each:
 
-The file-based agent system is described in [`docs/agents/README.md`](docs/agents/README.md).
-Three modes, and only Talon moves between them: **"just talking"**, **exploring** (default), and
-**"task it out"** (orchestration per `docs/agents/ORCHESTRATOR.md`). Dispatched agents read their
-`docs/agents/roles/<role>/ROLE.md` first and open with its `ROLE / PACKET / TOKEN` line.
+- **Stage by path. Never `git add -A`** — an engine run regenerates ~141 `.import`/`.uid`
+  sidecars with zero content diff.
+- **Godot CLI: engine flags before `--`, game flags after.** Wrong side is swallowed and looks
+  exactly like a hang.
+- **`user://` resolves by project NAME**, so every checkout of this project on a machine shares
+  one profile (`%APPDATA%/Godot/app_userdata/Super Find Great Deal/`). Gate any persisted
+  per-player fact on `IIntentSource.IsHumanInput` — a suite bot once spent a real achievement
+  into the player's live profile in the repo this came from. **Never touch Watis World's
+  profile**; the rename at the fork is what keeps them apart.
 
 ## The bible check — required before any gameplay feature is complete
 
-No gameplay feature is complete until it has been checked against every applicable bible. Pick
-by what the feature *is*: moves or acts on its own → **Behavior**; resolves its own state,
-timers, win/loss → **Mechanics**; the player acts on it → **Interaction**; arranges things into a
-playable space → **Level**; meant to make the player *feel* something → **Thrill** via `/direct`.
+No gameplay feature is complete until it has been checked against every applicable bible in
+`docs/`. Pick by what the feature *is*: the player acts on it → **INTERACTION**; it resolves its
+own state, timers or scoring → **MECHANICS**; it arranges things into a playable space →
+**LEVEL**.
 
 State these three lines when marking gameplay work complete:
 
@@ -103,6 +106,12 @@ Items checked:   <the specific numbered items that bore on this feature>
 Result:          <pass, or what was fixed to make it pass>
 ```
 
-If no bible applies, say so and say why. When a design call is genuinely ambiguous: Behavior /
-Mechanics / Interaction first, then `DESIGN-BIBLE.md`, then surface the fork to Talon and wait.
-Ambiguity about a *value* is not a fork — pick a sensible value, state it, move on.
+If none applies, say so and say why. `INTERACTION-BIBLE.md` is the one with scar tissue in it —
+the one in-world control this foundation ever shipped failed three playtests in a row, and §2/§3/
+§5/§7 are what those failures became. Read them before building a button.
+
+## Asking
+
+Ask Talon in plain conversational text, one question at a time, and wait for a plain-text answer.
+Never a multiple-choice popup, an option list or a numbered batch. Define any jargon the question
+uses.
