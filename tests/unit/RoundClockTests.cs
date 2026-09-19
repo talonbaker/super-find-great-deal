@@ -492,6 +492,12 @@ public class RoundClockTests
         // The .tres serialization contract (SfxLab's own header) plus a cross-lane one: DOOR-1
         // and SFX-1 branched from this same base and hold 24-35. A lane that compacted the gap
         // would silently re-point every presentation profile that referenced one of theirs.
+        //
+        // INT-0B (2026-09-19): those two lanes have now LANDED, so the assertion that 24-35 are
+        // absent has done its job and is replaced by the assertion it was standing in for -- that
+        // CLOCK-1's seven did not move when they arrived. The names are checked too, because the
+        // other way this lane could have been damaged at the merge is a collapse onto SFX-1's
+        // Whoosh (35) or the pre-fork Buzz (17), which the packet's ruling 1 forbids.
         Assert.Equal(36, (int)Sfx.ChimeUp);
         Assert.Equal(37, (int)Sfx.Tick);
         Assert.Equal(38, (int)Sfx.Note);
@@ -500,11 +506,21 @@ public class RoundClockTests
         Assert.Equal(41, (int)Sfx.BuzzDouble);
         Assert.Equal(42, (int)Sfx.ResetWhoosh);
 
-        int[] taken = Enum.GetValues<Sfx>().Select(v => (int)v).ToArray();
-        for (int ordinal = 24; ordinal <= 35; ordinal++)
-            Assert.DoesNotContain(ordinal, taken);
+        // 24-35 are now DOOR-1's and SFX-1's, exactly as the gap reserved them for.
+        Assert.Equal(24, (int)Sfx.Bang);
+        Assert.Equal(25, (int)Sfx.TinPick);
+        Assert.Equal(35, (int)Sfx.Whoosh);
 
-        // The pinned ordinals below are untouched — the whole reason the gap exists.
+        // One list, every ordinal once. This is what a collapsed or renumbered merge breaks.
+        int[] taken = Enum.GetValues<Sfx>().Select(v => (int)v).ToArray();
+        Assert.Equal(taken.Length, taken.Distinct().Count());
+
+        // RoundBuzz and ResetWhoosh are NOT Buzz and Whoosh, and must not become them: they are
+        // different sounds on different events (CLOCK-1's handoff, packet INT-0B ruling 1).
+        Assert.NotEqual((int)Sfx.Buzz, (int)Sfx.RoundBuzz);
+        Assert.NotEqual((int)Sfx.Whoosh, (int)Sfx.ResetWhoosh);
+
+        // The pinned ordinals below are untouched — the whole reason the gap existed.
         Assert.Equal(17, (int)Sfx.Buzz);
         Assert.Equal(23, (int)Sfx.Triumph);
     }

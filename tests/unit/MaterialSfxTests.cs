@@ -359,10 +359,14 @@ public class MaterialSfxTests
 
     /// <summary>The ordinals SFX-1 took, pinned. These are a .tres serialization contract — every
     /// number here is written as an int into a file under <c>assets/items/</c> — so a renumber
-    /// must break a test rather than silently repoint a profile at a different sound. 24 is
-    /// deliberately absent: DOOR-1 has it.</summary>
+    /// must break a test rather than silently repoint a profile at a different sound. 24 was
+    /// deliberately absent while DOOR-1 was on a sibling branch.
+    ///
+    /// <para>INT-0B (2026-09-19): DOOR-1 has landed, so "24 is absent" is replaced by "24 is
+    /// <see cref="Sfx.Bang"/>" — the fact the absence was standing in for. SFX-1's eleven are
+    /// asserted unmoved, which is the thing that would actually repoint a profile.</para></summary>
     [Fact]
-    public void AppendedSfxOrdinals_ArePinnedAndLeave24ToDoor1()
+    public void AppendedSfxOrdinals_ArePinnedAndSitAboveDoor1sBang()
     {
         Assert.Equal(25, (int)Sfx.TinPick);
         Assert.Equal(26, (int)Sfx.TinClank);
@@ -376,7 +380,7 @@ public class MaterialSfxTests
         Assert.Equal(34, (int)Sfx.ProducePlop);
         Assert.Equal(35, (int)Sfx.Whoosh);
         Assert.Equal(14, (int)ActorEvent.Placed);
-        Assert.DoesNotContain(24, Enum.GetValues<Sfx>().Select(s => (int)s));
+        Assert.Equal(24, (int)Sfx.Bang);
 
         // And the eleven are distinct from each other and from everything that was already here.
         int[] all = Enum.GetValues<Sfx>().Select(s => (int)s).ToArray();
