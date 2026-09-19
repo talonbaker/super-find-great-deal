@@ -5,12 +5,20 @@
 ; one edit; HOLD-1's board is meant to be built the same way out of the same two pieces (see
 ; docs/agents/handoffs/2026-09-19-CLOCK-1.md, "one screen").
 ;
-; WHAT A ROOM DOES WITH IT: instance this file, set the node's transform onto the inner face of a
-; wall FACING THE ROOM'S CENTRE, and set the `room` export to the room key
-; (SupermarketWorld.HoldingRoom / SearchRoom / TaskRoom). Nothing else. A Label3D with no rotation
-; faces +Z, so a clock on the -Z wall of a room needs the identity basis and one on the +Z wall
-; needs a 180 degree yaw -- and .claude/rules/godot-scenes.md's first line is that a .tscn's twelve
-; transform floats are basis ROWS, so do not hand-compute one without looking at a render.
+; WHAT A ROOM DOES WITH IT: instance this file and set the node's transform onto the inner face of
+; a wall FACING THE ROOM'S CENTRE. That is the whole contract -- there is deliberately nothing to
+; configure. A Label3D with no rotation faces +Z, so a clock on the -Z wall of a room needs the
+; identity basis and one on the +Z wall needs a 180 degree yaw; .claude/rules/godot-scenes.md's
+; first line is that a .tscn's twelve transform floats are basis ROWS, so do not hand-compute one
+; without looking at a render.
+;
+; DO NOT GIVE THIS SCRIPT AN [Export] AND SET IT ON A ROOM'S INSTANCE LINE. Godot does not apply a
+; nested PackedScene instance's exported C# script properties on this project's Godot/Mono build,
+; and it fails silently -- the native properties beside it (transform, mesh, mass) work fine, so
+; the clock ends up in exactly the right place holding the C# default. That is measured three
+; times now: PropManager.AuthoredKindOf (2026-07, Crate/Sphere `kind` and `tint`),
+; Carryable.LoadLiftM, and CLOCK-1's own first cut of `room`. RoundClock derives the room from the
+; NAME of the section scene above it instead, because a node name is native.
 ;
 ; THERE IS NO COLLISION AND THERE IS NO COLOUR IN THIS FILE, and both absences are deliberate.
 ;   - No collision: a player must never be stopped by the clock, and a StaticBody3D on a wall

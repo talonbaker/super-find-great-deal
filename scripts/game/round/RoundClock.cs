@@ -44,12 +44,35 @@ public partial class RoundClock : Node3D
     /// <inheritdoc cref="PanelNodeName"/>
     public const string TimerLabelNodeName = "TimerLabel";
 
-    /// <summary>Which room this clock is in, for the <c>--log-clock</c> line and for a capture's
-    /// caption. Set per instance in the room scene; the keys are
-    /// <c>SupermarketWorld.HoldingRoom</c> / <c>SearchRoom</c> / <c>TaskRoom</c>, so "which room"
-    /// has one spelling across the level, the teleports and this log.</summary>
-    [Export]
-    public string Room { get; set; } = "";
+    /// <summary>
+    /// Which room this clock is in, for the <c>--log-clock</c> line and for a capture's caption.
+    /// One of <c>SupermarketWorld.HoldingRoom</c> / <c>SearchRoom</c> / <c>TaskRoom</c>, so
+    /// "which room" has one spelling across the level, the teleports and this log. Empty for a
+    /// clock instanced outside a room (the level self-test does exactly that).
+    ///
+    /// <para><b>DERIVED FROM THE ANCESTRY, NOT AN <c>[Export]</c>, and that is this repo's
+    /// third payment for one engine trap.</b> The first draft was
+    /// <c>[Export] public string Room</c> with <c>room = "holding"</c> authored on each room's
+    /// instance line. It reads back as the empty string on every clock:
+    /// <b>Godot does not apply a nested PackedScene instance's exported C# script properties on
+    /// this project's Godot/Mono build.</b> Measured here — all three rooms' clocks logged the
+    /// node name instead of a room — and already measured twice before, on the same build, for
+    /// the same reason: see <c>PropManager.AuthoredKindOf</c> ("Crate.tscn/Sphere.tscn's authored
+    /// <c>kind</c>/<c>tint</c> both silently read back as the C# field's default for EVERY
+    /// authored prop") and <c>Carryable.LoadLiftM</c>. Native engine properties on the same
+    /// instanced nodes — <c>transform</c>, <c>mesh</c>, <c>mass</c> — are unaffected, which is
+    /// what makes the failure so quiet: the clock is in exactly the right place on the wall and
+    /// simply does not know where it is.</para>
+    ///
+    /// <para><b>A node NAME is native, so the ancestry survives instancing.</b> The three section
+    /// scenes are instanced into the seam file under the names
+    /// <c>SupermarketWorld.HoldingNodeName</c> / <c>SearchNodeName</c> / <c>TaskNodeName</c>, and
+    /// each section scene's own root carries the same name when instantiated standalone. So the
+    /// clock walks up until it meets one. That is one lookup at <c>_Ready</c> against constants
+    /// the level already owns, and it cannot silently return the wrong answer — it returns
+    /// nothing, loudly, if the tree is not the tree.</para>
+    /// </summary>
+    public string Room { get; private set; } = "";
 
     private MeshInstance3D? _panel;
     private Label3D? _phaseLabel;
@@ -83,6 +106,7 @@ public partial class RoundClock : Node3D
         }
 
         _timerBasePixelSize = _timerLabel.PixelSize;
+        Room = ResolveRoom(this);
 
         // The panel's material is LOCAL TO THE SCENE (see RoundClock.tscn) so three clocks are
         // three materials rather than one shared resource three nodes fight over. Duplicated
@@ -105,6 +129,30 @@ public partial class RoundClock : Node3D
     }
 
     public override void _ExitTree() => RoundAudio.UnregisterClock(this);
+
+    /// <summary>
+    /// Walks up to the section scene this clock hangs in and answers its room key. Empty when
+    /// there is no room above it, which is the level self-test instantiating
+    /// <c>RoundClock.tscn</c> on its own — a real answer there would be a lie.
+    ///
+    /// <para>The node names come from <see cref="World.SupermarketWorld"/>'s own constants
+    /// rather than being spelled here, so a room renamed in the seam file is a compile error
+    /// somewhere rather than a clock that quietly stops knowing where it is.</para>
+    /// </summary>
+    private static string ResolveRoom(Node from)
+    {
+        for (Node? n = from.GetParent(); n != null; n = n.GetParent())
+        {
+            string name = n.Name.ToString();
+            if (name == World.SupermarketWorld.HoldingNodeName)
+                return World.SupermarketWorld.HoldingRoom;
+            if (name == World.SupermarketWorld.SearchNodeName)
+                return World.SupermarketWorld.SearchRoom;
+            if (name == World.SupermarketWorld.TaskNodeName)
+                return World.SupermarketWorld.TaskRoom;
+        }
+        return "";
+    }
 
     /// <summary>Repaints from the live token set. Called on bind and again on every temperature
     /// change, which is the difference between a clock that follows the light and one that was
