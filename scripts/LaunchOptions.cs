@@ -649,6 +649,35 @@ public sealed class LaunchOptions
     private readonly List<(string Verb, string Value, double AtSec)> _roundScript = new();
     // --- end ROUND-1 ------------------------------------------------------------------------------
 
+    // --- REACH-1 (2026-09-19): placement integrity layers 2 and 3 ---------------------------------
+
+    /// <summary><c>--reach-target &lt;propId&gt;</c>: server-only. Names the prop the round is
+    /// hiding, so REACH-1's fact source has something to audit before BTN-1's object rack exists
+    /// to choose one. −1 (the default) means no target, and the reachability fact then answers
+    /// <c>null</c> — unmeasured — which is exactly what every suite that does not pass this flag
+    /// needs it to do.</summary>
+    public int ReachTargetPropId { get; private set; } = -1;
+
+    /// <summary><c>--reach-selftest</c>: the planted-room self-test — six authored fixtures, each
+    /// one of §5b's named cases, audited by the real layer-2 and layer-3 code on a real server.
+    /// Implies <c>--world reachplant</c>. Prints one machine-readable summary line plus one
+    /// verdict line per case and quits; <c>tests/Run-ReachTest.ps1</c> gates on the LINES, not on
+    /// the exit code (the reason <c>--supermarket-selftest</c> does: a process that dies before
+    /// its own summary exits non-zero for reasons that are not about the subject).</summary>
+    public bool ReachSelfTest { get; private set; }
+
+    /// <summary><c>--reach-cost &lt;seconds&gt;</c>: server-only. Attaches the cost probe that
+    /// measures what §5b's audit actually costs — rest audits per second, physics queries per
+    /// second, and server physics frame time p50/p95 — for the given number of seconds, then
+    /// prints a summary and quits the server. 0 (the default) attaches nothing.
+    ///
+    /// <para>A flag rather than an always-on counter because the probe samples every physics
+    /// tick, and a measurement rig that runs in a real session is a measurement rig that is part
+    /// of the thing it measures.</para></summary>
+    public double ReachCostSec { get; private set; }
+
+    // --- end REACH-1 ------------------------------------------------------------------------------
+
     // --- Voice proximity gate + bandwidth instrumentation (perf followups, 2026-08-07) --------
     /// <summary>--net-stats &lt;path&gt;: the dedicated server appends one JSON line per second of
     /// ENet's own transport byte/packet counters plus the voice relay's relayed/gated counts.
@@ -1077,6 +1106,29 @@ public sealed class LaunchOptions
                     break;
                 case "--supermarket-selftest":
                     options.SupermarketSelfTest = true;
+                    break;
+                // --- REACH-1 -------------------------------------------------------------
+                case "--reach-selftest":
+                    options.ReachSelfTest = true;
+                    // The planted room is the only world this test means anything in, and a run
+                    // that forgot the second flag would audit the empty search room and report
+                    // six passes about nothing. Implied here rather than required at the call
+                    // site, for the same reason --first-person-selftest implies its camera.
+                    options.World = Game.World.ReachPlantWorld.WorldId;
+                    options.WorldExplicit = true;
+                    break;
+                case "--reach-target":
+                    if (int.TryParse(Next(args, ref i).Trim(), out int reachTarget))
+                        options.ReachTargetPropId = reachTarget;
+                    else
+                        GD.PushWarning("[reach] --reach-target: not an integer prop id; ignored");
+                    break;
+                case "--reach-cost":
+                    if (double.TryParse(Next(args, ref i).Trim(), NumberStyles.Float,
+                            CultureInfo.InvariantCulture, out double reachCost) && reachCost > 0)
+                        options.ReachCostSec = reachCost;
+                    else
+                        GD.PushWarning("[reach] --reach-cost: not a positive number of seconds; ignored");
                     break;
                 case "--build-ui-theme":
                     options.BuildUiTheme = true;

@@ -292,6 +292,39 @@ public partial class Gameplay : Node3D
             _world as World.SupermarketWorld, _players, Round.HideSeekTuning.Current,
             net.Options.RoundScript);
         _hideSeekDriver.ResetRequested += OnRoundResetRequested;
+
+        // REACH-1 (2026-09-19), program doc §5b layer 3. Registered on the SERVER only and
+        // registered FIRST among the real sources, which matters: RoundFacts.Combine takes the
+        // first NON-NULL TargetRetrievable in registration order, and this is the lane that owns
+        // that fact. It answers null until it has measured something, so a server with no target
+        // — every suite that does not pass --reach-target, and the whole holding room — is
+        // byte-for-byte unaffected. The phase is passed as a lambda because this source is
+        // constructed before the driver has stepped once.
+        if (net.Role == NetworkManager.SessionRole.Server)
+        {
+            var reach = new Round.ReachabilityFactSource(_propManager,
+                () => _hideSeekDriver.ServerState.Phase);
+            if (net.Options.ReachTargetPropId >= 0)
+                reach.TargetPropId = net.Options.ReachTargetPropId;
+            _hideSeekDriver.Register(reach);
+
+            if (net.Options.ReachSelfTest)
+            {
+                // The planted room's self-test quits the process when it is done, so this is a
+                // dedicated run and nothing else about the session matters.
+                AddChild(new World.ReachPlantSelfTest
+                    { Name = "ReachPlantSelfTest", Props = _propManager });
+            }
+            if (net.Options.ReachCostSec > 0)
+            {
+                AddChild(new World.ReachCostProbe
+                {
+                    Name = "ReachCostProbe",
+                    Props = _propManager,
+                    DurationSec = net.Options.ReachCostSec,
+                });
+            }
+        }
         // WHAT USED TO BE HERE, in one line each, because every one of these blocks carried a
         // "THIS IS THE ONLY CONSTRUCTION SITE" warning and deleting them is exactly the move those
         // warnings were written against: the lake (WaterService plus the chill overlays and the
@@ -697,12 +730,19 @@ public partial class Gameplay : Node3D
         // is played in. Authored, not code-built (.claude/rules/godot-scenes.md).
         World.SupermarketWorld.WorldId =>
             GD.Load<PackedScene>(ScenePaths.Supermarket).Instantiate<IGameWorld>(),
+        // REACH-1 (2026-09-19): the planted room — a copy of the search room with §5b's six
+        // failure cases authored into it as real fixtures. Set only by --reach-selftest, never
+        // typed by a player, and deliberately NOT the search room: every fixture in it is a
+        // prop in an illegal pose on purpose.
+        World.ReachPlantWorld.WorldId =>
+            GD.Load<PackedScene>(World.ReachPlantWorld.ScenePath).Instantiate<IGameWorld>(),
         // The code-built CI scaffolding the scene suites run on: "open" is prop-free, "propsync"
         // is seeded by PropManager.SpawnInitialProps. Neither is reachable from an interactive
         // launch (HostMenu never passes --world).
         "open" or "propsync" => new GameWorld(),
         _ => throw new System.InvalidOperationException(
-            $"unknown world id '{id}' — registered worlds are \"supermarket\" (played), \"open\" and \"propsync\" (CI)"),
+            $"unknown world id '{id}' — registered worlds are \"supermarket\" (played), "
+            + "\"reachplant\" (REACH-1's planted room), \"open\" and \"propsync\" (CI)"),
     };
 
     // P11 (Task A3): the resumed-vs-fresh palette-color decision, pulled out as a pure static
