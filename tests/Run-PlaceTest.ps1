@@ -48,7 +48,14 @@
 #>
 [CmdletBinding()]
 param(
-    [int]$Port = 7896,
+    # 7898, NOT 7896 (INT-0, 2026-09-19). THREE lanes off BASE-1 -- ROUND-1, FP-1 and CARRY-1 --
+    # each independently picked 7896 as "the next free port", because each was reading the same
+    # Run-CarryNetTest 7893/7894/7895 ladder and none could see the others. The merge put all three
+    # suites at the end of Run-AllTests.ps1's registry, where they run back to back on one socket.
+    # ROUND-1 keeps 7896 (it documented the claim in three places), FP-1 took 7897, this takes
+    # 7898. Measured rather than reasoned: the first post-merge run of Run-FirstPersonTest.ps1 on
+    # 7896 died with `Couldn't create an ENet host` right after Run-RoundLoopSmoke.ps1 released it.
+    [int]$Port = 7898,
     [double]$DurationSec = 26,
     [switch]$SkipBuild
 )
