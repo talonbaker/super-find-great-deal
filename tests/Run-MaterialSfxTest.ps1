@@ -233,7 +233,17 @@ $ProduceFallAt = "41,1.20,3"
 # epsilon and a placement authored flush with the floor plane is the case that epsilon exists
 # for; 1 cm of clearance keeps the refusal paths out of a fixture that is testing a SOUND. The
 # last centimetre falls, which is what PlaceLooseServer means by Loose-not-Resting.
-$PlaceCanAt   = "37,0.35,4"
+#
+# AND IT IS SEEDED AT 0.08, NOT AT 0.35 LIKE EVERY OTHER PROP HERE, which is the one number in
+# this fixture that is defending against a race rather than staging one. --seed-props-drop
+# releases the WHOLE fixture at $DropAtSec, and it skips any prop that is already Held -- so
+# whether this can falls at all depends on whether the place bot has grabbed it by then, and the
+# suite must not care. Seeded 2 cm above its own resting height, the drop is a 0.6 m/s
+# non-event: under the 2.0 m/s audible floor, far too slow to tip a cylinder, and it lands
+# within a centimetre of where it started. A can seeded at 0.35 like its neighbours would fall
+# 0.29 m, and a cylinder that tips and rolls two metres puts the scripted PLACE transform out of
+# the bot's 1.65 m reach and turns assertion 10 into a coin flip about a bounce.
+$PlaceCanAt   = "37,0.08,4"
 $PlaceCanTo   = "37.3,0.07,4,20"
 
 # Prop ids are assigned by PropManager.ServerSpawn in seed order, starting at 1 (authored props
