@@ -10,10 +10,14 @@
     dependency for the struct math and codec paths these tests exercise, so they run
     without a Godot editor or runtime present.
 
-    We take a ProjectReference on the game's WatisWorld.csproj. That does three things
-    in one line: (1) builds the game so its output is fresh, (2) exposes every public
+    We take a ProjectReference on the game's SuperFindGreatDeal.csproj. That does three
+    things in one line: (1) builds the game so its output is fresh, (2) exposes every public
     foundation type, and (3) flows GodotSharp.dll in transitively as a runtime dependency.
-    So MpFoundation.dll and GodotSharp.dll both land next to the test assembly.
+    So SuperFindGreatDeal.dll and GodotSharp.dll both land next to the test assembly.
+
+    (This project keeps its SailNet.Tests name and RootNamespace: the rename pass at the fork
+    covered the game project and solution only, because a test-assembly rename is a namespace
+    change and namespaces are deliberately not being swept yet. See docs/PRUNE-BACKLOG.md.)
 
     The game project is a Godot.NET.Sdk project; a plain Microsoft.NET.Sdk project can
     still reference it because the produced MpFoundation.dll / GodotSharp.dll are normal
@@ -58,7 +62,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\WatisWorld.csproj" />
+    <ProjectReference Include="..\..\SuperFindGreatDeal.csproj" />
   </ItemGroup>
 
 </Project>

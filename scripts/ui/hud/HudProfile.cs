@@ -52,8 +52,10 @@ public readonly struct HudProfile
     /// </summary>
     public bool QuotaStrip { get; private init; }
 
-    /// <summary>Top-centre: the shared bubble tally (BT-8). Opt-IN, unlike everything above:
-    /// a world with no <see cref="Sail.Game.Bubble.BubbleCounter"/> has nothing to show.</summary>
+    /// <summary>Top-centre: the shared tally that used to be the bubble count. Opt-IN, unlike
+    /// everything above. Nothing builds it since the fork pruned the bubbles (BASE-1,
+    /// 2026-09-19) — the flag is kept so the slot has a name when HOLD-1 puts the score board in
+    /// it, and every profile below sets it false.</summary>
     public bool BubbleCount { get; private init; }
 
     /// <summary>Bottom-right: the permanent "ESC · HOW TO PLAY" hint
@@ -78,22 +80,22 @@ public readonly struct HudProfile
     };
 
     /// <summary>
-    /// The Bubble Test level: one readout, and it is the only number in the level.
+    /// The supermarket: no readout of a system this world does not run.
     ///
-    /// <para>Everything else was cut for the same reason rather than for taste — each is a readout
-    /// of a system this world does not run (the cycle is atmosphere here, not a deadline). A
-    /// readout of a system that is not running is not neutral clutter: it is a promise the level
-    /// does not keep.</para>
+    /// <para>The rule, carried over verbatim from the level this profile replaced: a readout of a
+    /// system that is not running is not neutral clutter, it is a promise the level does not keep.
+    /// There is no day here (the cycle is inherited plumbing, not a deadline) and no quota, so
+    /// both are off. ROUND-1's phase/timer strip and HOLD-1's board are the readouts this world
+    /// will actually earn.</para>
     ///
     /// <para>The how-to-play hint survives that cut because it is not a readout — see
-    /// <see cref="HowToPlayHint"/>. It is also the world where it matters most: this is the one
-    /// that lost its first-run How-to-Play door on 2026-09-04.</para>
+    /// <see cref="HowToPlayHint"/>.</para>
     /// </summary>
-    public static HudProfile BubbleTest => new()
+    public static HudProfile Supermarket => new()
     {
         DayPhase = false,
         QuotaStrip = false,
-        BubbleCount = true,
+        BubbleCount = false,
         HowToPlayHint = true,
     };
 
@@ -102,14 +104,14 @@ public readonly struct HudProfile
     /// <see cref="Full"/> (see the class doc for why the layout self-test depends on that).</summary>
     public static HudProfile For(string? worldId) => worldId switch
     {
-        AvatarVisual.BoxKidWorldId => BubbleTest, // "bubbletest"
+        "supermarket" => Supermarket,
         _ => Full,
     };
 
     /// <summary>The profile for the world this process is actually running. The null-conditionals
     /// are defence only — <c>NetworkManager</c> is an autoload, so in practice this ALWAYS
     /// resolves a world id, and in a scene launched without <c>--world</c> that id is
-    /// <c>LaunchOptions.DefaultWorld</c> ("bubbletest"), NOT "no session". See the trap paragraph
+    /// <c>LaunchOptions.DefaultWorld</c> ("supermarket"), NOT "no session". See the trap paragraph
     /// on this class before using it from anywhere a lab or self-test also reaches.</summary>
     public static HudProfile Current =>
         For(MpFoundation.NetworkManager.Instance?.Options?.World);

@@ -152,10 +152,12 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
         _isServer = isServer;
         // Every peer runs its own copy of this to build the replicated prop locally.
         _spawner.SpawnFunction = new Callable(this, MethodName.SpawnFromData);
-        // CORE-PROG-A2 (core-spine spec §5.2, "props" row): the map-scoped slice whose
-        // playthrough-boundary reset restores the initial dump. Null-safe: labs and self-tests
-        // construct this manager with no store and keep today's no-reset behavior.
-        Sail.Game.Run.WorldStateStore.Instance?.Register(this);
+        // This manager is still the map-scoped world-state slice it was (see the interface on the
+        // class declaration, and ResetForNewPlaythrough below): a round boundary that wants the
+        // authored prop layout back calls that method. What is GONE since the fork (BASE-1,
+        // 2026-09-19) is the old quota spine's WorldStateStore, which used to be registered here
+        // and fan the reset automatically. Nothing fans it today — ROUND-1 owns wiring the
+        // hide-seek loop's reset edge to it, and until then the slice is implemented but unfanned.
     }
 
     /// <summary>Server: spawns the initial networked props for a world. Only the dedicated

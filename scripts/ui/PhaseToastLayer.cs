@@ -24,7 +24,6 @@ public partial class PhaseToastLayer : CanvasLayer
     private readonly Queue<string> _queue = new();
     private Label _label = null!;
     private bool _showing;
-    private Flow.NightfallOverlay _nightfall = null!;
 
     /// <summary>CORE-PROG-B1's suppression seam (spec §3.5 row 1): when a playthrough view
     /// is attached (CORE-INT-1 sets this beside the FlowScreens attach), the telegraph only
@@ -44,20 +43,14 @@ public partial class PhaseToastLayer : CanvasLayer
     /// reference it already holds and is unaffected.</para></summary>
     public static PhaseToastLayer? Instance { get; private set; }
 
-    /// <summary>The nested DuskToNight treatment — exposed so the scripted demo can cue it
-    /// the way the live crossing does.</summary>
-    public Flow.NightfallOverlay Nightfall => _nightfall;
-
     public override void _Ready()
     {
         Instance = this;
         Layer = Design.UiLayers.PhaseToast;
 
-        // The DuskToNight treatment (packet 3b) rides this layer's existing
-        // subscription — extend, never a parallel PhaseCrossed subscriber. Its CanvasLayer
-        // slot is its own (ScreenRouter.NightfallLayer); nesting only scopes its lifetime.
-        _nightfall = new Flow.NightfallOverlay { Name = "NightfallOverlay" };
-        AddChild(_nightfall);
+        // The nested DuskToNight full-screen treatment (NightfallOverlay) was pruned with the
+        // other quota-loop flow screens at the fork (BASE-1, 2026-09-19); the plain toast line
+        // below is all that is left of the crossing telegraph.
 
         _label = new Label
         {
@@ -111,8 +104,6 @@ public partial class PhaseToastLayer : CanvasLayer
         if (text == null)
             return; // DawnToDay — no toast, see PhaseToastText's doc.
         ShowLine(text);
-        if (PhaseToastText.FullTreatmentFor(kind))
-            _nightfall.ShowNightfall();
     }
 
     /// <summary>Enqueues a toast line directly — the scripted demo's entry (no RunDriver

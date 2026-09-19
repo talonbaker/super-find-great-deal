@@ -6,7 +6,6 @@ using MpFoundation.Net.Steam;
 using MpFoundation.Game.Sandbox;
 using MpFoundation.Game.Props;
 using MpFoundation.Game.World;
-using MpFoundation.Game.Light;
 
 namespace MpFoundation.Game;
 
@@ -47,38 +46,6 @@ public partial class Gameplay : Node3D
     private Node3D _entities = null!;
     private CycleDriver _cycleDriver = null!;
     private RunDriver _runDriver = null!;
-    /// <summary>The playthrough state machine (CORE-PROG-A1, core-spine spec §1) — the layer
-    /// above RunDriver exactly as RunDriver sits above CycleDriver. Present in every world.</summary>
-    private Sail.Game.Run.PlaythroughDriver _playthroughDriver = null!;
-
-    /// <summary>The world-state store (CORE-PROG-A2, spec §5.3): the single world-state
-    /// RunReset/dawn-cutoff subscriber every stateful manager registers its slice with, and
-    /// the object PlaythroughDriver runs the §5.4 playthrough-boundary entry guard against.</summary>
-    private Sail.Game.Run.WorldStateStore _worldStateStore = null!;
-    /// <summary>The winter-cache quota ledger (core-spine spec §2). Present in every world.</summary>
-    private Sail.Game.Run.QuotaLedger _quotaLedger = null!;
-    /// <summary>The lake's authority (W2, lake-water contract): the cold clock, the sputter-out,
-    /// Soaked, and the five-event stream W4's splash/audio listener subscribes to. Present in
-    /// every world exactly like PropManager above; a world with no lake leaves it wired but
-    /// inert, because every avatar in it resolves WaterState.Dry forever.</summary>
-    private Sail.Game.Water.WaterService _waterService = null!;
-
-    /// <summary>The player's flashlight: one replicated on/off bit per peer and the shadowless glow
-    /// it renders (NIGHT-2, notes 10/11). Present in every world exactly like WaterService above;
-    /// a world nobody presses F in holds an empty dictionary and no renderer nodes at all.</summary>
-    private FlashlightManager _flashlightManager = null!;
-    private Honk.HonkManager _honkManager = null!;
-
-    /// <summary>The failure-state machine (phase 1c). Present in every world exactly like
-    /// PropManager/WaterService above; a world with nothing driving it leaves it wired but
-    /// idle.</summary>
-    private Sail.Game.Failure.IncapacitationService _incapacitation = null!;
-
-    /// <summary>How far every player can see (canon fact 4, the parity law). Server-authoritative,
-    /// replicated to every peer. Present in every world exactly like WaterService above; a world
-    /// with no light sources leaves it wired and honest, publishing the darkness floor for
-    /// everyone.</summary>
-    private Game.Sight.PlayerSightService _playerSight = null!;
 
     private Label _connectingLabel = null!;
     private Label _roomCodeLabel = null!;
@@ -230,22 +197,14 @@ public partial class Gameplay : Node3D
         _props = GetNode<Node3D>("Props");
         _propSpawner = GetNode<MultiplayerSpawner>("PropSpawner");
 
-        // The world-state store (CORE-PROG-A2, core-spine spec §5.3): constructed BEFORE every
-        // stateful manager — not at spec §5.3's "immediately after RunDriver" position, because
-        // PropManager is constructed before RunDriver in this method and could never
-        // self-register from Setup otherwise (the store's class doc records the deviation). Its
-        // RunDriver subscriptions attach below via HookRunDriver, immediately after RunDriver
-        // exists and BEFORE PlaythroughDriver.Setup — that order is a correctness dependency
-        // (dawn cutoffs must read pre-verdict state; see the store's class doc). Every stateful
-        // manager's Setup registers its slice with this instance; registration order = this
-        // method's construction order = the boundary fan order.
-        _worldStateStore = new Sail.Game.Run.WorldStateStore { Name = Sail.Game.Run.WorldStateStore.NodeName };
-        AddChild(_worldStateStore);
-        _worldStateStore.Setup(net.Role == NetworkManager.SessionRole.Server);
-        // The reconnect registry is a plain field, not a manager with a Setup, so Gameplay
-        // registers it directly: a resume ticket into a world that no longer exists must die at
-        // the playthrough boundary (spec §5.2 / §6 case 3 — the live 60 s cross-reset exploit).
-        _worldStateStore.Register(_reconnects);
+        // NO WORLD-STATE STORE HERE ANY MORE (BASE-1, 2026-09-19). The old quota spine owned one,
+        // constructed at exactly this point, and it fanned ResetForNewPlaythrough across every
+        // registered slice at a playthrough boundary. The SLICES survive - PropManager and
+        // ReconnectRegistry still implement the interfaces in scripts/game/run/WorldStateSlices.cs
+        // - but nothing fans them today. ROUND-1 owns the round's reset edge; when it lands it
+        // either constructs a store here or calls the slices directly, and the ONE thing it must
+        // not lose is the reason ReconnectRegistry was a slice at all: a 60 s resume ticket into a
+        // world that has since been reset is an exploit, not a courtesy.
 
         _propManager = new PropManager { Name = PropManager.NodeName };
         AddChild(_propManager);
@@ -293,45 +252,6 @@ public partial class Gameplay : Node3D
             GD.Print($"[cycle] --cycle-start-phase {net.Options.CycleStartPhaseName} -> " +
                      $"{net.Options.CycleStartPhase:F6} (day index {net.Options.CycleStartDay})");
 
-        // BT-6's bubble fixture (--bubble-selftest): six bubbles at known points plus a
-        // BubbleCounter, built identically on every peer that carries the flag. Added AFTER
-        // CycleDriver because the bubbles' idle bob and their night glow both read it, and its
-        // Instance has to exist before their first frame. Nothing here runs on any normal
-        // launch — the level's own bubbles are authored nodes placed by BT-11 and adopted by a
-        // BubbleCounter the world adds (BT-8); this is only the harness that lets
-        // tests/Run-BubbleSyncTest.ps1 prove the tally converges across three peers.
-        // CELEBRATE-1's gate override (--celebrate-force). Set on EVERY launch, not only under the
-        // fixture: it is a static, so a session that left it true would hand the next one a bot
-        // that celebrates. Assigning the option unconditionally makes "off" the state of every
-        // ordinary launch rather than the absence of a write.
-        Sail.Game.Bubble.BubbleCelebration.ForceForTest = net.Options.CelebrateForce;
-        if (net.Options.BubbleSelfTest)
-        {
-            var bubbleFixture = new Sail.Game.Bubble.BubbleSelfTest
-            {
-                Name = Sail.Game.Bubble.BubbleSelfTest.NodeName,
-                IsServer = net.Role == NetworkManager.SessionRole.Server,
-                ResetAtSec = net.Options.BubbleResetAtSec,
-                PopAllAtSec = net.Options.BubblePopAllAtSec,
-            };
-            AddChild(bubbleFixture);
-        }
-        else if (net.Options.BubblePopAllAtSec >= 0)
-        {
-            // CELEBRATE-1: the same scheduled completion, in a world that has its own authored
-            // bubbles rather than the six-bubble fixture — i.e. the REAL level, which is what the
-            // capture in docs/qa/CELEBRATE-1/ is a picture of. Only the first mark: the
-            // recompletion is derived from the fixture's own reset lever and has no meaning here.
-            // Added AFTER the world (see the block above this one) so BubbleCounter.Instance
-            // already exists by the time this node's first frame runs.
-            AddChild(new Sail.Game.Bubble.BubbleCompletionSchedule
-            {
-                Name = Sail.Game.Bubble.BubbleCompletionSchedule.NodeName,
-                IsServer = net.Role == NetworkManager.SessionRole.Server,
-                PopAllAtSec = net.Options.BubblePopAllAtSec,
-            });
-        }
-
         // The run driver (L1): typed phase-crossing events, the run-length/run-end contract, and
         // the reset hook — a layer above CycleDriver, present in every world exactly like it (see
         // RunDriver's own class doc). Added AFTER CycleDriver so it always has a real phase to
@@ -346,200 +266,28 @@ public partial class Gameplay : Node3D
         // the existing suites. See RunCyclesOrUncapped's own doc for why the raw sentinel stays.
         _runDriver.Setup(net.Role == NetworkManager.SessionRole.Server,
             net.Options.RunCyclesOrUncapped, net.Options.CyclePeriodSec, net.Options.RunResetAtSec);
-        // The store's RunDriver subscriptions (CORE-PROG-A2): MUST run before
-        // _playthroughDriver.Setup below subscribes to PhaseCrossed — C# event order is
-        // subscription order, and the store's dawn-cutoff fan has to read PRE-verdict state at
-        // a real dawn (InRound → band-live → cutoffs fire) or the legitimate glow-stick dawn
-        // cutoff would be skipped on the very crossing that ends a round. See the store's
-        // class doc; the ordering is asserted live by Run-StoreTest.ps1.
-        _worldStateStore.HookRunDriver();
-
-        // The playthrough driver (CORE-PROG-A1, core-spine spec §1): Boot/RoundIntro/InRound/
-        // RoundEnd/UpgradeLobby/Loss, the verdict chain, and the between-rounds clock re-anchor
-        // — a layer above RunDriver exactly as RunDriver sits above CycleDriver. Constructed
-        // IMMEDIATELY after RunDriver and before every manager that will gate on it, and that
-        // ordering is a correctness dependency twice over: (a) its server Setup subscribes to
-        // RunDriver.PhaseCrossed for the verdict instant, so RunDriver.Instance must be live;
-        // (b) QuotaLedger below guards ServerBank on PlaythroughDriver.Instance.State, so the
-        // driver must exist before anything can bank. The store argument is the live
-        // WorldStateStore (CORE-PROG-A2, constructed at the top of this method — before every
-        // stateful manager, see its construction comment for why not literally after
-        // RunDriver): every commit into RoundIntro(1) now fans a real boundary reset (spec
-        // §5.4's entry guard), and Run-FlowTest asserts the old no-store error is ABSENT.
-        _playthroughDriver = new Sail.Game.Run.PlaythroughDriver { Name = Sail.Game.Run.PlaythroughDriver.NodeName };
-        AddChild(_playthroughDriver);
-        _playthroughDriver.Setup(net.Role == NetworkManager.SessionRole.Server,
-            net.Options.CyclePeriodSec, store: _worldStateStore,
-            net.Options.FlowIntroSec, net.Options.FlowTallySec, net.Options.FlowLobbySec);
-
-        // The quota ledger (spec §2): constructed AFTER PlaythroughDriver — it answers to the
-        // driver (its bank guard reads driver state, its round numbers ride the driver's
-        // RoundIntro broadcast), the same "the layer it calls into must already exist" ordering
-        // this method uses throughout. The schedule is DATA: the server loads
-        // assets/run/quota_schedule.tres (a missing/corrupt file falls back to QuotaMath's
-        // defaults and logs — a data file must never crash a session); clients never read
-        // their copy for authority, only broadcasts (spec §2.2). SetQuotaLedger then registers
-        // the ONE shipped loss predicate with the driver's chain (spec §1.6).
-        Sail.Game.Run.QuotaSchedule? quotaSchedule = null;
-        if (net.Role == NetworkManager.SessionRole.Server)
-        {
-            quotaSchedule = GD.Load<Sail.Game.Run.QuotaSchedule>("res://assets/run/quota_schedule.tres");
-            if (quotaSchedule == null)
-                GD.PushError("[quota] assets/run/quota_schedule.tres failed to load - falling back to QuotaMath defaults");
-        }
-        _quotaLedger = new Sail.Game.Run.QuotaLedger { Name = Sail.Game.Run.QuotaLedger.NodeName };
-        AddChild(_quotaLedger);
-        _quotaLedger.Setup(net.Role == NetworkManager.SessionRole.Server, quotaSchedule,
-            net.Options.QuotaEarlyOverride, net.Options.QuotaBankAt);
-        _playthroughDriver.SetQuotaLedger(_quotaLedger);
-
-        // Test-only (--net-probe-at, CORE-PROG-A1): the two wire-mechanism probe nodes the
-        // core-spine verdict design is gated on (CallLocal synchronicity on the authority,
-        // cross-node same-channel ordering on a remote — spec §1.6/§5.4, SD-1 UNVERIFIED list).
-        // Added on EVERY peer that passes the flag (identical paths on every peer);
-        // only the server ever emits. Every real launch path constructs neither node.
-        if (net.Options.NetProbeAtSec >= 0)
-        {
-            var probeA = new Sail.Game.Run.NetOrderProbe { Name = Sail.Game.Run.NetOrderProbe.NodeNameA };
-            var probeB = new Sail.Game.Run.NetOrderProbe { Name = Sail.Game.Run.NetOrderProbe.NodeNameB };
-            AddChild(probeA);
-            AddChild(probeB);
-            bool probeServer = net.Role == NetworkManager.SessionRole.Server;
-            probeA.Setup(probeServer, isPrimary: true, net.Options.NetProbeAtSec, probeB);
-            probeB.Setup(probeServer, isPrimary: false, net.Options.NetProbeAtSec, probeA);
-        }
-
-        // The lake (W2, lake-water contract). Takes providers rather than reaching for node paths
-        // or a static Instance, so it stays inert in a world with no lake.
-        _waterService = new Sail.Game.Water.WaterService { Name = Sail.Game.Water.WaterService.NodeName };
-        AddChild(_waterService);
-        _waterService.Setup(
-            net.Role == NetworkManager.SessionRole.Server,
-            EnumerateAvatars);
-        // The cold's visual + haptic urgency cue (§5.1). Attached HERE rather than up with the
-        // other UI layers because its _Ready subscribes to WaterService.Instance, which does not
-        // exist until the lines above have run. Headless is a no-op inside Attach.
-        Sail.Game.Water.ChillCueOverlay.Attach(this);
-        // The cold's diegetic-readout channel (2026-08-08 playtest fallout, P2) — replaces the
-        // hardware-gated rumble as the third redundant channel. Same placement reason as the
-        // line above.
-        Sail.Game.Water.ChillReadout.Attach(this);
-        // The splash VFX and audio listener (W4, spec §9). Same placement and the same reason as
-        // the line above — its _Ready subscribes to the five WaterService events, which do not
-        // exist until the service has been added. This is the ONLY construction site: there is no
-        // autoload and no scene node, so if this line is ever deleted the feature is silently
-        // gone in the real game while every lab and every test still passes.
-        Sail.Game.Water.Fx.WaterFx.Attach(this);
-
-        // The flashlight (NIGHT-2, Talon's 2026-08-29 notes 10 and 11: "when night falls, it's
-        // extremely difficult to see anything" / "give the player a simple 'glow'"). Canon fact 6's
-        // personal light. It takes the avatar resolver PropManager's own uses, for the same reason
-        // — the light hangs on the server's OWN authoritative avatar node, never on anything a
-        // client asserted.
+        // WHAT USED TO BE HERE, in one line each, because every one of these blocks carried a
+        // "THIS IS THE ONLY CONSTRUCTION SITE" warning and deleting them is exactly the move those
+        // warnings were written against: the lake (WaterService plus the chill overlays and the
+        // splash FX), the flashlight, the goose honk, the failure/incapacitation states, and the
+        // server-authoritative sight table. All five were pruned at the fork (BASE-1, 2026-09-19)
+        // together with the systems that fed them - there is no lake, no night to need a torch, no
+        // downed state and no darkness floor in three lit indoor rooms.
         //
-        // THIS IS THE ONLY CONSTRUCTION SITE, the trap WaterFx's and IncapacitationService's
-        // comments name: no autoload, no scene node, so deleting this block removes the feature
-        // from the real game while every arithmetic test still passes.
-        //
-        // PRESENTATION ONLY, deliberately: it lights geometry and contributes NOTHING to
-        // PlayerSightService below — see FlashlightManager's class doc for the three things holding
-        // that, and FlashlightProfile's for the measurement that says this is the fix rather than a
-        // hedge. It is therefore constructed BEFORE _playerSight with no wiring between them, and
-        // there is deliberately no _playerSight.Flashlights line to write.
-        _flashlightManager = new FlashlightManager { Name = FlashlightManager.NodeName };
-        AddChild(_flashlightManager);
-        _flashlightManager.Setup(net.Role == NetworkManager.SessionRole.Server,
-            id => _players.GetNodeOrNull<Node3D>(id.ToString()));
-        // The local input reader (F). No-op headless, same Attach guard as the water overlays above.
-        FlashlightController.Attach(this);
-
-        // The goose honk (HONK-1, 2026-09-04): proximity voice for players without a microphone.
-        // Same construction shape as the flashlight immediately above it — a plain Node holding the
-        // RPCs, an avatar resolver rather than a node path, and a separate local input reader that
-        // is not attached headless. THIS IS THE ONLY CONSTRUCTION SITE, the trap FlashlightManager
-        // and WaterFx both name: no autoload and no scene node, so deleting these three lines
-        // removes the feature from the real game while every arithmetic test still passes.
-        _honkManager = new Honk.HonkManager { Name = Honk.HonkManager.NodeName };
-        AddChild(_honkManager);
-        _honkManager.Setup(net.Role == NetworkManager.SessionRole.Server,
-            id => _players.GetNodeOrNull<Node3D>(id.ToString()));
-        Honk.HonkController.Attach(this);
-
-        // The failure states (phase 1c, beta plan §10). Added AFTER WaterService and RunDriver,
-        // and both are correctness dependencies rather than niceties — the same kind
-        // WaterService's own placement above states:
-        //   - WaterService, because the night-water freeze subscribes to its Sputtered event;
-        //   - RunDriver, because the dawn floor rides its NightToDawn crossing.
-        // Providers rather than node paths or sibling statics, so it stays inert exactly as
-        // WaterService does.
-        //
-        // THIS IS THE ONLY CONSTRUCTION SITE. There is no autoload and no scene node, so if this
-        // block is ever deleted the failure states are silently gone in the real game while every
-        // lab and every arithmetic test still passes — the trap WaterFx's own comment names one
-        // line above.
-        //
-        // THIS IS THE INTERIM DEATH MODEL, AND IT IS LIVE ON PURPOSE (Talon, 2026-08-12).
-        // Canon retired this loss model on 2026-08-11 with the prey pivot — recoverable
-        // incapacitation, the all-incapacitated-at-once hard loss, and dawn-recovers-everyone are
-        // all superseded — and canon 14 replaces it with respawn at the deepest CONNECTED hearth
-        // plus a dropped haul and the walk back. That replacement DOES NOT EXIST IN CODE and has
-        // no spec, so gating this off would leave nothing at all handling a downed player. Talon
-        // ruled it stays live and unchanged until canon 14 is built: this one lands as-is.
-        //
-        // So: if you are here because the shipped behaviour contradicts the canon block, that is
-        // known, dated and deliberate — not a bug to fix in passing. Replacing it is a specced
-        // piece of work (hearth graph, haul drop, walk-back), and the day it lands, this block
-        // and IncapacitationService go with it.
-        _incapacitation = new Sail.Game.Failure.IncapacitationService
-        {
-            Name = Sail.Game.Failure.IncapacitationService.NodeName,
-        };
-        AddChild(_incapacitation);
-        _incapacitation.Setup(
-            net.Role == NetworkManager.SessionRole.Server,
-            EnumerateAvatars,
-            // The warmth probe: is this position inside a lit fire's warmth, the thaw's one
-            // recovery path. No world here has a fire, so nowhere is ever warm — the same answer
-            // a fire registry with no fires in it gave before.
-            _ => false,
-            // Everything you carry scatters (beta plan §10) — a gameplay fact that feeds the fire
-            // economy, not cleanup. See PropManager.ScatterHeldBy for why Loose, not Resting.
-            peerId => _propManager.ScatterHeldBy(peerId));
-
-        // HOW FAR EVERY PLAYER CAN SEE (canon fact 4). AFTER CycleDriver, which it reads through the
-        // static Instance every tick rather than caching, so it recovers on its own if the ordering
-        // ever moves.
-        //
-        // THIS IS THE ONLY CONSTRUCTION SITE. There is no autoload and no scene node — the same trap
-        // WaterFx's and IncapacitationService's comments above name: delete this block and the
-        // feature is silently gone in the real game while every arithmetic test still passes.
-        //
-        // ONE PRODUCER, ONE CONSUMER, AND THE ARROW ONLY POINTS ONE WAY. This block builds the
-        // server-authoritative number and its replication. The renderer that expresses it —
-        // OutdoorAtmosphere's depth fog, via SightPresentation — reads PlayerSightService.Instance
-        // and Synced and takes a float; there is no path back, and there must never be one. A
-        // second derivation of "how far can this player see" anywhere on the client side is the
-        // parity-law violation canon fact 4 exists to prevent, and it would arrive looking like a
-        // convenience. Nothing else consumes this yet.
-        _playerSight = new Game.Sight.PlayerSightService { Name = Game.Sight.PlayerSightService.NodeName };
-        AddChild(_playerSight);
-        _playerSight.Setup(net.Role == NetworkManager.SessionRole.Server);
-        // Positions come from the server's OWN authoritative avatar transforms, never from anything
-        // a client asserted - identical seam to PropManager.AvatarResolver.
-        _playerSight.PeerSource = EnumerateAvatarPositions;
+        // TWO SEAMS THEY LEFT BEHIND, both deliberate and both still load-bearing:
+        //   - MoveState still carries Water/Soaked/ControlLocked and Incapacity, and the motor
+        //     still reads them (scripts/game/water/WaterGeometry.cs and
+        //     scripts/game/failure/IncapacityContract.cs are kept for exactly that). Nothing
+        //     writes them now, so every body resolves Dry and Active forever; the wire bytes are
+        //     unchanged, which is why prediction and every net suite are untouched by this prune.
+        //   - WaterGeometry.ActiveWaters is EMPTY by default here, so no room can accidentally sit
+        //     inside the old camp lake's footprint and drown a player in a dry building.
 
         // L11's session summary seam (Issue #114) — see SessionSummaryProvider's own class doc
         // for exactly what's real vs. genuinely undefined (MapCoveragePercent — an open question
         // for Talon, not a value this pass may invent). _players is the exact same Players root
         // PropManager's own AvatarResolver delegate already reads.
         World.SessionSummarySource.Current = new World.SessionSummaryProvider(_players);
-
-        // L11 (Issue #114) headless-observable mirror of the loop UI's own dismiss/toast/summary
-        // decisions — present on EVERY peer, including a headless server/bot, unlike the actual
-        // CanvasLayer UI below (which renders nothing there). BotHarness samples it so
-        // Run-LoopUiTest.ps1 can prove the never-strand/toast/summary contract without a
-        // windowed client. Added after RunDriver/CycleDriver so both Instances already exist.
-        AddChild(new World.LoopUiTelemetry { Name = World.LoopUiTelemetry.NodeName });
 
         // L11 (Issue #114): the loop UI shell — loading/hint overlay, phase toasts, session
         // summary. Client-rendered only, same gate as PerfHud/SessionHud/InteractPrompt above.
@@ -565,45 +313,22 @@ public partial class Gameplay : Node3D
             // "don't show this again" and nothing persisted. It still obeys the single run-level
             // suppression every panel obeys, so it can never land on a capture or a bot run.
             //
-            // Gated on the world THIS PEER BUILT rather than on the autoload's options (see
-            // LaunchOptions.DefaultWorld's trap note): the line names bubbles, and only one
-            // registered world has any — the CI scaffolding worlds "open" and "propsync" do not,
-            // and copy naming a mechanic the running world lacks is the defect note 4 was about.
-            if (worldId == Sail.Game.World.BubbleTest.BubbleTestLayout.WorldId
-                && !Ui.OnboardingSettings.GoalLineSuppressed)
-            {
-                loading.Dismissed += () => toasts.ShowLine(Ui.PhaseToastText.BubbleGoalToast);
-            }
+            // (The one-line goal toast that used to be raised here named the old level's
+            // bubbles. This game's goal is a round, not a collectible, so ROUND-1 owns whatever
+            // is said on entry - and the rule the old line was carrying still binds: copy that
+            // names a mechanic the running world lacks is the defect, so gate any replacement on
+            // the world THIS PEER BUILT, never on the autoload's options.)
             AddChild(loading);
-            // CORE-INT-1: one round-flow surface set per launch mode, never both. An explicit
-            // --run-cycles cap is the LEGACY mode (RunDriver ends the run, RunEndedSignal
-            // fires, the session summary owns the end screen — the surviving test hook,
-            // spec §1.5/D5). The default run is uncapped (RunCyclesOrUncapped), RunEndedSignal
-            // is unreachable, and B1's flow screens own every non-InRound moment instead —
-            // attaching the legacy panel there too would put two summary surfaces on one
-            // screen the first time anything else fired it (B1 parked question 2: gated, not
-            // deleted). Wired HERE, at the bottom of the client-UI block: PlaythroughDriver/
-            // QuotaLedger already exist (constructed above — the adapter subscribes in its
-            // ctor), SessionSummarySource.Current is already set (the tally's per-kid lines
-            // read it), and PhaseToastLayer above gets its FlowView seam in the same breath
-            // so the dusk/night telegraph is suppressed outside band-live states from the
-            // first frame (spec §3.5 row 1).
-            if (net.Options.RunCycles > 0)
-            {
-                AddChild(new Ui.SessionSummaryPanel { Name = "SessionSummaryPanel" });
-            }
-            else
-            {
-                var flowView = new Presentation.LivePlaythroughView(_playthroughDriver, _quotaLedger);
-                var quotaView = new Presentation.LiveQuotaView(_quotaLedger);
-                Ui.PhaseToastLayer.FlowView = flowView;
-                Ui.Flow.FlowScreens.RecaptureMouseOnHide = true; // live play has a captured-mouse world under the screens.
-                // LOSS-1 (Talon note 4, 2026-08-29): the four round surfaces only exist where a
-                // scored playthrough does. Passed rather than read inside Attach because the
-                // labs and self-tests that also call it have no world — see Attach's doc.
-                Ui.Flow.FlowScreens.Attach(this, flowView, quotaView, LeaveToMenu,
-                    roundScreens: Sail.Game.Run.WorldRunFlow.Current);
-            }
+            // The routed flow screens (round intro / tally / upgrade lobby / loss) and their
+            // live views were the quota playthrough's surfaces and were pruned with it at the
+            // fork (BASE-1, 2026-09-19). What is KEPT is the substrate they were built on and
+            // the law they were built under: ScreenRouter, FlowScreenBase and ConnectingGate are
+            // still here, and every one of them initialises by POLLING state after Synced rather
+            // than by having witnessed a transition (the never-strand rule). ROUND-1's phase
+            // screens are written against that same seam.
+            //
+            // The legacy --run-cycles session summary is likewise gone; RunDriver still ends a
+            // capped run and nothing renders the end.
         }
 
         switch (net.Role)
@@ -786,60 +511,17 @@ public partial class Gameplay : Node3D
         // before it renders anything, never the zero-initialized default (see
         // RunDriver.Synced's doc).
         _runDriver.SendRunStateTo((int)id);
-        // Playthrough-state late-join delivery (CORE-PROG-A1, spec §3.4): same call site, same
-        // reasoning, immediately after the run state it layers on. Carries state, round, the
-        // live countdown and both latched payloads — a joiner into RoundEnd sees the tally, a
-        // joiner into Loss lands on the loss screen, all from the poll (the never-strand rule);
-        // until this lands a joiner holds PlaythroughDriver.Synced false and B1's Connecting
-        // gate correctly refuses to present the world as "playing".
-        _playthroughDriver.SendFlowStateTo((int)id);
-        // Quota-ledger late-join delivery (spec §3.4, after SendFlowStateTo): a joiner's
-        // banked/demand numbers must match the server's before any surface reads them — the
-        // zero default here looks like "nothing banked yet", a true-sounding wrong answer.
-        _quotaLedger.SendQuotaTo((int)id);
-        // Test-only (--quota-bank-at): connect-order-index -> peer id, so a scheduled test bank
-        // can name "the first bot" without predicting a peer id (Godot's ENetMultiplayerPeer
-        // assigns peer ids randomly). No-op cost when the schedule is empty (every real launch path).
-        _quotaLedger.TestRegisterConnectIndex(index, (int)id);
-        // Failure-state late-join delivery (phase 1c): same call site, same reasoning. The
-        // replicated MoveState already carries WHAT each body
-        // is, so a late joiner sees the states themselves — but not the CAUSE, and the cause is
-        // what selects the skin. Without this a peer joining a session where somebody is frozen at
-        // the shore would render them as an ordinary player standing very still in the dark,
-        // which is the most misleading thing this game could show a new arrival.
-        _incapacitation.SendStateTo((int)id);
-        // Flashlight late-join delivery (NIGHT-2): same call site, same reasoning — a joiner would
-        // render the player standing in front of them dark while every other peer sees them
-        // glowing, which is a desync that reads as the feature being broken rather than as a
-        // missing dump.
-        _flashlightManager.SendFlashlightStateTo((int)id);
-        // Water late-join delivery (W2, lake-water contract §12): same call site, same reasoning.
-        // Without it a peer joining a session where somebody is already halfway across the lake
-        // renders them standing bolt upright in deep water with no chill and no swim, and W4's
-        // splash listener never learns a swim is under way at all.
-        _waterService.SendWaterStateTo((int)id);
-        // Sight-range late-join delivery (canon fact 4): same call site, same reasoning, and it must
-        // come AFTER the spawner call above because the table is keyed by live avatars — SendSightTo
-        // recomputes before it sends so the brand-new peer is in the table it receives. Without this
-        // a joiner holds PlayerSightService.Synced false and therefore reads the darkness floor for
-        // itself and everyone else until the next 0.2 s broadcast. That is the correct direction to
-        // be wrong in (see RangeFor's doc) but it is still a documented failure shape, and this
-        // closes it.
-        _playerSight.SendSightTo((int)id);
+        // EVERY OTHER LATE-JOIN DUMP THAT USED TO BE HERE WENT WITH ITS SYSTEM (BASE-1,
+        // 2026-09-19): playthrough state, the quota ledger, the failure states, the flashlight,
+        // the water state and the sight table. The call site and its reasoning are what matter
+        // to the lanes that follow: a joiner must be COMPLETE from this one funnel, because an
+        // event fired before it arrived never reaches it. ROUND-1's phase/role/score dump and
+        // VOICE-1's room membership both belong on these lines, after the spawner call above so
+        // the new peer is already in whatever table is being sent.
         ServerLog.Info("peer joined", $"peer={id} players={Multiplayer.GetPeers().Length}");
     }
 
-    /// <summary>Peer id and authoritative position for <see cref="Game.Sight.PlayerSightService"/>.
-    /// Deliberately no velocity term: this is how well the player sees the WORLD, and standing
-    /// still does not help you see in the dark.</summary>
-    private System.Collections.Generic.IEnumerable<(int PeerId, Vector3 Position)>
-        EnumerateAvatarPositions()
-    {
-        foreach (SandboxAvatar a in EnumerateAvatars())
-            yield return (a.OwnerPeerId, a.GlobalPosition);
-    }
-
-    /// <summary>Every live avatar, for WaterService's server tick. A method rather than an
+    /// <summary>Every live avatar. A method rather than an
     /// inline lambda over <c>GetChildren()</c> so the null/type filtering has one home — the
     /// Players root also carries the spectate camera and, transiently, a node mid-free.</summary>
     private System.Collections.Generic.IEnumerable<SandboxAvatar> EnumerateAvatars()
@@ -867,44 +549,19 @@ public partial class Gameplay : Node3D
         // comment and ReconnectRegistry.Capture's).
         int[] heldPropIds = _propManager.HeldPropIdsFor((int)id);
 
-        // Water state is dropped on disconnect, deliberately and NOT carried by ReconnectRegistry.
-        // A disconnect is not a death and must not reuse the death path (MECHANICS-BIBLE §8.2's
-        // separate-fields rule), but the inverse is also true: resuming a swim would put a
-        // reconnecting player back in deep water with the chill they left on, and the resume
-        // position is already the last authoritative one — so if they were in the lake they are
-        // still in the lake and the clock legitimately restarts from zero. That is the forgiving
-        // reading, and it is stated here rather than left to fall out of the dictionary.
-        _waterService.ForgetPeer((int)id);
-        // WATER-3: the drowning clock takes the SAME forgiving reading, for the same reason and in
-        // the same breath — a reconnecting player whose last authoritative position was under the
-        // water must start their three seconds again, not resume 2.9 s into a breath they stopped
-        // holding when their connection dropped. `RespawnService` is created by the world (the
-        // bubble test's), so the static is null-safe by design rather than by luck.
-        Sail.Game.Run.RespawnService.Instance?.ForgetPeer((int)id);
-        // Same treatment, and here it is load-bearing rather than tidy: a departed peer left in
-        // the machine dictionary still counts toward AllConnectedIncapacitated, so a player who
-        // disconnects while knocked out would hold the whole group one body short of a recovery
-        // forever — and the run's only hard loss condition would then be permanently armed by
-        // somebody who is no longer in the session.
-        _incapacitation.ForgetPeer((int)id);
+        // The per-peer state the water, drowning and incapacitation services used to forget
+        // here went with them at the fork (BASE-1, 2026-09-19). The rule they shared is worth
+        // keeping in view for anything ROUND-1 adds: a departed peer left in a server-side
+        // dictionary is not merely litter - one of them counted toward an all-players predicate,
+        // so a player who disconnected at the wrong moment armed a loss condition forever. ENet
+        // peer ids are also RECYCLED, so a stale entry lands on whoever joins next.
+
         // Release everything this peer held BEFORE freeing its avatar node, so the drop
         // position derives from its still-valid last authoritative transform (and so no prop
         // stays bound to a node that's about to be freed). Props still drop immediately -
         // today's behavior, every existing invariant preserved; heldPropIds (captured above)
         // is what lets a successful resume re-grant them (see OnPeerConnected).
         _propManager.OnPeerLeft((int)id);
-
-        // The flashlight goes out and the entry is dropped, deliberately: it is attached to a body
-        // that has just left. Left in the table it would be a lit peer with no avatar, which the
-        // renderer would chase every frame forever. Costing a returning player one keypress is the
-        // right side of that trade.
-        _flashlightManager.OnPeerLeft((int)id);
-
-        // The honk cooldown latch goes with the peer, for a reason the flashlight above does not
-        // have: ENet peer ids are RECYCLED, so a latch left behind would make the next player to
-        // be handed this id silently unable to honk for up to 0.6 s after they join. Same
-        // recycled-id discipline VoiceManager applies to its avatar cache and its mute entries.
-        _honkManager.OnPeerLeft((int)id);
 
         // Steam-hosted matches only: a resolvable identity gets a 60s reconnect grace
         // window at its last position, plus whatever it held (restored on resume if still
@@ -945,17 +602,19 @@ public partial class Gameplay : Node3D
         return player;
     }
 
-    // internal, not private, for one reason: BubbleTestSelfTest asserts that
-    // BuildWorld("bubbletest") really returns a BubbleTestWorld. That check is not a
+    // internal, not private, for one reason: SupermarketWorldSelfTest asserts that
+    // BuildWorld("supermarket") really returns a SupermarketWorld. That check is not a
     // formality — it is the one live proof that the registered id and the scene it loads have
     // not drifted apart. Same assembly, so no visibility is leaked outside it.
     internal static IGameWorld BuildWorld(string id)
     {
-        // WATER-3: which lake this world has, before anything in it exists. Server and client both
-        // build the world, so both land on the same footprint and the motor's depth test stays a
-        // world constant — a reconciliation replay resolves the identical answer the live step did.
-        // EGG-2: the SET, not the single lake. The bubble test has two water bodies since the
-        // blue tower got its moat; every other world still gets exactly one and is unchanged.
+        // Which water this world has, before anything in it exists. Server and client both build
+        // the world, so both land on the same footprint and the motor's depth test stays a world
+        // constant — a reconciliation replay resolves the identical answer the live step did.
+        // No world here has any (BASE-1, 2026-09-19), so this installs an empty set. The line
+        // stays, and installing it EXPLICITLY per world is the point: ActiveWaters is a
+        // process-wide static, and a world that inherits the previous one's shoreline drowns
+        // players in a dry building.
         Sail.Game.Water.WaterGeometry.ActiveWaters = Sail.Game.Water.WaterGeometry.WatersForWorld(id);
         return BuildWorldScene(id);
     }
@@ -966,14 +625,16 @@ public partial class Gameplay : Node3D
     // is wrong.
     private static IGameWorld BuildWorldScene(string id) => id switch
     {
-        // BT-0 (2026-08-27): the Bubble Test playtest level.
-        "bubbletest" => GD.Load<PackedScene>(ScenePaths.BubbleTest).Instantiate<IGameWorld>(),
+        // BASE-1 (2026-09-19): the three boxy rooms - holding, search, task - the whole game
+        // is played in. Authored, not code-built (.claude/rules/godot-scenes.md).
+        World.SupermarketWorld.WorldId =>
+            GD.Load<PackedScene>(ScenePaths.Supermarket).Instantiate<IGameWorld>(),
         // The code-built CI scaffolding the scene suites run on: "open" is prop-free, "propsync"
         // is seeded by PropManager.SpawnInitialProps. Neither is reachable from an interactive
         // launch (HostMenu never passes --world).
         "open" or "propsync" => new GameWorld(),
         _ => throw new System.InvalidOperationException(
-            $"unknown world id '{id}' — registered worlds are \"bubbletest\" (played), \"open\" and \"propsync\" (CI)"),
+            $"unknown world id '{id}' — registered worlds are \"supermarket\" (played), \"open\" and \"propsync\" (CI)"),
     };
 
     // P11 (Task A3): the resumed-vs-fresh palette-color decision, pulled out as a pure static

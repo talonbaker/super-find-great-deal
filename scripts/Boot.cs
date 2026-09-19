@@ -132,48 +132,11 @@ public partial class Boot : Node
         }
         // --- end L1 -----------------------------------------------------------------------------
 
-        // --- CORE-PROG-A1 (2026-08-13, core-spine spec §2.2) ----------------------------------
-        if (options.FlowSelfTest)
-        {
-            // The quota schedule's RESOURCE path — the one seam dotnet test can't reach (a
-            // loaded .tres needs the engine); everything else about the machine/quota is xUnit.
-            int exitCode = Sail.Game.Run.FlowSelfTest.Run();
-            GetTree().Quit(exitCode);
-            return;
-        }
-        // --- end CORE-PROG-A1 -------------------------------------------------------------------
-
-        // --- BT-0 (2026-08-27 Bubble Test) ---------------------------------------------------
-        if (options.BubbleTestSelfTest)
-        {
-            // A Node rather than a static Run(host): half of what it
-            // checks is the boundary scan actually firing, and RespawnService scans in _Process
-            // at 10 Hz — a synchronous static cannot let a frame pass, so it could only ever
-            // assert configuration and never assert that the configuration does anything. It
-            // quits the tree itself when the last check lands.
-            AddChild(new Sail.Game.World.BubbleTest.BubbleTestSelfTest { Name = "BubbleTestSelfTest" });
-            return;
-        }
-
-        // --- BT-10 (the TV easter egg) --------------------------------------------------------
-        if (options.TvPortalSelfTest)
-        {
-            // A Node for the same reason BubbleTestSelfTest is one, one step stronger: Area3D's
-            // BodyEntered is a PHYSICS callback, so a synchronous static could place a body in a
-            // trigger and never learn whether the trigger noticed.
-            AddChild(new Sail.Game.Bubble.TvPortalSelfTest { Name = "TvPortalSelfTest" });
-            return;
-        }
-
-        // --- EGG-1 (the Puffin Lab throwback) -------------------------------------------------
-        if (options.PuffinLabSelfTest)
-        {
-            // A Node for TvPortalSelfTest's reason: the last check parks a body in an Area3D and
-            // waits for BodyEntered, which is a physics callback and cannot be observed
-            // synchronously.
-            AddChild(new Sail.Game.World.PuffinLab.PuffinLabSelfTest { Name = "PuffinLabSelfTest" });
-            return;
-        }
+        // (The self-test entries for the quota schedule, the bubble test level, the TV portal
+        // easter egg and the Puffin Lab all went with their systems at the fork - BASE-1,
+        // 2026-09-19. BASE-1's own world self-test is registered below, beside the other
+        // node-shaped ones, for the reason they all are: a static Run() cannot let a frame pass,
+        // and anything that asserts a scene did something needs frames.)
 
         if (options.VoiceMuteSelfTest)
         {
@@ -192,14 +155,6 @@ public partial class Boot : Node
             return;
         }
 
-        if (options.PresentationSelfTest)
-        {
-            GD.Print("[boot] presentation self-test");
-            Callable.From(() => GetTree().Quit(
-                Game.Presentation.PresentationSelfTest.Run(GetTree()))).CallDeferred();
-            return;
-        }
-
         if (options.BuildUiTheme)
         {
             // Editor-preview export only — the running game never reads the file. See
@@ -208,23 +163,15 @@ public partial class Boot : Node
             return;
         }
 
-        if (options.ScreenFlowSelfTest)
+        if (options.SupermarketSelfTest)
         {
-            // CORE-PROG-B1: in-engine walk of the flow screens against the scripted fake
-            // playthrough. A node rather than a synchronous call — the screens' poll
-            // contract and tweens need real frames (a synchronous _Ready cannot let one pass). Quits itself.
-            GD.Print("[boot] screenflow self-test");
-            AddChild(new Ui.Flow.ScreenFlowSelfTest { Name = "ScreenFlowSelfTest" });
-            return;
-        }
-
-        if (options.HudLayoutSelfTest)
-        {
-            // PLAY-1: the HUD's two shared columns and the standing coverage law, measured off
-            // the REAL node rectangles. A node for the same reason the walk above is one —
-            // Control layout only settles after the tree has run frames. Quits itself.
-            GD.Print("[boot] hud-layout self-test");
-            AddChild(new Ui.Hud.HudLayoutSelfTest { Name = "HudLayoutSelfTest" });
+            // BASE-1: instances Supermarket.tscn and checks every named spawn marker plus each
+            // room's packed-vs-live node count. A Node rather than a static Run() because the
+            // live half of that comparison only means anything after the tree has run frames -
+            // a section that builds geometry in _Ready is exactly what it exists to catch
+            // (.claude/rules/godot-scenes.md). Quits itself.
+            GD.Print("[boot] supermarket world self-test");
+            AddChild(new Game.World.SupermarketWorldSelfTest { Name = "SupermarketWorldSelfTest" });
             return;
         }
 
@@ -274,15 +221,6 @@ public partial class Boot : Node
             // a live tree, so it needs the tree to exist first.
             GD.Print("[boot] ui theme self-test");
             AddChild(new Ui.Design.UiThemeSelfTest { Name = "UiThemeSelfTest" });
-            return;
-        }
-
-        if (options.ScreenDemo)
-        {
-            // CORE-PROG-B1's dev entry: the scripted screen demo, no server and no world.
-            // After the display-settings block above so a headed demo window behaves like
-            // the real game's.
-            AddChild(new Ui.Flow.ScreenDemoRoot { Name = "ScreenDemo" });
             return;
         }
 

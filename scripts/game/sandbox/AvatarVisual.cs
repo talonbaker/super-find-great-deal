@@ -3502,17 +3502,19 @@ public partial class AvatarVisual : Node3D
         ApplyRootPose();
     }
 
-    /// <summary>The death beat's pose (<see cref="Sail.Game.Run.DeathBeatPose"/>), additive over
-    /// whatever the other two contributors are doing. Presentation only and never replayed - the
-    /// body's authoritative transform is untouched by this, which is what lets a client play a
-    /// beat without ever disagreeing with the server about where anyone is standing.
+    /// <summary>An additive whole-body pose offset, over whatever the other two contributors are
+    /// doing. Presentation only and never replayed - the body's authoritative transform is
+    /// untouched by this, which is what lets a client play a beat without ever disagreeing with
+    /// the server about where anyone is standing.
     ///
-    /// <para>Call with <see cref="Sail.Game.Run.DeathBeatPose.Pose.Rest"/> to clear it; the beat
-    /// does exactly that when it ends, so a body that comes back is posed by nothing.</para></summary>
-    public void SetDeathPose(in Sail.Game.Run.DeathBeatPose.Pose pose)
+    /// <para>Call with two zero vectors to clear it. It took a <c>DeathBeatPose.Pose</c> until the
+    /// fork (BASE-1, 2026-09-19) pruned the death beat that produced one; the seam is kept as raw
+    /// vectors because it is the one place a client-side stagger or flinch can be expressed
+    /// without touching the authoritative transform.</para></summary>
+    public void SetAdditivePose(Vector3 offset, Vector3 rotationRad)
     {
-        _deathPos = pose.Offset;
-        _deathRot = pose.Rotation;
+        _deathPos = offset;
+        _deathRot = rotationRad;
         ApplyRootPose();
     }
 

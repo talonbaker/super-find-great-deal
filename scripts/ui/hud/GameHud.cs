@@ -46,7 +46,6 @@ public partial class GameHud : CanvasLayer
     private const double PollIntervalSec = 0.1;
 
     private DayPhaseWidget? _dayPhase;
-    private HudBubbleCount? _bubbles;
     private HudHowToPlayHint? _howToPlay;
     private double _poll;
 
@@ -83,22 +82,10 @@ public partial class GameHud : CanvasLayer
         // the answer cannot change inside a session — the world is built before the HUD is.
         _profile = HudProfile.Current;
 
-        // BT-8: the shared bubble tally takes the HEAD of the top-centre column and the day/phase
-        // readout stacks under it (UiColumns). No world has both today, and the column derives
-        // rather than assumes that.
-        if (_profile.BubbleCount)
-        {
-            _bubbles = new HudBubbleCount();
-            _bubbles.SetAnchorsPreset(Control.LayoutPreset.CenterTop);
-            _bubbles.OffsetTop = Design.UiColumns.BubbleCountTop;
-            root.AddChild(_bubbles);
-            _bubbles.Resized += () =>
-            {
-                CentreTop(_bubbles);
-                PublishColumn();
-            };
-            CentreTop(_bubbles);
-        }
+        // The bubble tally that used to take the HEAD of the top-centre column went with the
+        // bubbles at the fork (BASE-1, 2026-09-19). The column still derives its rungs from
+        // measured heights rather than assuming what is above them, so the next occupant of that
+        // slot (HOLD-1's board, ROUND-1's phase/timer strip) drops in without moving anything.
 
         if (_profile.DayPhase)
         {
@@ -152,8 +139,7 @@ public partial class GameHud : CanvasLayer
     private void PublishColumn()
     {
         bool shown = Visible;
-        Design.UiColumns.BubbleCountHeight =
-            shown && _bubbles is { Visible: true } b ? b.Size.Y : 0f;
+        Design.UiColumns.BubbleCountHeight = 0f;
         Design.UiColumns.DayPhaseHeight = shown && _dayPhase != null ? _dayPhase.Size.Y : 0f;
         // The day/phase readout's own top depends on the rung above it, so it is re-placed here
         // rather than only at build: the tally appears one poll after the world adds its counter.
@@ -179,7 +165,6 @@ public partial class GameHud : CanvasLayer
         _poll = 0;
 
         _dayPhase?.Tick();
-        _bubbles?.Tick();
     }
 
     /// <summary>Re-centres a top-anchored widget on its own current width. Called on every resize

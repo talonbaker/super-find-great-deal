@@ -107,12 +107,27 @@ public static class NetProfile
     /// a 6-player session <c>6 avatars x 30 Hz x 3 B x 5 recipients</c> = <b>2.64 kB/s</b> added to
     /// the server's egress against a 48.3 kB/s baseline for the same traffic; 0.53 kB/s per client
     /// ingress.</para></summary>
-    public const int ProtocolVersion = 14;
+    ///
+    /// <para><b>v15 (2026-09-19, BASE-1 — the fork into Super Find Great Deal).</b> No message
+    /// shape changed in this bump and none is expected to: it is spent entirely on making a Watis
+    /// World build and a Super Find Great Deal build refuse each other at the handshake. The two
+    /// games share an App ID (Spacewar, <see cref="FallbackSteamAppId"/>), share a transport, and
+    /// were the same binary yesterday, so without this a Watis client would connect to this server
+    /// and be handed a world, an avatar and a prop stream it has no matching content for — the
+    /// silently-wrong failure this field exists to convert into a refused connection. The lobby
+    /// scope tag below is the matchmaking half of the same fence; this is the ENet/direct-connect
+    /// half, which no lobby tag can reach.</para></summary>
+    public const int ProtocolVersion = 15;
 
     /// <summary>Steam lobby scope tag — keeps this title's room codes from colliding with any
     /// other title developing against the same (shared Spacewar) App ID. Per-title value:
-    /// change it with the App ID when you ship. Also the SteamLobby directory key.</summary>
-    public const string GameTag = "mp-foundation";
+    /// change it with the App ID when you ship. Also the SteamLobby directory key.
+    ///
+    /// <para>Set to <c>super-find-great-deal</c> at the fork (BASE-1, 2026-09-19). Watis World
+    /// ships <c>mp-foundation</c>, so a room code from one game can no longer resolve to a lobby
+    /// of the other while both develop against the same Spacewar App ID. The App ID itself is
+    /// deliberately untouched.</para></summary>
+    public const string GameTag = "super-find-great-deal";
 
     /// <summary>Fallback Steam App ID when neither --steam-app-id nor steam_appid.txt is set:
     /// Valve's Spacewar test app. Swap for your real App ID at ship time (see SteamService).</summary>

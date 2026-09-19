@@ -849,15 +849,15 @@ public partial class OutdoorAtmosphere : Node3D
     /// <see cref="SightPresentation.TargetRangeM"/> turns into the darkness floor — blind, never
     /// omniscient. A world with no sight service at all (every dev lab, the playground) therefore
     /// renders its night at the floor, and the day is untouched because the weight is zero there.</summary>
+    /// <para><b>BASE-1 (2026-09-19): there is no sight service in this repo.</b> The whole
+    /// server-authoritative sight stack (<c>PlayerSightService</c>, <c>PlayerSightTable</c>) was
+    /// pruned at the fork — it existed for an outdoor night nobody plays here — so the absent-service
+    /// branch below is now the only branch, and it resolves exactly as it always did for a world
+    /// that had no service: not authoritative, which is the darkness floor. The pure presentation
+    /// half (<see cref="SightPresentation"/>, <see cref="PlayerSightCurve"/>) is kept because this
+    /// fog math and its xUnit suite are still live.</para>
     private (bool Synced, float RangeM) ReadSight()
-    {
-        if (SightSource != null)
-            return SightSource();
-        PlayerSightService? service = PlayerSightService.Instance;
-        return service == null
-            ? (false, PlayerSightCurve.DarkFloorM)
-            : (service.Synced, service.LocalRangeM);
-    }
+        => SightSource != null ? SightSource() : (false, PlayerSightCurve.DarkFloorM);
 
     private void Apply(in AtmoState s)
     {

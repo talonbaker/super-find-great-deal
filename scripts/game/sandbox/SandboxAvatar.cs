@@ -547,36 +547,22 @@ public partial class SandboxAvatar : CharacterBody3D, IServerConfirmedBody
     private NetRole _role = NetRole.Offline;
     private int _ownerPeerId;
 
-    /// <summary>W7-5: in-game achievements ("Duck walk" / "Tough guy" / "Tough guy duck walk" /
-    /// "Bubblholic"), tracked, persisted and toasted for THIS peer's own controlled body only.
-    /// Constructed in <see cref="ConfigureAsNetworked"/> when <c>isOwner</c> is true <b>and a
-    /// person is driving this body</b> (<c>IIntentSource.IsHumanInput</c>), so a remote proxy's
-    /// avatar (someone else's body, rendered on this client), a headless dedicated server's
-    /// simulation of every avatar, and <b>every scripted suite bot</b> never build one — an
-    /// achievement is only ever earned on the machine of the player who actually did it. Null for
-    /// the offline sandbox/labs on purpose: those are dev tools, not the shipped play session the
-    /// packet scopes this to.
+    /// <summary><b>Achievements were pruned at the fork</b> (BASE-1, 2026-09-19): the whole
+    /// <c>scripts/game/achievements/</c> package and its UI toast went with the old game's
+    /// objectives, so there is no per-body runtime here any more and nothing writes to
+    /// <c>user://settings.cfg</c> from an avatar.
     ///
-    /// <para><b>The bot half of that gate is W7-8's, and it was not hypothetical.</b> A bot owns
-    /// its own avatar, so <c>isOwner</c> alone let one earn achievements into
-    /// <c>user://settings.cfg</c> — a path that resolves by project NAME and is therefore the one
-    /// real profile shared by every worktree on this machine. Run-AimTest's scripted 2s→6s aim hold
-    /// clears the 3.0 s "Tough guy" threshold, and it had already spent Talon's first-time
-    /// unlock.</para></summary>
-    private Sail.Game.Achievements.AchievementRuntime? _achievements;
+    /// <para><b>The gate this replaced is worth reading before anything persistent is added back.</b>
+    /// A bot owns its own avatar, so an <c>isOwner</c>-only gate let a suite bot earn achievements
+    /// into <c>user://settings.cfg</c> — a path that resolves by project NAME and is therefore one
+    /// profile shared by every checkout on this machine. Run-AimTest's scripted 2s->6s aim hold
+    /// cleared a 3.0 s threshold and spent Talon's real first-time unlock. Any future per-player
+    /// persisted fact gates on <see cref="IsHumanDriven"/>, never on ownership alone.</para></summary>
+    internal bool TracksAchievements => false;
 
-    /// <summary><b>Is this body tracking achievements at all</b> — i.e. did it come out of
-    /// <see cref="ConfigureAsNetworked"/> with a runtime. Exposed for
-    /// <c>SandboxSelfTest.RunAchievementGateTestsAsync</c>, which is the only place the W7-8 gate
-    /// can be measured in the engine: the alternative proof is "run a bot and look at the shared
-    /// user:// profile afterwards", and that requires temporarily deleting a real player's earned
-    /// achievement to have anything to look for.</summary>
-    internal bool TracksAchievements => _achievements != null;
-
-    /// <summary><b>Is a PERSON driving this body?</b> The same question
-    /// <see cref="ConfigureAsNetworked"/> asks before it builds an <see cref="_achievements"/>
-    /// runtime, hoisted to a public read so a second consumer does not have to re-derive it — and
-    /// so the two can never answer differently, which is exactly how a gate rots.
+    /// <summary><b>Is a PERSON driving this body?</b> The question the pruned achievement runtime
+    /// was gated on, hoisted to a public read so a second consumer does not have to re-derive it —
+    /// and so two consumers can never answer differently, which is exactly how a gate rots.
     ///
     /// <para><b>Added by CELEBRATE-1 (2026-09-04) for the all-bubbles celebration</b>, which has
     /// the same hazard the achievement gate was built for and a slightly different shape: nothing
@@ -945,17 +931,13 @@ public partial class SandboxAvatar : CharacterBody3D, IServerConfirmedBody
         {
             _role = NetRole.PredictedOwner;
             _cheatMove = NetworkManager.Instance.Options.CheatMove;
-            // A SCRIPTED BODY EARNS NOTHING (W7-8, 2026-08-30). isOwner alone is not "a player":
-            // every suite bot is the owner of its own avatar, and AchievementStore writes into
-            // user://settings.cfg, which resolves by project NAME and is therefore the ONE real
-            // profile shared by every worktree on this machine. Run-AimTest's scripted 2s -> 6s aim
-            // hold clears the 3.0 s "Tough guy" threshold, and it had already spent Talon's
-            // first-time unlock: his live file's only achievement key was tough_guy, which is
-            // exactly the one a bot can reach. Gated on the INTENT SOURCE rather than on --bot or a
-            // build flag, because "is there a person driving this body" is a per-avatar question and
-            // those are per-process answers — see IIntentSource.IsHumanInput.
-            if (source?.IsHumanInput == true)
-                _achievements = new Sail.Game.Achievements.AchievementRuntime(this);
+            // A SCRIPTED BODY EARNS NOTHING (W7-8, 2026-08-30). The achievement runtime this
+            // branch used to build was pruned at the fork (BASE-1), but the rule it enforced
+            // outlives it and the next per-player persisted fact belongs here: isOwner alone is
+            // not "a player" — every suite bot owns its own avatar, and user://settings.cfg
+            // resolves by project NAME, so one shared profile is a bot press away. Gate on the
+            // INTENT SOURCE (IsHumanDriven / IIntentSource.IsHumanInput), never on --bot or a
+            // build flag, because "is a person driving this body" is a per-avatar question.
             SetPhysicsProcess(true);
         }
         else
@@ -1463,15 +1445,10 @@ public partial class SandboxAvatar : CharacterBody3D, IServerConfirmedBody
         _ring.RecordPrediction(_seq, _state, _aim.Stance, _aim.SteadyElapsedSec);
 
         float dt = (float)delta;
-        // W7-5: fed the SAME verb/aim-stance this tick just resolved above — never raw input
-        // (see AchievementTracker's own doc for why that distinction is the packet's stop
-        // condition). BubbleCounter may not exist in a world with no bubbles, or not yet be
-        // synced for a peer that just joined; CheckBubblholic's own rule already refuses a
-        // total of zero, so a null/not-yet-synced counter is simply skipped rather than guarded
-        // twice.
-        _achievements?.Tracker.Step(dt, _state.Verb, AimStance);
-        if (_achievements != null && Sail.Game.Bubble.BubbleCounter.Instance is { Synced: true } bubbles)
-            _achievements.CheckBubblholic(bubbles.Count, bubbles.BubbleCount);
+        // (The achievement tracker that used to be stepped here went with the achievements
+        // package at the fork — BASE-1, 2026-09-19. It was fed the SAME verb/aim-stance this
+        // tick had just resolved, never raw input; anything scored off the motor later should
+        // read the resolved state the same way.)
         PlayStepCosmetics(ev, _state.Grounded, HorizontalSpeed(_state.Velocity), dt, intent.Sprint);
         // THE INTERACTION-GATES CASCADE ROW, owner half (table rows 7/9/14/22). A body that is
         // down cannot grab, drop, throw, fire a verb or act on the world. Gated in ONE place —
@@ -2473,19 +2450,15 @@ public partial class SandboxAvatar : CharacterBody3D, IServerConfirmedBody
         if (interactEdge && InteractOverride != null && InteractOverride())
             return;
 
-        // A DOWNED TEAMMATE OUTRANKS EVERY OTHER USE OF THIS KEY. Standing over a frozen friend
-        // with a log at your feet, Interact means "help them" — and it has to mean that on both
-        // sides, or the client grabs the log while the server starts a drag and the two disagree
-        // about what one press did.
-        //
-        // The server resolves the assist itself, from the Interact edge it latches out of the
-        // authoritative input stream (see TakeServerInteractEdge). This branch is the owning
-        // client agreeing not to ALSO fire a grab request for the same press. Both sides run the
-        // identical pure query over the identical replicated facts (positions and
-        // MoveState.Incapacity), so they cannot reach different answers — which is the only thing
-        // that makes a client-side prediction of a server rule safe.
-        if (interactEdge && Sail.Game.Failure.IncapacitationService.NearestAssistTarget(this) != null)
-            return;
+        // (THE DOWNED-TEAMMATE ASSIST that used to outrank every other use of this key went with
+        // the incapacitation service at the fork - BASE-1, 2026-09-19. The shape it had is the
+        // one to copy for any verb that competes with carry for this key, and BTN-1's button
+        // press is exactly that: the server resolved the assist itself from the Interact edge it
+        // latched out of the authoritative input stream, and THIS branch was only the owning
+        // client agreeing not to ALSO fire a grab for the same press. Both sides ran the
+        // identical pure query over identical replicated facts, so they could not reach different
+        // answers - which is the only thing that makes a client-side prediction of a server rule
+        // safe. Two answers to "what did that press do" is the defect.)
 
         if (_role == NetRole.PredictedOwner && Props != null)
         {

@@ -118,13 +118,13 @@ public sealed class LaunchOptions
     public bool VoiceGarbage { get; private set; }              // bot: transmit size-valid non-Opus bytes (decoder-hardening test)
     public bool VoiceOversize { get; private set; }             // bot: transmit oversized packets (size-bound test)
 
-    /// <summary>Which world the Gameplay scene builds. Defaults to "bubbletest" — the
-    /// movement-and-feel MVP's world (BubbleTest.tscn) — so every launch path that does not
-    /// explicitly override World (Practice Mode's child server, a bare direct-connect, a Steam
-    /// tester who just clicks Host) shows the world the MVP is asking players about. Flipped
-    /// "camp" -> "bubbletest" by LAUNCH-1 (2026-08-28, MVP integration plan §2.4); the MVP
-    /// extraction then retired every other world, so "bubbletest" is now the ONLY valid value
-    /// and Gameplay's world switch treats anything else as a launch error. Built locally by each
+    /// <summary>Which world the Gameplay scene builds. Defaults to "supermarket" — the three
+    /// rooms the game is played in — so every launch path that does not explicitly override World
+    /// (Practice Mode's child server, a bare direct-connect, a Steam tester who just clicks Host)
+    /// lands in the game rather than in CI scaffolding. The only other ids are the code-built
+    /// replication testbeds "open" and "propsync"; Gameplay's world switch treats anything else
+    /// as a launch error rather than falling back, because a silent fallback once shipped a
+    /// playtest where the level "did not load". Built locally by each
     /// peer, so pass the same value to server and clients of one session. Settable (not just
     /// CLI-parsed): the interactive Host flow (HostMenu) forces it to <see cref="DefaultWorld"/>
     /// when the launch did NOT name a world — see <see cref="WorldExplicit"/>.</summary>
@@ -140,15 +140,14 @@ public sealed class LaunchOptions
     /// <c>NetworkManager</c> is an AUTOLOAD, so <c>NetworkManager.Instance?.Options?.World</c>
     /// is never null and never empty: in ANY scene launched without <c>--world</c> it is this
     /// value. There is therefore no such thing as "a demo scene has no world id" - a demo, a
-    /// capture rig and an in-engine self-test all silently read <b>"bubbletest"</b>, and any
-    /// per-world profile they consult (<c>Sail.Game.Run.WorldRunFlow</c>) hands them the bubble
-    /// test's stripped answer. That has already cost real time twice, back when a fuller world
-    /// existed to name instead. The way out: pass the decision in as a parameter and default it
-    /// to the full behaviour (what <c>FlowScreens.Attach</c>'s <c>roundScreens</c> does, so no
-    /// demo can lose a surface however it was launched). Use <see cref="WorldExplicit"/> only to
+    /// capture rig and an in-engine self-test all silently read <b>"supermarket"</b>, and any
+    /// per-world profile they consult (<c>HudProfile</c>, <c>VoiceProximityGate</c>) hands them
+    /// that world's answer. That has already cost real time twice. The way out: pass the decision
+    /// in as a parameter and default it to the full behaviour, so no lab can lose a surface
+    /// however it was launched. Use <see cref="WorldExplicit"/> only to
     /// answer "did a human ask for this world" - never as a stand-in for "is there a session",
     /// because a plain double-click of the real game is also not explicit.</para></summary>
-    public const string DefaultWorld = "bubbletest";
+    public const string DefaultWorld = Game.World.SupermarketWorld.WorldId;
 
     /// <summary>--world was given on the command line, so <see cref="World"/> is a deliberate
     /// choice rather than the default. The interactive Host flow honours it instead of forcing
@@ -359,20 +358,12 @@ public sealed class LaunchOptions
     /// recycled-id safety). Exits 0/1; Run-VoiceTest.ps1 gates on it.</summary>
     public bool VoiceMuteSelfTest { get; private set; }
 
-    /// <summary>--presentation-selftest: headless checks of the presentation-profile
-    /// layer (ActorEvent resolution, profile .tres contents, Fire safety guards).
-    /// Exits 0/1; Run-PresentationSelfTest.ps1 gates on it.</summary>
-    public bool PresentationSelfTest { get; private set; }
-
-    /// <summary>--screenflow-selftest: in-engine headless walk of CORE-PROG-B1's flow
-    /// screens against the scripted fake playthrough — routing, late-join landing, kit
-    /// reuse. Exits 0/1; Run-ScreenFlowTest.ps1 gates on it.</summary>
-    public bool ScreenFlowSelfTest { get; private set; }
-
-    /// <summary>--hudlayout-selftest: in-engine headless measurement of the HUD's two shared
-    /// columns and of the standing coverage law — the real node rectangles, not the constants
-    /// that were supposed to produce them. Exits 0/1; Run-HudLayoutTest.ps1 gates on it.</summary>
-    public bool HudLayoutSelfTest { get; private set; }
+    /// <summary>--supermarket-selftest: the level's compliance test — the named spawn markers,
+    /// the authored-vs-live node count per room (nothing may be built in code), and the room
+    /// separation the voice cutoff depends on. Unlike the pure-logic *SelfTest flags above it
+    /// instantiates the real shipped scene. Prints one machine-readable summary line and exits
+    /// 0/1; tests/Run-SupermarketWorldTest.ps1 gates on the LINE, not the exit code.</summary>
+    public bool SupermarketSelfTest { get; private set; }
 
     /// <summary>--build-ui-theme: regenerates <c>resources/UITheme.tres</c> from the C# design
     /// tokens, for editor preview. Safe to run at any time — the exported file is build output
@@ -390,11 +381,6 @@ public sealed class LaunchOptions
     /// structurally cannot see propagation — it passed 1722 tests while the running game
     /// rendered the committed .tres instead of the design system. Exits 0/1.</summary>
     public bool UiThemeSelfTest { get; private set; }
-
-    /// <summary>--screen-demo: the human-watchable scripted-playthrough screen demo
-    /// (SPACE steps through every flow screen against the fake driver — no server, no
-    /// world). CORE-PROG-B1's dev entry for showing state transitions pre-integration.</summary>
-    public bool ScreenDemo { get; private set; }
 
     /// <summary>--telemetry-self-test: headless pure-logic checks of the telemetry module
     /// (TelemetryStore persistence, SessionMonitor crash classification, PendingQueue flush,
@@ -419,112 +405,17 @@ public sealed class LaunchOptions
     /// unchanged. See Run-ReconnectTest.ps1 and Task A1's report for the CI-scope rationale.</summary>
     public double ForceReconnectAtSec { get; private set; } = -1;
 
-    /// <summary>--net-probe-at &lt;sec&gt;: test-only (CORE-PROG-A1 probe obligation). Constructs
-    /// the two <see cref="Sail.Game.Run.NetOrderProbe"/> nodes on this peer; on a server, this
-    /// many seconds after Gameplay starts (and once at least one peer is connected) it emits the
-    /// one-tick CallLocal-synchronicity + cross-node-channel-ordering burst the core-spine
-    /// verdict design depends on (spec §1.6/§5.4 — the two mechanisms the SD-1 report lists as
-    /// UNVERIFIED). Pass the SAME flag to server and bots of one session so the probe nodes
-    /// exist at identical paths on every peer. Negative (default) = no probe nodes at all;
-    /// every real launch path leaves this unset. See tests/Run-NetProbeTest.ps1.</summary>
-    public double NetProbeAtSec { get; private set; } = -1;
-
-    // --- CORE-PROG-A1 (2026-08-13): playthrough-spine test hooks --------------------------------
-    /// <summary>--flow-timers &lt;introSec,tallySec,lobbySec&gt;: test-only (server). Overrides
-    /// the three PlaythroughDriver state timers (spec §8 placeholders 4/15/30 s) so a headless
-    /// suite can walk RoundIntro→…→UpgradeLobby→RoundIntro inside a test's duration. Values
-    /// still clamp to the ≥ 1 s floor (spec §1.7). 0 = unset (the CyclePeriodSec sentinel);
-    /// every real launch path leaves all three at 0. See tests/Run-FlowTest.ps1.</summary>
-    public double FlowIntroSec { get; private set; }
-    public double FlowTallySec { get; private set; }
-    public double FlowLobbySec { get; private set; }
-
-    /// <summary>--quota-early &lt;d1,d2,...&gt;: test-only (server). Overrides the loaded
-    /// schedule's EarlyRoundsDemand so a suite can force a survivable round 1 and a doomed
-    /// round 2 deterministically without editing the shipped .tres. Every real launch path
-    /// leaves this empty — the shipped schedule is assets/run/quota_schedule.tres, always.</summary>
-    public int[] QuotaEarlyOverride { get; private set; } = System.Array.Empty<int>();
-
-    /// <summary>--quota-bank-at &lt;sec,units,connectIndex&gt;: test-only (server), repeatable.
-    /// This many seconds into the session, banks &lt;units&gt; cache units for the peer at
-    /// &lt;connectIndex&gt; (0-based connect order, resolved at OnPeerConnected against the same
-    /// spawn-order counter Gameplay uses — NOT a literal peer id, because ENet assigns those
-    /// unpredictably) through the REAL QuotaLedger.ServerBank path, denial delivery included.
-    /// The drop-off interactable stand-in until /spec-interaction builds one: it establishes
-    /// the precondition directly, then the thing under test (the ledger, its replication, its
-    /// state guard) runs for real. An entry whose peer has not connected yet holds until it
-    /// can resolve.</summary>
-    public List<(double AtSec, int Units, int ConnectIndex)> QuotaBankAt { get; } = new();
-
-    /// <summary>CORE-INT-1: re-emit the SERVER-side flow/quota hooks (--flow-timers,
-    /// --quota-bank-at) onto a child dedicated server's command line — the same
-    /// only-when-explicitly-set contract the cycle-flag forwarding uses, so every launch
-    /// that never touched these flags builds a child command line identical to before.
-    /// Shared by both child-spawn paths (NetworkManager.StartPracticeServer,
-    /// LocalServerHost.SpawnAsync) because a hook forwarded by only one of them is the
-    /// silently-accepted-and-ignored trap all over again, one door down.</summary>
-    public void AppendFlowServerFlagsTo(System.Collections.Generic.ICollection<string> args)
-    {
-        if (FlowIntroSec > 0 && FlowTallySec > 0 && FlowLobbySec > 0)
-        {
-            args.Add("--flow-timers");
-            args.Add(string.Format(CultureInfo.InvariantCulture, "{0},{1},{2}",
-                FlowIntroSec, FlowTallySec, FlowLobbySec));
-        }
-        foreach ((double atSec, int units, int connectIndex) in QuotaBankAt)
-        {
-            args.Add("--quota-bank-at");
-            args.Add(string.Format(CultureInfo.InvariantCulture, "{0},{1},{2}",
-                atSec, units, connectIndex));
-        }
-    }
-
-    /// <summary>--flow-ready-at &lt;sec&gt;: test-only (bot), repeatable. At each mark the bot
-    /// sends one RequestReadyAdvance — in-state marks exercise the all-ready skip, out-of-state
-    /// marks exercise the server's silent stale-echo drop (spec §3.3), both over the real wire.</summary>
-    public List<double> FlowReadyAtSec { get; } = new();
-
-    /// <summary>--flow-play-again-at &lt;sec&gt;: test-only (bot). At this mark the bot sends one
-    /// RequestPlayAgain (T10). Negative (default) = never.</summary>
-    public double FlowPlayAgainAtSec { get; private set; } = -1;
-
-    /// <summary>--flashlight-at &lt;sec&gt;: test-only (bot), repeatable. At each mark the bot sends
-    /// one flashlight toggle (NIGHT-2). <b>Through the real verb, not a back door</b> — it calls
-    /// <c>FlashlightManager.ClientRequestToggle</c>, the same method the <c>F</c> key calls, so a
-    /// capture taken with it is evidence about the shipped path rather than about a test seam. Two
-    /// marks in one run give the A/B (off, then on) that a night capture needs from ONE binary,
-    /// which is the discipline <c>--bt-no-shadows</c> already sets in this repo.</summary>
-    public List<double> FlashlightAtSec { get; } = new();
-
-    /// <summary>--honk-at &lt;sec&gt;: test-only (bot), repeatable. At each mark the bot presses the
-    /// honk verb (HONK-1). <b>Through the real verb, not a back door</b> — it calls
-    /// <c>HonkManager.ClientRequestHonk</c>, the same method the <c>H</c> key calls, so what a
-    /// suite proves is the shipped path. Several marks a few hundredths apart is how
-    /// <c>Run-HonkTest.ps1</c> mashes the key to prove the cooldown.</summary>
-    public List<double> HonkAtSec { get; } = new();
-
-    /// <summary>--honk-forge &lt;sec&gt;: test-only (bot). At this mark the bot fires the honk
-    /// BROADCAST rpc straight at every other peer, naming a peer id that is not its own — the
-    /// forgery <c>HonkManager</c>'s doc claims <c>RpcMode.Authority</c> makes impossible. Exists so
-    /// that claim is measured rather than read off an attribute. Negative (default) = never.</summary>
-    public double HonkForgeAtSec { get; private set; } = -1;
-
-    /// <summary>--honk-flood &lt;sec&gt;: test-only (bot). From this mark, for
-    /// <c>BotHarness.HonkFloodDurationSec</c>, the bot asks the server for a honk EVERY FRAME,
-    /// bypassing the client-side cooldown copy the way a modified build would. Proves the
-    /// authoritative latch on the server rather than the courtesy one on the client — see
-    /// <c>HonkManager.TestRawRequest</c> for why the shipped path cannot prove it. Negative
-    /// (default) = never.</summary>
-    public double HonkFloodAtSec { get; private set; } = -1;
-
-    /// <summary>--flow-selftest: in-engine headless checks of the quota schedule RESOURCE path
-    /// — the one seam dotnet test cannot reach: assets/run/quota_schedule.tres loads as a
-    /// QuotaSchedule, the demand curve is computed from the file's OWN fields through the same
-    /// QuotaMath the game uses, and a field tweak (in memory) changes the curve through
-    /// unchanged code — the "a balance pass is a .tres edit, zero code changes" proof
-    /// (acceptance criterion 6). Exits 0/1; tests/Run-FlowTest.ps1 gates on it.</summary>
-    public bool FlowSelfTest { get; private set; }
-    // --- end CORE-PROG-A1 -----------------------------------------------------------------------
+    // THE SCRIPTED-VERB AND FLOW/QUOTA TEST FLAGS THAT USED TO SIT HERE went with their
+    // systems at the fork (BASE-1, 2026-09-19): --net-probe-at, --flow-timers, --quota-early,
+    // --quota-bank-at, --flow-ready-at, --flow-play-again-at, --flashlight-at, --honk-at,
+    // --honk-forge, --honk-flood and --flow-selftest, along with AppendFlowServerFlagsTo, the
+    // helper that re-emitted the server-side half onto a child dedicated server's command line.
+    //
+    // THAT HELPER IS THE PART WORTH REMEMBERING. The Host flow launches the real server as a
+    // CHILD PROCESS, so a server-side test flag typed on the parent's command line reaches
+    // nothing at all unless something forwards it. Any test hook ROUND-1 adds that the SERVER
+    // must see needs the same forwarding, and the symptom of forgetting is a flag that silently
+    // does nothing in exactly one launch mode.
 
     /// <summary>--cycle-period &lt;sec&gt;: overrides CycleDriver's 120s tidal-loop period.
     /// Test hook (Run-CycleTest.ps1) — a short period (e.g. 12s) makes a full day/night
@@ -1036,17 +927,8 @@ public sealed class LaunchOptions
                 case "--voice-mute-selftest":
                     options.VoiceMuteSelfTest = true;
                     break;
-                case "--presentation-selftest":
-                    options.PresentationSelfTest = true;
-                    break;
-                case "--screenflow-selftest":
-                    options.ScreenFlowSelfTest = true;
-                    break;
-                case "--hudlayout-selftest":
-                    options.HudLayoutSelfTest = true;
-                    break;
-                case "--screen-demo":
-                    options.ScreenDemo = true;
+                case "--supermarket-selftest":
+                    options.SupermarketSelfTest = true;
                     break;
                 case "--build-ui-theme":
                     options.BuildUiTheme = true;
@@ -1066,76 +948,6 @@ public sealed class LaunchOptions
                 case "--parent-managed":
                     options.ParentManaged = true;
                     break;
-                case "--net-probe-at":
-                    if (double.TryParse(Next(args, ref i), NumberStyles.Float, CultureInfo.InvariantCulture, out double probeAt) && probeAt >= 0)
-                        options.NetProbeAtSec = probeAt;
-                    break;
-                // --- CORE-PROG-A1 playthrough-spine test hooks ---
-                case "--flow-timers":
-                {
-                    string[] parts = Next(args, ref i).Split(',');
-                    if (parts.Length >= 3
-                        && double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out double fIntro) && fIntro > 0
-                        && double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out double fTally) && fTally > 0
-                        && double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out double fLobby) && fLobby > 0)
-                    {
-                        options.FlowIntroSec = fIntro;
-                        options.FlowTallySec = fTally;
-                        options.FlowLobbySec = fLobby;
-                    }
-                    break;
-                }
-                case "--quota-early":
-                {
-                    string[] parts = Next(args, ref i).Split(',');
-                    var demands = new List<int>();
-                    foreach (string part in parts)
-                        if (int.TryParse(part.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int d) && d > 0)
-                            demands.Add(d);
-                    if (demands.Count > 0)
-                        options.QuotaEarlyOverride = demands.ToArray();
-                    break;
-                }
-                case "--quota-bank-at":
-                {
-                    string[] parts = Next(args, ref i).Split(',');
-                    if (parts.Length >= 3
-                        && double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out double qAt) && qAt >= 0
-                        && int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out int qUnits) && qUnits > 0
-                        && int.TryParse(parts[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out int qIdx) && qIdx >= 0)
-                    {
-                        options.QuotaBankAt.Add((qAt, qUnits, qIdx));
-                    }
-                    break;
-                }
-                case "--flow-ready-at":
-                    if (double.TryParse(Next(args, ref i), NumberStyles.Float, CultureInfo.InvariantCulture, out double fReady) && fReady >= 0)
-                        options.FlowReadyAtSec.Add(fReady);
-                    break;
-                case "--flow-play-again-at":
-                    if (double.TryParse(Next(args, ref i), NumberStyles.Float, CultureInfo.InvariantCulture, out double fAgain) && fAgain >= 0)
-                        options.FlowPlayAgainAtSec = fAgain;
-                    break;
-                case "--flow-selftest":
-                    options.FlowSelfTest = true;
-                    break;
-                case "--flashlight-at":
-                    if (double.TryParse(Next(args, ref i), NumberStyles.Float, CultureInfo.InvariantCulture, out double flashAt) && flashAt >= 0)
-                        options.FlashlightAtSec.Add(flashAt);
-                    break;
-                case "--honk-at":
-                    if (double.TryParse(Next(args, ref i), NumberStyles.Float, CultureInfo.InvariantCulture, out double honkAt) && honkAt >= 0)
-                        options.HonkAtSec.Add(honkAt);
-                    break;
-                case "--honk-forge":
-                    if (double.TryParse(Next(args, ref i), NumberStyles.Float, CultureInfo.InvariantCulture, out double honkForge) && honkForge >= 0)
-                        options.HonkForgeAtSec = honkForge;
-                    break;
-                case "--honk-flood":
-                    if (double.TryParse(Next(args, ref i), NumberStyles.Float, CultureInfo.InvariantCulture, out double honkFlood) && honkFlood >= 0)
-                        options.HonkFloodAtSec = honkFlood;
-                    break;
-                // --- end CORE-PROG-A1 ---
                 case "--cycle-period":
                     if (double.TryParse(Next(args, ref i), NumberStyles.Float, CultureInfo.InvariantCulture, out double cyclePeriod) && cyclePeriod > 0)
                         options.CyclePeriodSec = cyclePeriod;
@@ -1349,34 +1161,6 @@ public sealed class LaunchOptions
                             AvatarVisual.MinBodyValueRampStrength,
                             AvatarVisual.MaxBodyValueRampStrength);
                     break;
-                // --- BT-0 (2026-08-27 Bubble Test) -----------------------------------------
-                case "--bubbletest-selftest":
-                    options.BubbleTestSelfTest = true;
-                    break;
-                case "--tvportal-selftest":
-                    options.TvPortalSelfTest = true;
-                    break;
-                // --- EGG-1 (the Puffin Lab throwback) --------------------------------------
-                case "--puffinlab-selftest":
-                    options.PuffinLabSelfTest = true;
-                    break;
-                // --- BT-6 (the bubble, the pop, and one shared counter) ---------------------
-                case "--bubble-selftest":
-                    options.BubbleSelfTest = true;
-                    break;
-                case "--bubble-reset-at":
-                    if (double.TryParse(Next(args, ref i), NumberStyles.Float, CultureInfo.InvariantCulture, out double bReset) && bReset >= 0)
-                        options.BubbleResetAtSec = bReset;
-                    break;
-                // --- CELEBRATE-1 (the last bubble, and the level noticing) ------------------
-                case "--bubble-pop-all-at":
-                    if (double.TryParse(Next(args, ref i), NumberStyles.Float, CultureInfo.InvariantCulture, out double bPopAll) && bPopAll >= 0)
-                        options.BubblePopAllAtSec = bPopAll;
-                    break;
-                case "--celebrate-force":
-                    options.CelebrateForce = true;
-                    break;
-                // --- end BT-6 --------------------------------------------------------------
                 case "--graphics":
                 {
                     string want = Next(args, ref i).Trim().ToLowerInvariant();

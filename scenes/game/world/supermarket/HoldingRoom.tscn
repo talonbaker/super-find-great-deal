@@ -1,0 +1,128 @@
+[gd_scene load_steps=9 format=3]
+
+; BASE-1 (2026-09-19) — THE HOLDING ROOM. 10 x 10 x 3.5 m interior box: floor, four walls,
+; ceiling, one light, four spawn markers. Every session starts here and every late joiner lands
+; here, so SupermarketWorld.SpawnPoints is exactly this room's markers.
+;
+; AUTHORED, NOT BUILT. Nothing in this level is constructed in code
+; (.claude/rules/godot-scenes.md; Talon, 2026-08-27). SupermarketWorldSelfTest counts this file's
+; PACKED nodes against the same scene's LIVE nodes and fails on any difference, so a later lane
+; that adds a bench in _Ready turns the suite red rather than passing review.
+;
+; GEOMETRY CONVENTION, the same in all three rooms so they can be read against each other:
+;   - the interior floor surface is y = 0 and the ceiling's underside is y = 3.5;
+;   - slabs and walls are 0.4 m thick and overlap at the corners (10.8 = 10 + 2 x 0.4), so there
+;     is no hairline seam for a fast body to squeeze through;
+;   - every StaticBody3D carries one BoxShape3D and one BoxMesh of the SAME size. Collision and
+;     render being one number is what stops a wall you can see through and a wall you cannot.
+;
+; THE TINT IS FUNCTIONAL. Each room is a different flat grey so a capture, a bug report or a
+; playtest video says which room it was taken in without a caption. Do not unify them.
+
+[sub_resource type="StandardMaterial3D" id="Mat_floor"]
+resource_name = "holding room floor (cool grey)"
+albedo_color = Color(0.34, 0.36, 0.4, 1)
+roughness = 0.9
+
+[sub_resource type="StandardMaterial3D" id="Mat_wall"]
+resource_name = "holding room walls (cool grey)"
+albedo_color = Color(0.46, 0.48, 0.52, 1)
+roughness = 0.95
+
+[sub_resource type="BoxMesh" id="BoxMesh_slab"]
+size = Vector3(10.8, 0.4, 10.8)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_slab"]
+size = Vector3(10.8, 0.4, 10.8)
+
+[sub_resource type="BoxMesh" id="BoxMesh_wall_x"]
+size = Vector3(0.4, 3.5, 10.8)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_wall_x"]
+size = Vector3(0.4, 3.5, 10.8)
+
+[sub_resource type="BoxMesh" id="BoxMesh_wall_z"]
+size = Vector3(10.8, 3.5, 0.4)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_wall_z"]
+size = Vector3(10.8, 3.5, 0.4)
+
+[node name="HoldingRoom" type="Node3D"]
+
+[node name="Floor" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.2, 0)
+
+[node name="Collision" type="CollisionShape3D" parent="Floor"]
+shape = SubResource("BoxShape3D_slab")
+
+[node name="Mesh" type="MeshInstance3D" parent="Floor"]
+mesh = SubResource("BoxMesh_slab")
+surface_material_override/0 = SubResource("Mat_floor")
+
+[node name="Ceiling" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3.7, 0)
+
+[node name="Collision" type="CollisionShape3D" parent="Ceiling"]
+shape = SubResource("BoxShape3D_slab")
+
+[node name="Mesh" type="MeshInstance3D" parent="Ceiling"]
+mesh = SubResource("BoxMesh_slab")
+surface_material_override/0 = SubResource("Mat_wall")
+
+[node name="WallXPos" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5.2, 1.75, 0)
+
+[node name="Collision" type="CollisionShape3D" parent="WallXPos"]
+shape = SubResource("BoxShape3D_wall_x")
+
+[node name="Mesh" type="MeshInstance3D" parent="WallXPos"]
+mesh = SubResource("BoxMesh_wall_x")
+surface_material_override/0 = SubResource("Mat_wall")
+
+[node name="WallXNeg" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5.2, 1.75, 0)
+
+[node name="Collision" type="CollisionShape3D" parent="WallXNeg"]
+shape = SubResource("BoxShape3D_wall_x")
+
+[node name="Mesh" type="MeshInstance3D" parent="WallXNeg"]
+mesh = SubResource("BoxMesh_wall_x")
+surface_material_override/0 = SubResource("Mat_wall")
+
+[node name="WallZPos" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.75, 5.2)
+
+[node name="Collision" type="CollisionShape3D" parent="WallZPos"]
+shape = SubResource("BoxShape3D_wall_z")
+
+[node name="Mesh" type="MeshInstance3D" parent="WallZPos"]
+mesh = SubResource("BoxMesh_wall_z")
+surface_material_override/0 = SubResource("Mat_wall")
+
+[node name="WallZNeg" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.75, -5.2)
+
+[node name="Collision" type="CollisionShape3D" parent="WallZNeg"]
+shape = SubResource("BoxShape3D_wall_z")
+
+[node name="Mesh" type="MeshInstance3D" parent="WallZNeg"]
+mesh = SubResource("BoxMesh_wall_z")
+surface_material_override/0 = SubResource("Mat_wall")
+
+[node name="RoomLight" type="OmniLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3, 0)
+light_energy = 2.2
+omni_range = 16.0
+shadow_enabled = false
+
+[node name="HoldingSpawn_0" type="Marker3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.5, 1.1, -2.5)
+
+[node name="HoldingSpawn_1" type="Marker3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.5, 1.1, -2.5)
+
+[node name="HoldingSpawn_2" type="Marker3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.5, 1.1, 2.5)
+
+[node name="HoldingSpawn_3" type="Marker3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.5, 1.1, 2.5)

@@ -59,10 +59,10 @@ public partial class Telemetry : Node
         _active = true;
         _sessionStartMsec = Time.GetTicksMsec();
 
-        // LD-2: the cadence clock (stop-seconds, research §A2-R3) is fed from the local body by a
-        // small node created on demand; a real client session is one of its two customers (the
-        // other is bubbletest's --bt-perf-readout), so it is created here and read once at quit.
-        Sail.Game.World.CadenceTracker.Ensure();
+        // (LD-2's cadence tracker - stop-seconds per level section - was created here. It read
+        // the old level's section layout to decide which section a stop happened in, so it went
+        // with that level at the fork; CadenceClock, the engine-free half, is still in
+        // scripts/game/world/ for whoever wants the measure back.)
 
         // Own an HTTPRequest for sends and a top CanvasLayer for the prompts.
         var request = new HttpRequest { UseThreads = false };
@@ -107,21 +107,18 @@ public partial class Telemetry : Node
     public void NotePropGrabbed()
     {
         _propsGrabbed++;
-        Sail.Game.World.CadenceTracker.Instance?.Clock.NoteAct("grab");
     }
 
     /// <summary>The local player threw a prop (feeds props_thrown — local actions only).</summary>
     public void NotePropThrown()
     {
         _propsThrown++;
-        Sail.Game.World.CadenceTracker.Instance?.Clock.NoteAct("throw");
     }
 
     /// <summary>The local player dropped a prop (feeds props_dropped — local actions only).</summary>
     public void NotePropDropped()
     {
         _propsDropped++;
-        Sail.Game.World.CadenceTracker.Instance?.Clock.NoteAct("drop");
     }
 
     // --- Boot-time prompts -------------------------------------------------------
@@ -236,16 +233,11 @@ public partial class Telemetry : Node
             NetworkManager.SessionRole.Client => "join",
             _ => "practice",
         };
-        // LD-2: session totals off the cadence clock, rounded to a tenth — the readout's
-        // resolution, and nothing finer is a measurement. Zeros and an empty split when the
-        // tracker never existed (it always does on this path; the null-guard is for shape).
-        var clock = Sail.Game.World.CadenceTracker.Instance?.Clock;
+        // LD-2's per-section stop-seconds split went with the cadence tracker (see the note in
+        // Configure). An empty dictionary is what this payload has always sent when the tracker
+        // did not exist, so the schema is unchanged and no reader has to learn a new shape.
+        Sail.Game.World.CadenceClock? clock = null;
         var bySection = new Godot.Collections.Dictionary();
-        if (clock != null)
-        {
-            foreach (var pair in clock.StopSecondsBySection)
-                bySection[pair.Key] = Tenths(pair.Value);
-        }
         return TelemetryPayload.BuildUsage(elapsedSec, role, net.Options.Transport, _peakPlayers, _voiceUsed,
             _propsGrabbed, _propsThrown, _propsDropped,
             Tenths(clock?.StopSecondsTotal ?? 0), Tenths(clock?.StopSecondsPerMinuteSession ?? 0), bySection);

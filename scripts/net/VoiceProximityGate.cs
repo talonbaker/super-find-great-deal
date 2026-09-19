@@ -70,18 +70,25 @@ public static class VoiceProximityGate
     /// already ships and that nobody needs a level to evaluate.</para>
     ///
     /// <para><b>Pure and static on purpose</b> — no Godot state, no <c>NetworkManager</c> — so
-    /// <c>tests/unit</c> can assert both arms without a runtime, which is what BT-0 acceptance
-    /// criterion 8 ("enabled when the world is bubbletest and not otherwise") actually needs.
+    /// <c>tests/unit</c> can assert both arms without a runtime ("enabled when the world is the
+    /// supermarket and not otherwise").
     /// It is a per-world <i>default</i>, not a lock: <c>--voice-gate on|off</c> still wins,
     /// because that flag writes <see cref="Enabled"/> and an explicit write beats the default
     /// (see the setter).</para>
     ///
     /// <para><b>This does NOT reverse the stance the class doc describes for the game at
-    /// large.</b> <see cref="EnabledByDefault"/> is still <c>false</c>, and every shipped world
-    /// except the Bubble Test still relays everything to everyone. Flipping the stance for the
-    /// whole game remains Talon's call and remains one edit to that constant.</para></summary>
+    /// large.</b> <see cref="EnabledByDefault"/> is still <c>false</c>, and the CI scaffolding
+    /// worlds still relay everything to everyone. Flipping the stance for the whole game remains
+    /// Talon's call and remains one edit to that constant.</para>
+    ///
+    /// <para><b>On by default for the supermarket (BASE-1, 2026-09-19)</b>, because this level's
+    /// geometry is built around it: the three rooms are 40 m apart and the proximity cutoff is
+    /// 24 m, so an ungated relay would let a hider hear the seeker through two solid walls and
+    /// the whole round would be over. VOICE-1 owns the other half of the answer — the cross-room
+    /// PA/intercom route — and it must read the same per-talker resolver on the server that the
+    /// client does, or the PA is silently muted here.</para></summary>
     public static bool DefaultForWorld(string worldId) =>
-        EnabledByDefault || worldId == Sail.Game.World.BubbleTest.BubbleTestLayout.WorldId;
+        EnabledByDefault || worldId == Game.World.SupermarketWorld.WorldId;
 
     /// <summary>What the relay actually reads. Resolved from <see cref="DefaultForWorld"/> against
     /// the world this process was launched with, unless something has written it explicitly

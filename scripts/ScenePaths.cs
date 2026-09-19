@@ -20,9 +20,9 @@ public static class ScenePaths
     public const string Gameplay = "res://scenes/game/Gameplay.tscn";
     public const string NetworkedAvatar = "res://scenes/game/NetworkedAvatar.tscn";
 
-    // BT-0 (2026-08-27): the Bubble Test playtest level — the only world the MVP extraction kept. A seam file — it instances seven section
-    // scenes and authors no geometry of its own (program D3); BT-1..5 and BT-10 each replace one
-    // section's contents, keeping the file name and root type. TANGLE-1 (2026-08-29) added the
-    // seventh, Tangle.tscn, as a new file rather than by replacing one — the count moved with it.
-    public const string BubbleTest = "res://scenes/game/world/bubbletest/BubbleTest.tscn";
+    // BASE-1 (2026-09-19): the three rooms the game is played in, and the only world that is not
+    // CI scaffolding. A seam file — it instances the three room scenes and authors no geometry of
+    // its own, so each room has one owner and one file and a later lane changes a room by opening
+    // that room.
+    public const string Supermarket = "res://scenes/game/world/supermarket/Supermarket.tscn";
 }

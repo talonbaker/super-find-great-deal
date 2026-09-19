@@ -153,13 +153,11 @@ public sealed class LocalServerHost : IDisposable
         // parent about what a name means.
         if (cycle.CycleFreeze)
             psi.ArgumentList.Add("--cycle-freeze");
-        // CORE-INT-1: the flow/quota server hooks ride the same only-when-set forwarding as
-        // the cycle flags above, for the same reason — passed to the process a human
-        // launches they reach only the client half and silently do nothing. Until the
-        // drop-off verb exists, --quota-bank-at is the only way a hosted prototype session
-        // can bank at all (QuotaLedger.ServerBank has no other caller), so Play-Prototype's
-        // demo schedule has to reach this child or dawn 1 is always a loss.
-        cycle.AppendFlowServerFlagsTo(psi.ArgumentList);
+        // (The flow/quota server hooks that rode the same only-when-set forwarding as the cycle
+        // flags above went with the quota spine at the fork - BASE-1, 2026-09-19. The rule they
+        // were here for still binds: a server-side flag passed to the process a HUMAN launches
+        // reaches only the client half and silently does nothing, so anything the server must see
+        // is appended here or it does not exist.)
 
         // --authored-clips is DELIBERATELY NOT forwarded (ANIM-M3), for the same reason
         // --night-brightness is not: this child is launched --headless and renders nothing, so

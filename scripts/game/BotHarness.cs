@@ -96,11 +96,6 @@ public partial class BotHarness : Node
         }
         MaybeCapture();
         MaybeCaptureAtTick();
-        MaybeSendFlowRequests();
-        MaybeToggleFlashlight();
-        MaybeHonk();
-        MaybeForgeHonk();
-        MaybeFloodHonk();
         if (MaybeFinishAfterHolding())
             return;
         if (_elapsed >= _options.DurationSec)
@@ -142,164 +137,20 @@ public partial class BotHarness : Node
         return true;
     }
 
-    // NIGHT-2 (--flashlight-at): scripted flashlight toggles over the real wire. Same elapsed-clock
-    // idiom as --capture-at and --flow-ready-at, and it goes through
-    // FlashlightManager.ClientRequestToggle — the SAME method the F key calls — so a capture taken
-    // between two marks is evidence about the shipped verb rather than about a capture-only hook.
-    // No-op cost when the flag was not passed.
-    private readonly HashSet<int> _flashlightFired = new();
-
-    private void MaybeToggleFlashlight()
-    {
-        if (_options.FlashlightAtSec.Count == 0)
-            return;
-        if (Light.FlashlightManager.Instance is not { } flashlight)
-            return;
-        for (int i = 0; i < _options.FlashlightAtSec.Count; i++)
-        {
-            if (_elapsed >= _options.FlashlightAtSec[i] && _flashlightFired.Add(i))
-            {
-                GD.Print($"[bot] {_options.DisplayName} toggling flashlight at {_elapsed:F1}s " +
-                         $"(lit peers before: {flashlight.LitCount})");
-                flashlight.ClientRequestToggle();
-            }
-        }
-    }
-
-    // HONK-1 (--honk-at): scripted honk presses over the real wire. Same elapsed-clock idiom as
-    // --flashlight-at above, and for the same reason: it goes through
-    // HonkManager.ClientRequestHonk — the SAME method the H key calls — so what a suite proves is
-    // the shipped verb rather than a test-only hook.
+    // THE SCRIPTED-VERB PROBES THAT USED TO LIVE HERE went with their systems at the fork
+    // (BASE-1, 2026-09-19): --flashlight-at, --honk-at, --honk-forge, --honk-flood and the
+    // --flow-ready-at / --flow-play-again-at flow requests. Two things about their SHAPE are
+    // worth copying when BTN-1 and ROUND-1 script their own presses, because both were learned
+    // the hard way and neither is obvious:
     //
-    // The mash case is expressed as several marks a few hundredths of a second apart rather than
-    // as a "spam for N seconds" flag, deliberately: the suite then quotes an EXACT number of
-    // presses ("6 presses inside 0.5 s produced 1 honk"), and a count the runner typed is a count
-    // it can assert against, where a duration would only let it assert an inequality.
-    private readonly HashSet<int> _honkFired = new();
-
-    private void MaybeHonk()
-    {
-        if (_options.HonkAtSec.Count == 0)
-            return;
-        if (Honk.HonkManager.Instance is not { } honk)
-            return;
-        for (int i = 0; i < _options.HonkAtSec.Count; i++)
-        {
-            if (_elapsed >= _options.HonkAtSec[i] && _honkFired.Add(i))
-            {
-                bool sent = honk.ClientRequestHonk();
-                GD.Print($"[bot] {_options.DisplayName} honk press #{i} at {_elapsed:F3}s " +
-                         $"(request {(sent ? "sent" : "suppressed by the local cooldown copy")})");
-            }
-        }
-    }
-
-    // HONK-1 (--honk-forge): the forgery probe. Fires the honk BROADCAST rpc from this CLIENT
-    // straight at every other peer, naming a peer id that is not this bot's — the attack
-    // HonkManager's doc claims RpcMode.Authority makes impossible. It exists so that claim is a
-    // measured fact rather than a reading of an attribute: the suite asserts the victim's
-    // received AND heard counters for the claimed id both stay at zero.
-    private bool _honkForged;
-
-    private void MaybeForgeHonk()
-    {
-        if (_options.HonkForgeAtSec < 0 || _honkForged || _elapsed < _options.HonkForgeAtSec)
-            return;
-        if (Honk.HonkManager.Instance is not { } honk)
-            return;
-        // Peer ids come from the replicated player list, NOT from Multiplayer.GetPeers(). Measured
-        // the hard way: on an ENet CLIENT, GetPeers() returns only the server (id 1), so the
-        // original spelling of this loop attempted zero forgeries and the suite's forgery check
-        // passed vacuously — it stayed green with RpcMode.Authority deliberately downgraded to
-        // AnyPeer. An attacker has the same list this does (they can see everyone's avatar), so
-        // this is also the more honest model of the attack.
-        List<(int Id, string Name)> targets = Voice.VoiceManager.Instance.GetRemotePlayers();
-        _honkForged = true;
-        int self = (int)Multiplayer.GetUniqueId();
-        int attempts = 0;
-        foreach ((int target, string _) in targets)
-        {
-            // Two lies in each call: aimed client->client (routed past the server's own authority)
-            // and claiming a honker id that is not this peer's.
-            //
-            // The two claimed ids are chosen so a landed forgery is UNAMBIGUOUS: this bot's own id
-            // and the victim's own id both belong to peers that never legitimately honk in this
-            // suite, so any nonzero count against either of them can only have come from here.
-            // Claiming the real honker's id would land in the same counter its real honks land in
-            // and be unassertable.
-            honk.TestForgeHonk(target, self);
-            honk.TestForgeHonk(target, target);
-            attempts += 2;
-        }
-        GD.Print($"[bot] {_options.DisplayName} FORGED {attempts} honk broadcasts at {_elapsed:F2}s " +
-                 $"across {targets.Count} remote peers (client->client, claiming other peers' ids)");
-    }
-
-    // HONK-1 (--honk-flood): the "modified client" probe. For HonkFloodDurationSec from the mark,
-    // ask the server for a honk EVERY FRAME with the client-side cooldown copy bypassed. The
-    // shipped path cannot reach the server's own latch — a real masher is stopped locally first —
-    // so without this the authoritative half of the anti-spam rule is an unexercised branch.
-    // Precedent and reasoning: --voice-flood, and HonkManager.TestRawRequest's doc.
-
-    /// <summary>How long <c>--honk-flood</c> hammers for. Two seconds is three-and-a-bit cooldowns:
-    /// long enough that the granted count is a rate rather than an accident of timing, short enough
-    /// that it does not dominate a suite's runtime.</summary>
-    public const double HonkFloodDurationSec = 2.0;
-
-    private int _honkFloodSent;
-    private bool _honkFloodReported;
-
-    private void MaybeFloodHonk()
-    {
-        if (_options.HonkFloodAtSec < 0 || _elapsed < _options.HonkFloodAtSec)
-            return;
-        if (Honk.HonkManager.Instance is not { } honk)
-            return;
-        if (_elapsed < _options.HonkFloodAtSec + HonkFloodDurationSec)
-        {
-            honk.TestRawRequest();
-            _honkFloodSent++;
-            return;
-        }
-        if (_honkFloodReported)
-            return;
-        _honkFloodReported = true;
-        // The window AND the server's cooldown are printed, not just the count, so the runner can
-        // DERIVE its ceiling instead of typing one beside a constant that lives here. Raising
-        // HonkFloodDurationSec would otherwise turn a legitimate result into a false red blaming
-        // the server (.claude/rules/test-suite.md, "derive bot lifetimes from the schedule").
-        GD.Print($"[bot] {_options.DisplayName} honk flood: {_honkFloodSent} raw requests " +
-                 $"over {HonkFloodDurationSec:F2}s window against a " +
-                 $"{Honk.HonkConfig.CooldownSec:F2}s server cooldown (client cooldown bypassed)");
-    }
-
-    // CORE-PROG-A1 (--flow-ready-at / --flow-play-again-at): scripted client→server flow
-    // requests over the real wire — RequestReadyAdvance marks may land in-state (exercising
-    // the all-ready skip) or out-of-state (exercising the server's silent stale-echo drop,
-    // spec §3.3); the Play Again mark drives T10 from a real remote peer. Same elapsed-clock
-    // idiom as --capture-at above. No-op cost when neither flag was passed.
-    private readonly HashSet<int> _flowReadyFired = new();
-    private bool _flowPlayAgainSent;
-
-    private void MaybeSendFlowRequests()
-    {
-        if (Sail.Game.Run.PlaythroughDriver.Instance is not { } flow)
-            return;
-        for (int i = 0; i < _options.FlowReadyAtSec.Count; i++)
-        {
-            if (_elapsed >= _options.FlowReadyAtSec[i] && _flowReadyFired.Add(i))
-            {
-                GD.Print($"[bot] {_options.DisplayName} sending RequestReadyAdvance at {_elapsed:F1}s");
-                flow.SendReadyAdvance();
-            }
-        }
-        if (_options.FlowPlayAgainAtSec >= 0 && !_flowPlayAgainSent && _elapsed >= _options.FlowPlayAgainAtSec)
-        {
-            _flowPlayAgainSent = true;
-            GD.Print($"[bot] {_options.DisplayName} sending RequestPlayAgain at {_elapsed:F1}s");
-            flow.SendPlayAgain();
-        }
-    }
+    //   - Drive the SHIPPED verb, not a test-only hook. The scripted presses went through the
+    //     same method the key calls, which is what made a capture taken between two marks
+    //     evidence about the game rather than about the harness.
+    //   - To test a rule the server enforces and the client mirrors, you need a deliberately
+    //     NON-COMPLIANT client. The honk flood existed because seven scripted presses through the
+    //     shipped verb produced two honks and the server logged nothing at all: the local
+    //     courtesy latch suppressed the extras before a packet left the machine, so the suite was
+    //     proving the copy while the authoritative rule had never executed once.
 
     /// <summary>Fires the next due --capture-at mark, at most one per frame. Skipped entirely
     /// when --capture-dir is unset (every CI run), and a no-op under --headless, where there is
@@ -563,86 +414,13 @@ public partial class BotHarness : Node
         List<PhaseEventSample> runHistory = RunDriver.Instance != null
             ? new List<PhaseEventSample>(RunDriver.Instance.History)
             : new List<PhaseEventSample>();
-        // L11 (Issue #114) instrumentation: LoopUiTelemetry mirrors the actual (non-headless-only)
-        // UI's own dismiss/toast/summary decisions off the SAME pure functions the real UI uses —
-        // see that class's doc. Present on every peer including a bot (unlike the real CanvasLayer
-        // UI), so a headless run can prove the loading overlay never strands, exactly which phase
-        // toasts fired and in what order, and the summary/reset lifecycle, without a windowed
-        // client. Null only if this peer's Gameplay somehow never wired one in (never in practice —
-        // see the unconditional AddChild in Gameplay._Ready) — defaulted defensively rather than
-        // risking a NullReferenceException taking down the whole bot process mid-run.
-        bool loopUiOverlayDismissed = LoopUiTelemetry.Instance?.OverlayDismissed ?? false;
-        List<byte> loopUiToasts = LoopUiTelemetry.Instance != null
-            ? new List<byte>(LoopUiTelemetry.Instance.ToastsFired)
-            : new List<byte>();
-        bool loopUiSummaryShown = LoopUiTelemetry.Instance?.SummaryShown ?? false;
-        int loopUiResetCount = LoopUiTelemetry.Instance?.ResetCount ?? 0;
-        // CORE-PROG-A1 flow/quota instrumentation: this peer's own converged view of the
-        // playthrough state machine and the quota ledger, polled the same style as the
-        // run/cycle fields above (no subscription-timing race). flowSynced=false must never be
-        // mistaken for "the playthrough really is in Boot" and quotaSynced=false must never be
-        // mistaken for "nothing is banked yet" — both zero defaults are true-sounding wrong
-        // answers, the same discipline as cycleSynced/runSynced above.
-        // FlowTransitions is LoopUiTelemetry's applied-transition mirror ("from>to@round"),
-        // which is what lets Run-FlowTest.ps1 assert the exact transition sequence per peer
-        // rather than inferring it from sampled states that can skip a short-lived one.
-        var flowDriver = Sail.Game.Run.PlaythroughDriver.Instance;
-        int flowState = (int)(flowDriver?.State ?? Sail.Game.Run.PlaythroughState.Boot);
-        int flowRound = flowDriver?.Round ?? 0;
-        bool flowSynced = flowDriver?.Synced ?? false;
-        double flowRemainingSec = flowDriver?.StateRemainingSec ?? -1;
-        int flowOutcomeKind = flowDriver?.LastOutcome is { } flowOutcome ? (int)flowOutcome.Kind : -1;
-        List<string> flowTransitions = LoopUiTelemetry.Instance != null
-            ? new List<string>(LoopUiTelemetry.Instance.FlowTransitions)
-            : new List<string>();
-        var quota = Sail.Game.Run.QuotaLedger.Instance;
-        bool quotaSynced = quota?.Synced ?? false;
-        int quotaBanked = quota?.CumulativeBanked ?? 0;
-        int quotaBankedRound = quota?.BankedThisRound ?? 0;
-        int quotaDemandRound = quota?.DemandCurrentRound ?? 0;
-        int quotaCumDemand = quota?.CumulativeDemand ?? 0;
-        int quotaLastDenial = (int)(quota?.LastDenial ?? Sail.Game.Run.QuotaLedger.QuotaDenial.None);
-        // BT-6 bubble instrumentation. Null on every launch without --bubble-selftest and in any
-        // world with no BubbleCounter, which is what keeps every other suite's JSONL byte-identical.
-        //
-        // FIVE FIELDS, and they are five on purpose: "the peers agree" is worth
-        // nothing from one number every peer could have arrived at alone. Count is the replicated
-        // tally, Popped is this peer's own bitset, Hidden is read off the actual scene nodes, and
-        // the three are told by different mechanisms — a peer whose count matches while a bubble
-        // is still rendering has a bug the tally alone cannot see. Synced separates "agrees with
-        // the server" from "has not heard from the server yet", which is the whole late-join
-        // assertion. MaxOffset is acceptance criterion 6's measured quantity.
-        BubbleSample? bubble = null;
-        if (Sail.Game.Bubble.BubbleCounter.Instance is { } bubbleCounter)
-        {
-            var hidden = new List<int>();
-            foreach (Node node in GetTree().GetNodesInGroup(Sail.Game.Bubble.Bubble.Group))
-            {
-                if (node is Sail.Game.Bubble.Bubble b && b.Popped && b.Id >= 0)
-                    hidden.Add(b.Id);
-            }
-            hidden.Sort();
-            bubble = new BubbleSample(
-                bubbleCounter.Synced, bubbleCounter.Count, bubbleCounter.PoppedIds(), hidden,
-                bubbleCounter.BubbleCount,
-                Sail.Game.Bubble.BubbleSelfTest.Instance?.MaxOffsetM ?? 0f,
-                bubbleCounter.CurrentEmissionEnergy,
-                Sail.Game.Bubble.BubbleCelebration.Received,
-                Sail.Game.Bubble.BubbleCelebration.Celebrated);
-        }
         var sample = new Sample(Time.GetTicksMsec(),
             System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), // cross-process comparable
             Multiplayer.GetUniqueId(), peers, props,
             Voice.VoiceManager.Instance.GetReceiveCounts(),
             avatarCount, _propManager.RuntimePropCount, dupNames, heldPropId, colorIdx,
             cyclePhase, cyclesElapsed, cycleSynced,
-            runCycles, runEnded, runSynced, runHistory, entities,
-            loopUiOverlayDismissed, loopUiToasts, loopUiSummaryShown, loopUiResetCount,
-            flowState, flowRound, flowSynced, flowRemainingSec, flowOutcomeKind, flowTransitions,
-            quotaSynced, quotaBanked, quotaBankedRound, quotaDemandRound, quotaCumDemand, quotaLastDenial,
-            bubble,
-            Honk.HonkManager.Instance?.GetHeardCounts(),
-            Honk.HonkManager.Instance?.GetReceivedCounts());
+            runCycles, runEnded, runSynced, runHistory, entities);
         string line = JsonSerializer.Serialize(sample, JsonOptions);
         if (_writer != null)
         {
@@ -677,52 +455,13 @@ public partial class BotHarness : Node
         int AvatarCount, int PropCount, List<string> DupNames, int HeldPropId, int ColorIdx,
         float CyclePhase, int CyclesElapsed, bool CycleSynced,
         int RunCycles, bool RunEnded, bool RunSynced, List<PhaseEventSample> RunHistory,
-        List<EntitySample> Entities,
-        // L11 (Issue #114): see the computation site in WriteSample for what each field proves.
-        // LoopUiToasts is PhaseEventKind values (byte) in firing order, only the ones that
-        // produced a toast line (DawnToDay is deliberately excluded — see PhaseToastText).
-        bool LoopUiOverlayDismissed, List<byte> LoopUiToasts, bool LoopUiSummaryShown, int LoopUiResetCount,
-        // CORE-PROG-A1 playthrough-flow + quota instrumentation — see the computation site in
-        // WriteSample for what each field proves. FlowState is a PlaythroughState ordinal,
-        // FlowOutcomeKind a RunOutcomeKind ordinal (-1 = no latched outcome), FlowTransitions
-        // the applied "from>to@round" sequence, QuotaLastDenial a QuotaDenial ordinal.
-        int FlowState, int FlowRound, bool FlowSynced, double FlowRemainingSec,
-        int FlowOutcomeKind, List<string> FlowTransitions,
-        bool QuotaSynced, int QuotaBanked, int QuotaBankedRound, int QuotaDemandRound,
-        int QuotaCumDemand, int QuotaLastDenial,
-        // BT-6 bubble instrumentation. Null outside --bubble-selftest / a world with no
-        // BubbleCounter — see the computation site in WriteSample for what each field proves.
-        BubbleSample? Bubble,
-        // HONK-1 instrumentation. Null in a scene with no HonkManager — which is a null in the
-        // JSON, not an absent key: JsonOptions is JsonSerializerDefaults.Web, which sets camelCase
-        // but NOT DefaultIgnoreCondition, so every bot log in the repo now carries
-        // "honkHeard":null,"honkReceived":null. Nothing compares JSONL bytes today (the only
-        // Get-FileHash in tests/ hashes generator output), and Bubble above is already in the same
-        // position — but a future schema check would need to know. TWO maps, and that is the whole
-        // point: HonkHeard counts
-        // the honks this peer PLAYED and HonkReceived the messages that ARRIVED. A far peer with
-        // received > 0 and heard == 0 proves the range rule culled it; received == 0 alone would
-        // equally be a broken wire, so one map could not tell the two apart. Both are keyed by the
-        // HONKER's peer id, as strings, for JSON.
-        Dictionary<string, long>? HonkHeard = null, Dictionary<string, long>? HonkReceived = null);
-
-    /// <summary>This peer's converged view of the shared bubble tally (BT-6). Popped is the
-    /// bitset's own answer; Hidden is read off the scene nodes; Adopted is how many bubbles this
-    /// peer's own AdoptAuthoredBubbles found (a peer that adopted a different number has an id
-    /// space that cannot be compared at all, so it is worth knowing before any other assertion is
-    /// believed). MaxOffset is the worst distance any bubble has sat from its authored position
-    /// on this peer, and Glow the emission energy currently written to the shared film.
-    ///
-    /// <para>CELEBRATE-1 adds the last two, and they are TWO for exactly the reason
-    /// <c>HonkHeard</c>/<c>HonkReceived</c> above are two: <c>CelebrateReceived</c> counts the
-    /// completion broadcasts that ARRIVED on this peer and <c>CelebratePlayed</c> the ones its
-    /// human-input gate let through. A bot with <c>received &gt; 0</c> and <c>played == 0</c>
-    /// proves the GATE culled it; <c>received == 0</c> alone would equally be a broken wire, and
-    /// one number could not tell the two apart. The suite's whole bot-gate assertion is that
-    /// pair.</para></summary>
-    private sealed record BubbleSample(bool Synced, int Count, List<int> Popped, List<int> Hidden,
-        int Adopted, float MaxOffset, float Glow,
-        long CelebrateReceived = 0, long CelebratePlayed = 0);
+        // (The LoopUi / playthrough-flow / quota / bubble / honk columns were dropped with
+        // their systems at the fork - BASE-1, 2026-09-19. What every one of them had in common is
+        // the reason to copy the pattern rather than the fields: each recorded a SYNCED flag
+        // beside its numbers, because "0 banked" and "has not heard from the server yet" are the
+        // same bytes and the second is a true-sounding wrong answer. Anything ROUND-1 samples
+        // here needs its own synced flag for that reason.)
+        List<EntitySample> Entities);
 
     // One server-simulated NetworkedEntity as this peer sees it: name, rendered position, and the
     // peak per-frame render step since the last sample (teleport frames excluded — see the

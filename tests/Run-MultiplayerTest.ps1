@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Fully automated multiplayer replication test for Watis World.
+    Fully automated multiplayer replication test for Super Find Great Deal.
 
 .DESCRIPTION
     Builds the project, launches one headless dedicated server and N headless bot
@@ -62,7 +62,7 @@ New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 # --- Build & import ----------------------------------------------------------
 if (-not $SkipBuild) {
     Write-Host "[1/5] dotnet build..." -ForegroundColor Cyan
-    dotnet build (Join-Path $root "WatisWorld.csproj") --nologo -v quiet
+    dotnet build (Join-Path $root "SuperFindGreatDeal.csproj") --nologo -v quiet
     if ($LASTEXITCODE -ne 0) { Fail "dotnet build failed (exit $LASTEXITCODE)" }
 
     Write-Host "[2/5] godot --import..." -ForegroundColor Cyan

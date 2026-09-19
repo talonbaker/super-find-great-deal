@@ -779,10 +779,15 @@ public partial class SandboxSelfTest : Node3D
     /// exact intent source a bot is driven by, the runtime that would do the writing is never
     /// built.</para>
     ///
-    /// <para><b>Both directions, in one place.</b> The absence check ("a bot builds none") is worth
-    /// nothing without the positive control immediately beside it ("a person's avatar builds one"),
-    /// because a gate wired to <c>false</c> would satisfy the first alone. The human arm uses the
-    /// real <c>LocalInputIntentSource</c>, not a stand-in — and
+    /// <para><b>The achievement runtime itself was pruned at the fork (BASE-1, 2026-09-19); the
+    /// GATE outlived it</b>, because the hazard is about <c>user://</c> and not about
+    /// achievements. What this measures now is <c>IsHumanDriven</c>, the seam the runtime was
+    /// gated on and the one every future per-player persisted fact must gate on.</para>
+    ///
+    /// <para><b>Both directions, in one place.</b> The absence check ("a bot is not a person") is
+    /// worth nothing without the positive control immediately beside it, because a gate wired to
+    /// <c>false</c> would satisfy the first alone. The human arm uses the real
+    /// <c>LocalInputIntentSource</c>, not a stand-in — and
     /// <c>BotAchievementGateTests.OnlyLocalInputClaimsToBeHumanInput</c> pins that it is the only
     /// class in the assembly that may claim to be one.</para>
     /// </summary>
@@ -797,7 +802,6 @@ public partial class SandboxSelfTest : Node3D
             new DeterministicWalkIntentSource(botBody, 6.0), raiseAtSec: 2.0, lowerAtSec: 6.0);
         botBody.ConfigureAsNetworked(isOwner: true, source: scripted);
         await Ticks(2);
-        Check("achievements_scripted_bot_tracks_nothing", !botBody.TracksAchievements);
 
         // THE POSITIVE CONTROL. Same method, same owner role, same tick — the ONLY difference is
         // that a person is driving. The camera is constructed but never attached: this source only
@@ -810,31 +814,24 @@ public partial class SandboxSelfTest : Node3D
         await Ticks(2);
         playerBody.ConfigureAsNetworked(isOwner: true, source: human);
         await Ticks(2);
-        Check("achievements_real_player_still_tracks", playerBody.TracksAchievements);
 
-        // A REMOTE PROXY never tracks, whoever is driving the body it mirrors — unchanged by W7-8
-        // and pinned here so the new gate cannot be read as the only thing holding it up.
+        // A REMOTE PROXY is never a person, whoever is driving the body it mirrors — pinned here
+        // so the bot arm cannot be read as the only thing holding the gate up.
         var proxyBody = new SandboxAvatar { Name = "9003", Position = new Vector3(132, 1, 132) };
         AddChild(proxyBody);
         await Ticks(2);
         proxyBody.ConfigureAsNetworked(isOwner: false, source: null);
         await Ticks(2);
-        Check("achievements_remote_proxy_tracks_nothing", !proxyBody.TracksAchievements);
 
-        // CELEBRATE-1 (2026-09-04): the all-bubbles celebration asks the SAME question through the
-        // SAME seam, so it is measured here rather than in a parallel self-test that could drift
-        // away from this one. Three arms, same three bodies, and the middle one is the positive
-        // control: without it, a gate wired to false would satisfy the two absence checks alone.
-        Check("celebrate_scripted_bot_is_not_a_person", !botBody.IsHumanDriven);
-        Check("celebrate_real_player_is_a_person", playerBody.IsHumanDriven);
-        Check("celebrate_remote_proxy_is_not_a_person", !proxyBody.IsHumanDriven);
-        // And the pure decision the gate actually makes, both directions. ForceForTest is the
-        // suite's own override (--celebrate-force) and must be the ONLY thing that can open the
-        // gate for a body nobody is driving.
-        Check("celebrate_gate_refuses_without_a_person",
-            !Sail.Game.Bubble.BubbleCelebration.ShouldCelebrate(humanPresent: false, forced: false));
-        Check("celebrate_gate_opens_for_a_person",
-            Sail.Game.Bubble.BubbleCelebration.ShouldCelebrate(humanPresent: true, forced: false));
+        // THREE ARMS, and the middle one is the positive control: without it, a gate wired to
+        // false would satisfy the two absence checks alone.
+        Check("human_gate_scripted_bot_is_not_a_person", !botBody.IsHumanDriven);
+        Check("human_gate_real_player_is_a_person", playerBody.IsHumanDriven);
+        Check("human_gate_remote_proxy_is_not_a_person", !proxyBody.IsHumanDriven);
+        // (The pure gate decision this used to assert both directions of belonged to the
+        // all-bubbles celebration and went with it at the fork - BASE-1, 2026-09-19. The three
+        // IsHumanDriven checks above are what survived, and they are the load-bearing half: they
+        // are the seam every future per-player persisted fact has to gate on.)
 
         botBody.QueueFree();
         playerBody.QueueFree();

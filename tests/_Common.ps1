@@ -39,7 +39,7 @@ function Reset-LogDir {
 
 function Invoke-BuildAndImport {
     Write-Host "  building godot project..." -ForegroundColor DarkGray
-    dotnet build (Join-Path $script:Root "WatisWorld.csproj") --nologo -v quiet | Out-Null
+    dotnet build (Join-Path $script:Root "SuperFindGreatDeal.csproj") --nologo -v quiet | Out-Null
     if ($LASTEXITCODE -ne 0) { Write-Fail "dotnet build (game) failed" }
     Write-Host "  godot import..." -ForegroundColor DarkGray
     & $script:GodotExe --headless --path $script:Root --import | Out-Null

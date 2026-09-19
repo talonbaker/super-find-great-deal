@@ -185,7 +185,7 @@ public class UiNoBespokeStylingTests
     private static string FindRepoRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WatisWorld.csproj")))
+        while (dir != null && !File.Exists(Path.Combine(dir.FullName, "SuperFindGreatDeal.csproj")))
             dir = dir.Parent;
         Assert.NotNull(dir);
         return dir!.FullName;

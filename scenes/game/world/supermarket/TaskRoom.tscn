@@ -1,0 +1,201 @@
+[gd_scene load_steps=15 format=3]
+
+; BASE-1 (2026-09-19) — THE TASK ROOM. 10 x 10 x 3.5 m interior box, same construction as
+; HoldingRoom.tscn (read that file's header for the convention and for why nothing here may be
+; built in code), PLUS a 3 x 3 x 3.5 m vestibule attached to the +Z wall.
+;
+; THE VESTIBULE IS WHERE THE SEEKER LANDS AND "WallZPos" IS THE DOOR THAT IS NOT A DOOR YET.
+; The seeker is teleported into the vestibule on the Found tick, already facing in, and the wall
+; between them and the hiders bursts open. Today that wall is solid: DOOR-1 replaces THIS node —
+; the main room's +Z wall, the one the Vestibule_0 marker faces — with the burst door. It is
+; deliberately a full wall rather than a doorway with a leaf hung in it, because a hider who can
+; see a gap has already been told where the ending comes from, and the whole beat is that the
+; instant is unknowable.
+;
+; The vestibule is sealed on its other three sides and has its own dimmer light, so a hider in
+; the main room sees nothing of it even for the frames between the teleport and the burst.
+
+[sub_resource type="StandardMaterial3D" id="Mat_floor"]
+resource_name = "task room floor (warm grey)"
+albedo_color = Color(0.38, 0.33, 0.3, 1)
+roughness = 0.9
+
+[sub_resource type="StandardMaterial3D" id="Mat_wall"]
+resource_name = "task room walls (warm grey)"
+albedo_color = Color(0.54, 0.47, 0.42, 1)
+roughness = 0.95
+
+[sub_resource type="BoxMesh" id="BoxMesh_slab"]
+size = Vector3(10.8, 0.4, 10.8)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_slab"]
+size = Vector3(10.8, 0.4, 10.8)
+
+[sub_resource type="BoxMesh" id="BoxMesh_wall_x"]
+size = Vector3(0.4, 3.5, 10.8)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_wall_x"]
+size = Vector3(0.4, 3.5, 10.8)
+
+[sub_resource type="BoxMesh" id="BoxMesh_wall_z"]
+size = Vector3(10.8, 3.5, 0.4)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_wall_z"]
+size = Vector3(10.8, 3.5, 0.4)
+
+[sub_resource type="BoxMesh" id="BoxMesh_vest_slab"]
+size = Vector3(3.8, 0.4, 3.4)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_vest_slab"]
+size = Vector3(3.8, 0.4, 3.4)
+
+[sub_resource type="BoxMesh" id="BoxMesh_vest_wall_x"]
+size = Vector3(0.4, 3.5, 3.4)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_vest_wall_x"]
+size = Vector3(0.4, 3.5, 3.4)
+
+[sub_resource type="BoxMesh" id="BoxMesh_vest_wall_z"]
+size = Vector3(3.8, 3.5, 0.4)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_vest_wall_z"]
+size = Vector3(3.8, 3.5, 0.4)
+
+[node name="TaskRoom" type="Node3D"]
+
+[node name="Floor" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.2, 0)
+
+[node name="Collision" type="CollisionShape3D" parent="Floor"]
+shape = SubResource("BoxShape3D_slab")
+
+[node name="Mesh" type="MeshInstance3D" parent="Floor"]
+mesh = SubResource("BoxMesh_slab")
+surface_material_override/0 = SubResource("Mat_floor")
+
+[node name="Ceiling" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3.7, 0)
+
+[node name="Collision" type="CollisionShape3D" parent="Ceiling"]
+shape = SubResource("BoxShape3D_slab")
+
+[node name="Mesh" type="MeshInstance3D" parent="Ceiling"]
+mesh = SubResource("BoxMesh_slab")
+surface_material_override/0 = SubResource("Mat_wall")
+
+[node name="WallXPos" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5.2, 1.75, 0)
+
+[node name="Collision" type="CollisionShape3D" parent="WallXPos"]
+shape = SubResource("BoxShape3D_wall_x")
+
+[node name="Mesh" type="MeshInstance3D" parent="WallXPos"]
+mesh = SubResource("BoxMesh_wall_x")
+surface_material_override/0 = SubResource("Mat_wall")
+
+[node name="WallXNeg" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5.2, 1.75, 0)
+
+[node name="Collision" type="CollisionShape3D" parent="WallXNeg"]
+shape = SubResource("BoxShape3D_wall_x")
+
+[node name="Mesh" type="MeshInstance3D" parent="WallXNeg"]
+mesh = SubResource("BoxMesh_wall_x")
+surface_material_override/0 = SubResource("Mat_wall")
+
+[node name="WallZPos" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.75, 5.2)
+
+[node name="Collision" type="CollisionShape3D" parent="WallZPos"]
+shape = SubResource("BoxShape3D_wall_z")
+
+[node name="Mesh" type="MeshInstance3D" parent="WallZPos"]
+mesh = SubResource("BoxMesh_wall_z")
+surface_material_override/0 = SubResource("Mat_wall")
+
+[node name="WallZNeg" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.75, -5.2)
+
+[node name="Collision" type="CollisionShape3D" parent="WallZNeg"]
+shape = SubResource("BoxShape3D_wall_z")
+
+[node name="Mesh" type="MeshInstance3D" parent="WallZNeg"]
+mesh = SubResource("BoxMesh_wall_z")
+surface_material_override/0 = SubResource("Mat_wall")
+
+[node name="RoomLight" type="OmniLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3, 0)
+light_energy = 2.2
+omni_range = 16.0
+shadow_enabled = false
+
+[node name="TaskSpawn_0" type="Marker3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.5, 1.1, -2.5)
+
+[node name="TaskSpawn_1" type="Marker3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.5, 1.1, -2.5)
+
+[node name="TaskSpawn_2" type="Marker3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.5, 1.1, 2.5)
+
+[node name="TaskSpawn_3" type="Marker3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.5, 1.1, 2.5)
+
+[node name="VestibuleFloor" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.2, 7.1)
+
+[node name="Collision" type="CollisionShape3D" parent="VestibuleFloor"]
+shape = SubResource("BoxShape3D_vest_slab")
+
+[node name="Mesh" type="MeshInstance3D" parent="VestibuleFloor"]
+mesh = SubResource("BoxMesh_vest_slab")
+surface_material_override/0 = SubResource("Mat_floor")
+
+[node name="VestibuleCeiling" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3.7, 7.1)
+
+[node name="Collision" type="CollisionShape3D" parent="VestibuleCeiling"]
+shape = SubResource("BoxShape3D_vest_slab")
+
+[node name="Mesh" type="MeshInstance3D" parent="VestibuleCeiling"]
+mesh = SubResource("BoxMesh_vest_slab")
+surface_material_override/0 = SubResource("Mat_wall")
+
+[node name="VestibuleWallXPos" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.7, 1.75, 7.1)
+
+[node name="Collision" type="CollisionShape3D" parent="VestibuleWallXPos"]
+shape = SubResource("BoxShape3D_vest_wall_x")
+
+[node name="Mesh" type="MeshInstance3D" parent="VestibuleWallXPos"]
+mesh = SubResource("BoxMesh_vest_wall_x")
+surface_material_override/0 = SubResource("Mat_wall")
+
+[node name="VestibuleWallXNeg" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.7, 1.75, 7.1)
+
+[node name="Collision" type="CollisionShape3D" parent="VestibuleWallXNeg"]
+shape = SubResource("BoxShape3D_vest_wall_x")
+
+[node name="Mesh" type="MeshInstance3D" parent="VestibuleWallXNeg"]
+mesh = SubResource("BoxMesh_vest_wall_x")
+surface_material_override/0 = SubResource("Mat_wall")
+
+[node name="VestibuleWallZPos" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.75, 8.6)
+
+[node name="Collision" type="CollisionShape3D" parent="VestibuleWallZPos"]
+shape = SubResource("BoxShape3D_vest_wall_z")
+
+[node name="Mesh" type="MeshInstance3D" parent="VestibuleWallZPos"]
+mesh = SubResource("BoxMesh_vest_wall_z")
+surface_material_override/0 = SubResource("Mat_wall")
+
+[node name="VestibuleLight" type="OmniLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3, 6.9)
+light_energy = 1.1
+omni_range = 6.0
+shadow_enabled = false
+
+[node name="Vestibule_0" type="Marker3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.1, 6.9)

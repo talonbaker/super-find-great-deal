@@ -75,7 +75,7 @@ public class UiThemeCoverageTests
     private static string ProjectThemePath()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WatisWorld.csproj")))
+        while (dir != null && !File.Exists(Path.Combine(dir.FullName, "SuperFindGreatDeal.csproj")))
             dir = dir.Parent;
         Assert.NotNull(dir);
 

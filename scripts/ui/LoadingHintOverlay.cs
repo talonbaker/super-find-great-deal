@@ -60,7 +60,11 @@ public partial class LoadingHintOverlay : CanvasLayer
     /// <c>FlowScreens.Attach</c>, this overlay has exactly ONE construction site (Gameplay's
     /// client-UI block), so there is no lab or capture rig that could be handed the wrong answer
     /// by <c>LaunchOptions.DefaultWorld</c>. See that constant's trap note.</para></summary>
-    private static bool ShowHint => Sail.Game.Run.WorldRunFlow.Current;
+    /// <para><b>False everywhere today.</b> It used to read <c>WorldRunFlow.Current</c>, the
+    /// quota spine's "does this world run a scored playthrough" flag, which went with that spine
+    /// at the fork (BASE-1, 2026-09-19). No world here has wood or a night job, so the hint line
+    /// is still untrue and still not shown - the same answer, minus a system.</para></summary>
+    private static bool ShowHint => false;
 
     // The ASCII camp-map diagram that used to sit above the hint was REMOVED here
     // (CORE-PROG-B1, Talon's standing ruling on the garbled loading text). Root cause,

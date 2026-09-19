@@ -427,7 +427,14 @@ public static class WaterGeometry
     /// client alike, before any avatar exists — so it is still a world constant from the motor's
     /// point of view and a reconciliation replay still resolves the identical depth the live step
     /// did.</para></summary>
-    public static LakeFootprint[] ActiveWaters { get; set; } = { CampLake };
+    /// <para><b>Empty by default since BASE-1 (2026-09-19).</b> Super Find Great Deal has no
+    /// water, and this used to default to <see cref="CampLake"/> — a box reaching from x = −150
+    /// to x = −45 — so a room authored anywhere inside that box would have had players wading and
+    /// then swimming through the floor with no lake rendered and no service running. An empty
+    /// array makes <see cref="DepthAt(Vector3)"/> answer −1 everywhere and the motor resolve
+    /// <see cref="WaterState.Dry"/> forever, which is the truth here. The footprints above are
+    /// kept only so the arithmetic this file is tested on still has named inputs.</para></summary>
+    public static LakeFootprint[] ActiveWaters { get; set; } = System.Array.Empty<LakeFootprint>();
 
     /// <summary>The lake a world id gets — the FIRST of its bodies. Kept for callers that mean
     /// "the named lake of this world" (the bubble test's self-test measures its disc against the
@@ -443,10 +450,11 @@ public static class WaterGeometry
     /// <para><b>Order is not arbitrary:</b> the named lake is first, because
     /// <see cref="ActiveLake"/> reads index 0 and every diagnostic that prints "the lake" means
     /// that one.</para></summary>
-    public static LakeFootprint[] WatersForWorld(string? worldId) =>
-        worldId == BubbleTestWorldId
-            ? new[] { BubbleTestLake, BluePrecisionMoat }
-            : new[] { CampLake };
+    /// <para><b>No world in this repo has water (BASE-1, 2026-09-19)</b>, so every id answers
+    /// "nothing". Kept as the one place a pond would be added rather than deleted, for the same
+    /// reason the doc above gives: a silent inheritance of somebody else's shoreline is the
+    /// failure mode.</para></summary>
+    public static LakeFootprint[] WatersForWorld(string? worldId) => System.Array.Empty<LakeFootprint>();
 
     /// <summary>Mirrors <c>BubbleTestLayout.WorldId</c>, for the reason
     /// <see cref="BubbleTestLakeCentreX"/> gives: the water contract does not depend on a

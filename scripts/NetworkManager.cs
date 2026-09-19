@@ -570,13 +570,12 @@ public partial class NetworkManager : Node
         if (Options.CycleFreeze)
             psi.ArgumentList.Add("--cycle-freeze");
         // CORE-INT-1: the flow/quota hooks are SERVER-side flags with the exact trap the
-        // cycle comment above describes — given to the process a human launches they reach
-        // only the client half, are silently accepted, and do nothing. The prototype smoke
-        // needs --quota-bank-at on the CHILD: QuotaLedger.ServerBank is the only banking
-        // path until the drop-off verb exists, so without forwarding, every practice
-        // playthrough is an unavoidable loss at dawn 1. Forwarded only when explicitly set,
-        // so an ordinary Practice launch builds a child command line identical to before.
-        Options.AppendFlowServerFlagsTo(psi.ArgumentList);
+        // (The flow/quota server hooks that were forwarded here went with the quota spine at
+        // the fork - BASE-1, 2026-09-19. THE FORWARDING ITSELF IS THE THING TO REMEMBER: this
+        // server is a CHILD PROCESS, so any server-side test hook ROUND-1 adds must be appended
+        // to this command line or it reaches only the client half of the launch, is silently
+        // accepted, and does nothing. Forward only when explicitly set, so an ordinary Practice
+        // launch keeps building the same child command line it always did.)
 
         var process = new System.Diagnostics.Process { StartInfo = psi };
         try

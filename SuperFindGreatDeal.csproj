@@ -2,7 +2,7 @@
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <EnableDynamicLoading>true</EnableDynamicLoading>
-    <AssemblyName>WatisWorld</AssemblyName>
+    <AssemblyName>SuperFindGreatDeal</AssemblyName>
     <RootNamespace>MpFoundation</RootNamespace>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
