@@ -10,15 +10,30 @@ namespace MpFoundation.Game.Round;
 /// measured.</summary>
 public readonly record struct HideSeekWireScore(int PeerId, byte Score);
 
-/// <summary>The frozen card on the wire. Gains are bytes (display values, clamped); the round
-/// index and both identities are not.</summary>
+/// <summary>
+/// The frozen card on the wire. Gains and totals are bytes (display values, clamped); the round
+/// index, the match index and every identity are not.
+///
+/// <para><b>MATCH-1's five fields ride here rather than being recomputed on each client.</b> The
+/// match result is a FROZEN fact about a round that has already finished, and the client's own
+/// copy of <c>HideSeekTuning</c> is not the server's — deriving "did that end a match" or "who
+/// won" locally is the same class of mistake as reading the live <c>Round</c> for a card's own
+/// round index, which is what <see cref="HideSeekTally.RoundIndex"/> already exists to prevent.
+/// Five fields, four of them a byte or a bool, on a message that is only sent when something
+/// changes.</para>
+/// </summary>
 public readonly record struct HideSeekWireTally(
     int RoundIndex,
     int HiderPeerId,
     byte HiderGained,
     int SeekerPeerId,
     byte SeekerGained,
-    bool EndedByDisconnect);
+    bool EndedByDisconnect,
+    bool MatchOver = false,
+    int MatchIndex = 0,
+    int WinnerPeerId = 0,
+    byte HiderTotal = 0,
+    byte SeekerTotal = 0);
 
 /// <summary>
 /// <b>The replicated round message.</b> One absolute value per fact, on
@@ -49,6 +64,14 @@ public readonly record struct HideSeekWireTally(
 /// raised its <c>Found</c> event with a locally invented tick would be lying about the one number
 /// the startle hangs on. <see cref="HideSeekState.Tick"/> and <c>HidingExtended</c> are not here:
 /// they are server bookkeeping nothing downstream reads.</para>
+///
+/// <para><b>This message has no version constant of its own, deliberately.</b> It is versioned by
+/// the one number a handshake actually compares, <c>NetProfile.ProtocolVersion</c> (15, set by
+/// BASE-1) — a second version living beside the first is two numbers that have to be bumped
+/// together and will not be. MATCH-1 added five fields to <see cref="HideSeekWireTally"/> and did
+/// NOT touch <c>ProtocolVersion</c>: this whole wave ships as one build and the bump, if the wave
+/// wants one, belongs at integration where the wave's total change is visible. Recorded here so
+/// the next lane to widen this message knows which number is the real one.</para>
 /// </summary>
 public readonly record struct HideSeekWire(
     byte Phase,
@@ -94,7 +117,12 @@ public readonly record struct HideSeekWire(
         HideSeekWireTally? tally = s.LastTally is { } card
             ? new HideSeekWireTally(card.RoundIndex, card.HiderPeerId,
                 ClampByte(card.HiderGained), card.SeekerPeerId, ClampByte(card.SeekerGained),
-                card.EndedByDisconnect)
+                card.EndedByDisconnect,
+                MatchOver: card.MatchOver,
+                MatchIndex: card.MatchIndex,
+                WinnerPeerId: card.WinnerPeerId,
+                HiderTotal: ClampByte(card.HiderTotal),
+                SeekerTotal: ClampByte(card.SeekerTotal))
             : null;
 
         return new HideSeekWire(
@@ -129,7 +157,12 @@ public readonly record struct HideSeekWire(
 
         HideSeekTally? tally = wire.Tally is { } t
             ? new HideSeekTally(t.RoundIndex, t.HiderPeerId, t.HiderGained,
-                t.SeekerPeerId, t.SeekerGained, t.EndedByDisconnect)
+                t.SeekerPeerId, t.SeekerGained, t.EndedByDisconnect,
+                MatchOver: t.MatchOver,
+                MatchIndex: t.MatchIndex,
+                WinnerPeerId: t.WinnerPeerId,
+                HiderTotal: t.HiderTotal,
+                SeekerTotal: t.SeekerTotal)
             : null;
 
         return new HideSeekView(
@@ -158,7 +191,8 @@ public readonly record struct HideSeekWire(
     public (byte Phase, int Round, int RemainingTenths, int Hider, int Seeker,
         int[] ScorePeers, int[] ScoreValues, byte Refusal, int Towers, int FoundTick,
         int TallyRound, int TallyHider, int TallyHiderGain, int TallySeeker, int TallySeekerGain,
-        bool TallyByDisconnect) Pack()
+        bool TallyByDisconnect, bool TallyMatchOver, int TallyMatchIndex, int TallyWinner,
+        int TallyHiderTotal, int TallySeekerTotal) Pack()
     {
         ImmutableArray<HideSeekWireScore> rows =
             Scores.IsDefault ? ImmutableArray<HideSeekWireScore>.Empty : Scores;
@@ -174,7 +208,9 @@ public readonly record struct HideSeekWire(
         return (Phase, Round, RemainingTenths, HiderPeerId, SeekerPeerId, peers, values, Refusal,
             TowersCompleted, FoundTick,
             Tally is null ? NoTallyRound : card.RoundIndex, card.HiderPeerId,
-            card.HiderGained, card.SeekerPeerId, card.SeekerGained, card.EndedByDisconnect);
+            card.HiderGained, card.SeekerPeerId, card.SeekerGained, card.EndedByDisconnect,
+            card.MatchOver, card.MatchIndex, card.WinnerPeerId, card.HiderTotal,
+            card.SeekerTotal);
     }
 
     /// <summary>
@@ -241,7 +277,8 @@ public readonly record struct HideSeekWire(
     public static HideSeekWire Unpack(byte phase, int round, int remainingTenths, int hider,
         int seeker, int[]? scorePeers, int[]? scoreValues, byte refusal, int towers, int foundTick,
         int tallyRound, int tallyHider, int tallyHiderGain, int tallySeeker, int tallySeekerGain,
-        bool tallyByDisconnect)
+        bool tallyByDisconnect, bool tallyMatchOver = false, int tallyMatchIndex = 0,
+        int tallyWinner = 0, int tallyHiderTotal = 0, int tallySeekerTotal = 0)
     {
         int[] peers = scorePeers ?? Array.Empty<int>();
         int[] values = scoreValues ?? Array.Empty<int>();
@@ -254,7 +291,12 @@ public readonly record struct HideSeekWire(
         HideSeekWireTally? card = tallyRound == NoTallyRound
             ? null
             : new HideSeekWireTally(tallyRound, tallyHider, ClampByte(tallyHiderGain),
-                tallySeeker, ClampByte(tallySeekerGain), tallyByDisconnect);
+                tallySeeker, ClampByte(tallySeekerGain), tallyByDisconnect,
+                MatchOver: tallyMatchOver,
+                MatchIndex: Math.Max(tallyMatchIndex, 0),
+                WinnerPeerId: tallyWinner,
+                HiderTotal: ClampByte(tallyHiderTotal),
+                SeekerTotal: ClampByte(tallySeekerTotal));
 
         return new HideSeekWire((byte)Math.Clamp((int)phase, 0, (int)HideSeekPhase.Tally),
             ClampUShort(round), ClampUShort(remainingTenths), hider, seeker,

@@ -89,6 +89,31 @@ public partial class HideSeekDriver : Node
     /// <see cref="View"/>.</summary>
     public HideSeekState ServerState => _state;
 
+    /// <summary>The numbers this session was set up with — every phase length, and MATCH-1's
+    /// match size. Exposed read-only because the copy needs it: "ROUND 1 OF 2" and "found at
+    /// 1:12" are both questions about the tuning, and a widget reading
+    /// <see cref="HideSeekTuning.Current"/> instead would be reading a different object from the
+    /// one the driver is stepping the moment anything ever writes to that static.</summary>
+    public HideSeekTuning Tuning => _tuning;
+
+    /// <summary>
+    /// A peer's display name, or empty for a peer with no avatar in the tree. The same lookup
+    /// <c>SessionSummaryProvider.ResolveDisplayName</c> does, against the same Players root this
+    /// driver already holds for the teleports — <b>never invented here</b>, because
+    /// <see cref="HideSeekText.PlayerName"/> owns the fallback and two fallbacks would print two
+    /// different names for one peer.
+    ///
+    /// <para>It is on the DRIVER because the driver is the static-instance seam every round
+    /// renderer already goes through (<c>GameHud</c>'s class doc: "the HUD never reaches into the
+    /// scene tree hunting for a manager"), and because the card names peers whose roles have
+    /// already swapped by the time anything draws it.</para>
+    /// </summary>
+    public string NameOf(int peerId) =>
+        peerId == 0
+            ? string.Empty
+            : _players?.GetNodeOrNull<SandboxAvatar>(peerId.ToString())?.DisplayName
+              ?? string.Empty;
+
     /// <summary>Fires on every peer (server included) exactly once per phase change, in order.
     /// DOOR-1, VOICE-1 and HOLD-1 all code against this.
     ///
@@ -155,7 +180,9 @@ public partial class HideSeekDriver : Node
             }
             GD.Print($"[round] driver ready (server) — hiding {_tuning.HidingSec:0}s "
                      + $"(+{_tuning.HidingGraceSec:0}s grace), seeking {_tuning.SeekingSec:0}s, "
-                     + $"tally {_tuning.TallySec:0}s, channel {NetProfile.RoundChannel}");
+                     + $"tally {_tuning.TallySec:0}s, match {_tuning.MatchRoundsOrFloor} round(s) "
+                     + $"(match tally {_tuning.MatchTallySec:0}s), "
+                     + $"channel {NetProfile.RoundChannel}");
         }
     }
 
@@ -259,7 +286,28 @@ public partial class HideSeekDriver : Node
         switch (to)
         {
             case HideSeekPhase.Hiding:
+                // MATCH-1: the Start that begins a match is the same Start that begins a round,
+                // so the ONE observable difference — the scores going back to zero — is logged
+                // here by name. Without it, "the reset happened" and "nobody had scored yet" are
+                // the same rows in every log this session writes.
+                if (_tuning.IsFirstRoundOfMatch(_state.RoundIndex))
+                    GD.Print($"[round] match {_tuning.MatchIndexOf(_state.RoundIndex)} begins at "
+                             + $"round {_state.RoundIndex} — scores zeroed: {ScoreLine()}");
                 MoveTo(_state.HiderPeerId, SupermarketWorld.SearchRoom, 0);
+                break;
+
+            case HideSeekPhase.Tally:
+                // The card, as one greppable line. MatchOver is the field the whole packet is
+                // about and it is false on every round but the last of a match, which is exactly
+                // the pair a suite has to see to believe either.
+                if (_state.LastTally is { } card)
+                    GD.Print($"[round] card: round {card.RoundIndex} match {card.MatchIndex} "
+                             + $"hider={card.HiderPeerId} +{card.HiderGained} "
+                             + $"seeker={card.SeekerPeerId} +{card.SeekerGained} "
+                             + $"totals {card.HiderTotal}-{card.SeekerTotal} "
+                             + $"matchOver={card.MatchOver} winner={card.WinnerPeerId} "
+                             + $"tally={_state.RemainingSec:0.#}s"
+                             + (card.EndedByDisconnect ? " endedByDisconnect" : string.Empty));
                 break;
             case HideSeekPhase.Seeking:
                 MoveTo(_state.HiderPeerId, SupermarketWorld.TaskRoom, 0);
@@ -278,6 +326,17 @@ public partial class HideSeekDriver : Node
                     MoveTo(_roster[i], SupermarketWorld.HoldingRoom, i);
                 break;
         }
+    }
+
+    /// <summary>The roster's scores as one greppable string, in roster order — the same order and
+    /// the same rows <see cref="HideSeekWire.Encode"/> puts on the wire, so a log line and a
+    /// message can be compared without translating between two orderings.</summary>
+    private string ScoreLine()
+    {
+        var parts = new List<string>(_roster.Count);
+        foreach (int peer in _roster)
+            parts.Add($"{peer}={_state.ScoreOf(peer)}");
+        return parts.Count > 0 ? string.Join(", ", parts) : "(nobody)";
     }
 
     /// <summary>Decides one move and tries it immediately; a refusal is queued rather than
@@ -355,6 +414,8 @@ public partial class HideSeekDriver : Node
         Rpc(MethodName.ApplyRound, p.Phase, p.Round, p.RemainingTenths, p.Hider, p.Seeker,
             p.ScorePeers, p.ScoreValues, p.Refusal, p.Towers, p.FoundTick, p.TallyRound,
             p.TallyHider, p.TallyHiderGain, p.TallySeeker, p.TallySeekerGain, p.TallyByDisconnect,
+            p.TallyMatchOver, p.TallyMatchIndex, p.TallyWinner, p.TallyHiderTotal,
+            p.TallySeekerTotal,
             ++_seq);
     }
 
@@ -373,6 +434,8 @@ public partial class HideSeekDriver : Node
         RpcId(peerId, MethodName.ApplyRound, p.Phase, p.Round, p.RemainingTenths, p.Hider,
             p.Seeker, p.ScorePeers, p.ScoreValues, p.Refusal, p.Towers, p.FoundTick, p.TallyRound,
             p.TallyHider, p.TallyHiderGain, p.TallySeeker, p.TallySeekerGain, p.TallyByDisconnect,
+            p.TallyMatchOver, p.TallyMatchIndex, p.TallyWinner, p.TallyHiderTotal,
+            p.TallySeekerTotal,
             ++_seq);
     }
 
@@ -385,13 +448,15 @@ public partial class HideSeekDriver : Node
     private void ApplyRound(byte phase, int round, int remainingTenths, int hider, int seeker,
         int[] scorePeers, int[] scoreValues, byte refusal, int towers, int foundTick,
         int tallyRound, int tallyHider, int tallyHiderGain, int tallySeeker, int tallySeekerGain,
-        bool tallyByDisconnect, uint seq)
+        bool tallyByDisconnect, bool tallyMatchOver, int tallyMatchIndex, int tallyWinner,
+        int tallyHiderTotal, int tallySeekerTotal, uint seq)
     {
         _ = seq;   // reliable + ordered: no staleness guard is needed (RunDriver's note).
 
         HideSeekWire wire = HideSeekWire.Unpack(phase, round, remainingTenths, hider, seeker,
             scorePeers, scoreValues, refusal, towers, foundTick, tallyRound, tallyHider,
-            tallyHiderGain, tallySeeker, tallySeekerGain, tallyByDisconnect);
+            tallyHiderGain, tallySeeker, tallySeekerGain, tallyByDisconnect,
+            tallyMatchOver, tallyMatchIndex, tallyWinner, tallyHiderTotal, tallySeekerTotal);
 
         bool first = !Synced;
         HideSeekView previous = View;

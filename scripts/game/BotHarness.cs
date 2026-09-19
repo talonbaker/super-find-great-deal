@@ -549,7 +549,9 @@ public partial class BotHarness : Node
             roundView.FoundTick, roundScores,
             roundTally is { } card
                 ? new RoundTallySample(card.RoundIndex, card.HiderPeerId, card.HiderGained,
-                    card.SeekerPeerId, card.SeekerGained, card.EndedByDisconnect)
+                    card.SeekerPeerId, card.SeekerGained, card.EndedByDisconnect,
+                    card.MatchOver, card.MatchIndex, card.WinnerPeerId, card.HiderTotal,
+                    card.SeekerTotal)
                 : null,
             entities, placeDeny);
         string line = JsonSerializer.Serialize(sample, JsonOptions);
@@ -621,8 +623,15 @@ public partial class BotHarness : Node
     // The frozen card as this peer folded it, or null before the first round finishes. Carries
     // its own RoundIndex because the loop's index has already advanced by the time the card
     // exists — see HideSeekTally's doc.
+    // MatchOver / MatchIndex / WinnerPeerId / the two totals are MATCH-1's: a match is
+    // HideSeekTuning.MatchRounds rounds and the card that ends one carries its result. They are
+    // sampled from the CARD rather than recomputed from roundScores here for the reason the card
+    // carries them at all -- the next match's Start zeroes the live scores while this card is
+    // still the last one every peer holds, so a log that derived "who won" from the score map
+    // would start disagreeing with the game one round later.
     private sealed record RoundTallySample(int RoundIndex, int HiderPeerId, int HiderGained,
-        int SeekerPeerId, int SeekerGained, bool EndedByDisconnect);
+        int SeekerPeerId, int SeekerGained, bool EndedByDisconnect,
+        bool MatchOver, int MatchIndex, int WinnerPeerId, int HiderTotal, int SeekerTotal);
 
     // One server-simulated NetworkedEntity as this peer sees it: name, rendered position, and the
     // peak per-frame render step since the last sample (teleport frames excluded — see the
