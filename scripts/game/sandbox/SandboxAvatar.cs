@@ -957,6 +957,9 @@ public partial class SandboxAvatar : CharacterBody3D, IServerConfirmedBody
     private SnapshotBuffer? _snapshots;
     private bool _hasRendered;
     private float _maxRenderStep;
+    // INT-0: commanded-teleport (epoch bump) accounting on the OWNER — see TakeCommandedTeleports.
+    private int _commandedTeleports;
+    private float _lastTeleportJumpM;
 
     /// <summary>
     /// Networked wiring, kept for tests and internal use: the owner predicts + reconciles,
@@ -1763,6 +1766,10 @@ public partial class SandboxAvatar : CharacterBody3D, IServerConfirmedBody
             // teleport lands Lowered on the server BEFORE this snapshot was ever built, so
             // auth.AimStance already reads Lowered here — nothing extra to force.
             _visualError = Vector3.Zero;
+            // INT-0 instrumentation: count the bump where it is actually CONSUMED, not where the
+            // position happens to move a long way. See TakeCommandedTeleports.
+            _commandedTeleports++;
+            _lastTeleportJumpM = LastCorrectionM;
             return;
         }
         // Fold the pop into the render offset; OwnerTick drains it over a few frames.
@@ -2119,6 +2126,27 @@ public partial class SandboxAvatar : CharacterBody3D, IServerConfirmedBody
         float peak = _maxRenderStep;
         _maxRenderStep = 0;
         return peak;
+    }
+
+    /// <summary><b>Commanded teleports this OWNER has applied since the last call, and how far the
+    /// last one moved it</b> (INT-0, 2026-09-19). Take-and-reset, exactly like
+    /// <see cref="TakeMaxRenderStep"/> above and for the same reason: a bot samples at about 5 Hz
+    /// and <c>Reconcile</c> runs at 60, so a "last correction" read at sample time has already
+    /// been overwritten by the ordinary sub-centimetre ones and a teleport leaves no trace in it.
+    ///
+    /// <para>Counted inside <c>Reconcile</c>'s <c>teleported</c> branch — where the epoch bump is
+    /// actually CONSUMED — rather than inferred from a large position delta, which is the
+    /// distinction the count exists to make. A room change that arrived as an ordinary big
+    /// correction rather than as an epoch bump moves the body just as far and reads identically in
+    /// every position log; it is also a body the owner interpolated into rather than snapped to,
+    /// which is the stale-view failure one layer down. Server-sim and offline roles never
+    /// reconcile, so this stays zero on them.</para></summary>
+    public (int Count, float LastJumpM) TakeCommandedTeleports()
+    {
+        var taken = (_commandedTeleports, _lastTeleportJumpM);
+        _commandedTeleports = 0;
+        _lastTeleportJumpM = 0f;
+        return taken;
     }
 
     // --- RPCs (movement rides its own unreliable ENet channel; see NetCodec) ------------

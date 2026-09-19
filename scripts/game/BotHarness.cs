@@ -289,10 +289,19 @@ public partial class BotHarness : Node
                 // last sample (a teleport shows up as a huge step). The reconciliation
                 // and smoothness suites assert on these.
                 float pe = 0, ve = 0, mrs = 0;
+                // INT-0: commanded teleports (epoch bumps) this owner CONSUMED since the last
+                // sample, and how far the last one moved it. Take-and-reset, so it cannot be
+                // missed the way LastCorrectionM is: pe is overwritten by every one of the ~12
+                // ordinary sub-centimetre reconciles between two samples, and a teleport
+                // therefore leaves no trace in it at all. Self only -- a remote proxy does not
+                // reconcile, and its teleports are already excluded from mrs by design.
+                int tp = 0;
+                float tj = 0;
                 if (id == selfId)
                 {
                     pe = player.LastCorrectionM;
                     ve = player.VisualErrorM;
+                    (tp, tj) = player.TakeCommandedTeleports();
                 }
                 else
                 {
@@ -318,7 +327,7 @@ public partial class BotHarness : Node
                 // both arms for EVERYONE, not just its owner" is only checkable if a witness bot can
                 // report what it resolved. Run-ArmfulCarryTest.ps1 asserts on it.
                 peers.Add(new PeerSample(id, player.DisplayName, player.AvatarKey, pos.X, pos.Y, pos.Z, pe, ve, mrs, pa,
-                    (int)player.AimStance, player.AimSteadiness01, (int)player.CarryPoseNow));
+                    (int)player.AimStance, player.AimSteadiness01, (int)player.CarryPoseNow, tp, tj));
             }
         }
         var props = new List<PropSample>();
@@ -392,6 +401,33 @@ public partial class BotHarness : Node
         int colorIdx = avatarsById.TryGetValue(selfId, out SandboxAvatar? selfAvatar)
             ? SandboxAvatar.PaletteIndexFor(selfAvatar.BodyColor)
             : -1;
+        // FIRST-PERSON LENS instrumentation (INT-0, 2026-09-19 -- the FP-1 x ROUND-1 cross-lane
+        // seam). Nothing else in this log can see the camera. `Peers` is a list of AVATAR NODE
+        // positions, and the first-person lens is a CHILD of this peer's own avatar, so a lens
+        // that had gone stale, been unparented, or gone NaN across a ROUND-1 room teleport would
+        // read in `Peers` as a perfectly healthy body standing in the right room. The claim the
+        // cross-lane check has to settle is "the eye went with the body", and `Off` -- the
+        // distance from the avatar's own origin to the lens, which is the eyeline offset and
+        // nothing else -- is the quantity that says so: it must hold its pre-teleport value
+        // through the jump, on the same sample where `Pe` (the owner's last prediction
+        // correction) spikes with the epoch bump.
+        //
+        // Null unless this process actually built a first-person rig (--first-person-cam,
+        // --first-person-selftest, or a human client). A null here is "this bot has no lens",
+        // never "the lens is at the origin" -- the same true-sounding-wrong-answer trap every
+        // Synced flag in this record exists for.
+        LensSample? lens = null;
+        if (avatarsById.TryGetValue(selfId, out SandboxAvatar? lensBody)
+            && lensBody.GetNodeOrNull<Sandbox.FirstPersonCamera>("FirstPersonCamera") is { } fpRig
+            && fpRig.CameraNode is { } fpLens)
+        {
+            Vector3 eye = fpLens.GlobalPosition;
+            Vector3 fwd = -fpLens.GlobalTransform.Basis.Z;
+            Vector3 body = lensBody.GlobalPosition;
+            bool nan = !eye.IsFinite() || !fwd.IsFinite() || !body.IsFinite();
+            lens = new LensSample(eye.X, eye.Y, eye.Z, fwd.X, fwd.Y, fwd.Z,
+                nan ? -1f : body.DistanceTo(eye), fpRig.Yaw, fpRig.Pitch, fpLens.Current, nan);
+        }
         // Cycle-clock instrumentation (CycleDriver): this peer's own converged view of the
         // tidal-loop phase clock. `synced` is what Run-CycleTest.ps1's late-join assertion
         // keys on — a sample logged before the server's first phase delivery lands must read
@@ -439,6 +475,7 @@ public partial class BotHarness : Node
             avatarCount, _propManager.RuntimePropCount, dupNames, heldPropId, colorIdx,
             cyclePhase, cyclesElapsed, cycleSynced,
             runCycles, runEnded, runSynced, runHistory,
+            lens,
             round?.Synced ?? false, (int)roundView.Phase, roundView.Round, roundView.RemainingSec,
             roundView.HiderPeerId, roundView.SeekerPeerId, (int)roundView.Refusal,
             roundView.FoundTick, roundScores,
@@ -481,6 +518,10 @@ public partial class BotHarness : Node
         int AvatarCount, int PropCount, List<string> DupNames, int HeldPropId, int ColorIdx,
         float CyclePhase, int CyclesElapsed, bool CycleSynced,
         int RunCycles, bool RunEnded, bool RunSynced, List<PhaseEventSample> RunHistory,
+        // This peer's own first-person lens (INT-0), or null if this process built none. See the
+        // computation site: it is null rather than zeroed for the same reason every Synced flag
+        // here exists.
+        LensSample? Lens,
         // The hide-seek round (ROUND-1), with its own Synced flag for the reason stated two
         // paragraphs down and at the computation site.
         bool RoundSynced, int RoundPhase, int RoundIndex, float RoundRemaining,
@@ -494,6 +535,19 @@ public partial class BotHarness : Node
         // here needs its own synced flag for that reason.)
         List<EntitySample> Entities);
 
+    // THE FIRST-PERSON LENS, in world space (INT-0, 2026-09-19). X/Y/Z is the lens itself, not the
+    // rig node it hangs off; Dx/Dy/Dz is the direction it faces (-Z of its own basis, which is
+    // Godot's camera-forward convention). Off is |avatar origin -> lens|: the eyeline offset, and
+    // the ONE quantity that discriminates "the camera went with the body through a teleport" from
+    // "the body arrived and the eye stayed behind" -- the avatar positions in Peers[] read
+    // identically under both. Nan is a first-class field rather than an absent sample because a
+    // NaN that silently dropped out of the log would look exactly like a bot that stopped
+    // sampling; when it is true, Off is -1 rather than a NaN that JSON cannot represent anyway.
+    // Current says whether this lens is the one actually rendering (a --spectate-cam bot can own
+    // a second camera; a headless one renders nothing at all and still reports the transform).
+    private sealed record LensSample(float X, float Y, float Z, float Dx, float Dy, float Dz,
+        float Off, float Yaw, float Pitch, bool Current, bool Nan);
+
     // The frozen card as this peer folded it, or null before the first round finishes. Carries
     // its own RoundIndex because the loop's index has already advanced by the time the card
     // exists — see HideSeekTally's doc.
@@ -506,7 +560,11 @@ public partial class BotHarness : Node
     private sealed record EntitySample(string Name, float X, float Y, float Z, float Mrs);
 
     private sealed record PeerSample(long Id, string Name, string AvatarKey, float X, float Y, float Z,
-        float Pe, float Ve, float Mrs, bool Pa, int AimStance, float AimSteadiness01, int CarryPose);
+        float Pe, float Ve, float Mrs, bool Pa, int AimStance, float AimSteadiness01, int CarryPose,
+        // Tp/Tj (INT-0): commanded teleports this OWNER consumed since the last sample, and the
+        // distance the last one moved it. Always 0 on a remote peer's row — see the computation
+        // site for why this is a take-and-reset counter rather than a reading of Pe.
+        int Tp, float Tj);
 
     // One networked prop as this peer sees it: id, kind, current holder (0 = none), position, and
     // — while held — two carry-drift scalars: Off = distance from the holder's carry anchor (the
