@@ -173,12 +173,15 @@ public class SightPresentationTests
     [Fact]
     public void ContractScan_NothingInTheSightPathReadsTheGraphicsTier()
     {
+        // Two files, not the four this scanned before BASE-1 (2026-09-19): the
+        // server-authoritative half (PlayerSightService, PlayerSightTable) was pruned at the fork
+        // and only the pure presentation math is still shipped. The law is unchanged and still
+        // worth scanning for — a graphics tier may not change what anyone can see — and the
+        // positive control below is what proves the scanner still reaches a file at all.
         string[] sightFiles =
         {
             "scripts/game/sight/SightPresentation.cs",
             "scripts/game/sight/PlayerSightCurve.cs",
-            "scripts/game/sight/PlayerSightService.cs",
-            "scripts/game/sight/PlayerSightTable.cs",
         };
 
         foreach (string path in sightFiles)

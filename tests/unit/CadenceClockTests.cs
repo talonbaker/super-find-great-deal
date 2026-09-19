@@ -3,7 +3,6 @@ using Godot;
 using MpFoundation.Game.Sandbox;
 using MpFoundation.Net;
 using Sail.Game.World;
-using Sail.Game.World.BubbleTest;
 using Xunit;
 
 namespace SailNet.Tests;
@@ -289,20 +288,9 @@ public class CadenceClockTests
         Assert.InRange(c.StopSecondsTotal, 5.9, 6.1);
     }
 
-    [Fact]
-    public void CadenceSections_KeyAt_ReadsTheFootprints_AndTheRoomIsNotTheHub()
-    {
-        Assert.Equal("Hub", CadenceSections.KeyAt(BubbleTestLayout.HubAnchor));
-        Assert.Equal("CyanRun", CadenceSections.KeyAt(BubbleTestLayout.CyanAnchor));
-        Assert.Equal("RedCairns", CadenceSections.KeyAt(BubbleTestLayout.RedAnchor));
-        Assert.Equal("BluePrecision", CadenceSections.KeyAt(BubbleTestLayout.BlueAnchor));
-        Assert.Equal("GreenHills", CadenceSections.KeyAt(BubbleTestLayout.GreenAnchor));
-        Assert.Equal("Tangle", CadenceSections.KeyAt(BubbleTestLayout.TangleAnchor));
-        // The TV room sits in plan under the hub, 20 m down; the Y extent tells them apart.
-        Assert.Equal("TvRoom", CadenceSections.KeyAt(BubbleTestLayout.TvRoomAnchor + new Vector3(0, 1, 0)));
-        Assert.Equal("Hub", CadenceSections.KeyAt(BubbleTestLayout.HubAnchor + new Vector3(0, 1, 0)));
-        Assert.Null(CadenceSections.KeyAt(new Vector3(0f, 0f, 400f)));
-    }
+    // (The section-footprint mapping test that stood here read the old level's published anchor
+    // constants, and went with that level at the fork - BASE-1, 2026-09-19. CadenceSections still
+    // has no footprints of its own to check until a world publishes some.)
 
     // =============================================================================================
     // The readout text

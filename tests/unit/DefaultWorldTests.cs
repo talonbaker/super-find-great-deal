@@ -24,15 +24,16 @@ namespace SailNet.Tests;
 /// not execute <c>HostMenu.HostAsync</c> itself (a Godot <c>Control</c> needs a running engine).
 /// What removes the drift risk there is not this file but the shared
 /// <see cref="LaunchOptions.DefaultWorld"/> symbol both sites now use; that the menu path really
-/// reaches the bubble test is evidenced by a headed no-flag launch capture.</para>
+/// reaches the supermarket is evidenced by a headed no-flag launch capture.</para>
 /// </summary>
 public class DefaultWorldTests
 {
-    /// <summary>A LaunchOptions nobody configured builds the bubble test — the MVP's world.</summary>
+    /// <summary>A LaunchOptions nobody configured builds the supermarket — the game's world,
+    /// not the CI scaffolding.</summary>
     [Fact]
-    public void ANamelessLaunchBuildsTheBubbleTest()
+    public void ANamelessLaunchBuildsTheSupermarket()
     {
-        Assert.Equal("bubbletest", LaunchOptions.DefaultWorld);
+        Assert.Equal("supermarket", LaunchOptions.DefaultWorld);
 
         // The zero-argument parse is the real Steam path: no --world anywhere on the line.
         var parsed = LaunchOptions.Parse(new string[0]);

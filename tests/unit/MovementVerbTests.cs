@@ -982,7 +982,11 @@ public class MovementVerbTests
     {
         Assert.Equal(58, NetCodec.SnapshotBytes);
         Assert.Equal(26, NetCodec.InputEntryBytes);
-        Assert.Equal(14, NetProfile.ProtocolVersion);
+        // 15, not the 14 this shipped at: BASE-1 (2026-09-19) spent one bump on the fork itself,
+        // so a Watis World build and a Super Find Great Deal build refuse each other at the
+        // handshake. The two byte counts above are what this test is actually about and neither
+        // moved; this line is here so a future wire change cannot ride in on an unnoticed number.
+        Assert.Equal(15, NetProfile.ProtocolVersion);
 
         // Zero new input bits: every verb is carried by three fields that were already on the wire.
         string[] intentFields = typeof(MoveIntent)

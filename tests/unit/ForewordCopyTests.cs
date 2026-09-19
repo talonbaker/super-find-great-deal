@@ -54,12 +54,13 @@ public class ForewordCopyTests
         + "Love,\n"
         + "Talon.";
 
+    /// <summary>One line, not the three this shipped with. BASE-1 (2026-09-19) removed the
+    /// water line and the bubble line because the fork removed the water and the bubbles, and
+    /// copy that names a mechanic the running world lacks is the defect this repo learned from
+    /// (note 4). They were not reworded — replacements are Talon's to dictate.</summary>
     private static readonly string[] ExpectedNotes =
     {
         "Double tapping a directional key will let you run in that direction.",
-        "Water will kill you if you breath it in. The game is realistic like that.",
-        "The bubbles will also kill you, but I coated the player in a fine dusting of salt which "
-            + "kills the bubbles first. I've included a bubble death counter for your satisfaction.",
     };
 
     // --- the foreword panel --------------------------------------------------------------------
@@ -154,34 +155,30 @@ public class ForewordCopyTests
     // --- GOOD TO KNOW ---------------------------------------------------------------------------
 
     [Fact]
-    public void GoodToKnow_IsTalonsThreeLinesInHisOrder()
+    public void GoodToKnow_IsTalonsSurvivingLine()
     {
         Assert.Equal("GOOD TO KNOW", HowToPlayContent.NotesTitle);
         Assert.Equal(ExpectedNotes, HowToPlayContent.Lines);
     }
 
-    /// <summary>Named separately for the same reason as the foreword fragments: "breath" is one
-    /// keystroke from being corrected, and a failure that says so beats a failure that prints two
-    /// 160-character strings.</summary>
+    /// <summary><b>The removed lines stay removed, and they stay removed for a REASON that is
+    /// not taste.</b> Talon's water line and bubble line were verbatim copy and this file used to
+    /// pin both character-for-character; BASE-1 (2026-09-19) took them out because the fork took
+    /// out the water, the drowning clock and the bubbles, and a HOW TO PLAY screen promising a
+    /// system the build lacks is the exact defect note 4 was written about — at the exact moment
+    /// it costs most, in front of a playtester.
+    ///
+    /// <para>Asserted as an absence over the WHOLE list rather than over an index, because the
+    /// well-meaning restoration would put them back anywhere. If this game ever grows water, the
+    /// line comes back from Talon, not from here.</para></summary>
     [Fact]
-    public void GoodToKnow_KeepsHisSpellingOfBreathe()
+    public void GoodToKnow_DoesNotPromiseTheOldGamesSystems()
     {
-        Assert.Contains("if you breath it in", HowToPlayContent.Lines[1], StringComparison.Ordinal);
-    }
-
-    /// <summary><b>The joke stands, and it is not a claim about an unbuilt feature.</b> Talon,
-    /// 2026-09-04: <i>"About the 'death counter' I'm making a joke about the HUD bubble counter.
-    /// Just a joke you know."</i> The counter it riffs on is <c>Hud.HudBubbleCount</c>, already on
-    /// screen. Pinned because the line reads, to anyone arriving without that quote, exactly like
-    /// copy promising a system the build lacks — and the fix they would reach for is deleting
-    /// Talon's sentence.</summary>
-    [Fact]
-    public void GoodToKnow_KeepsTheBubbleDeathCounterJoke()
-    {
-        Assert.Contains("bubble death counter", HowToPlayContent.Lines[2], StringComparison.Ordinal);
-        Assert.True(File.Exists(Path.Combine(FindRepoRoot(), "scripts", "ui", "hud", "HudBubbleCount.cs")),
-            "The joke's referent — the shipped HUD bubble counter — is gone; the line now promises "
-            + "something that really does not exist. Ask Talon before touching either.");
+        foreach (string line in HowToPlayContent.Lines)
+        {
+            Assert.DoesNotContain("bubble", line, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("breath", line, StringComparison.OrdinalIgnoreCase);
+        }
     }
 
     // --- the WINDOWED display row -----------------------------------------------------------------

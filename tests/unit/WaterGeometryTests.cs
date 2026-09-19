@@ -16,10 +16,28 @@ public class WaterGeometryTests
 
     // --- Depth ---------------------------------------------------------------------------
 
+    /// <summary>Against a NAMED lake, not the active set. Since BASE-1 (2026-09-19) no world
+    /// in this repo has any water and <c>ActiveWaters</c> is empty by default, so the no-argument
+    /// overload correctly answers "dry" everywhere — which is a fact about the game, not about
+    /// this arithmetic. The named-lake overload is the one that tests the maths, and it never
+    /// touches the process-wide static, so it is also the one that is safe under parallel
+    /// xUnit.</summary>
     [Fact]
     public void Depth_IsWaterSurfaceMinusFeet()
     {
-        Assert.Equal(1.42f, WaterGeometry.DepthAt(InLake(-70f, -2f)), precision: 4);
+        Assert.Equal(1.42f, WaterGeometry.DepthAt(InLake(-70f, -2f), WaterGeometry.CampLake),
+            precision: 4);
+    }
+
+    /// <summary><b>And with no active water, everything is dry.</b> The other half of the same
+    /// fact, asserted rather than assumed: an empty <c>ActiveWaters</c> must answer "no water
+    /// here" and not "water everywhere", because the difference between those two readings is a
+    /// player swimming through a supermarket floor.</summary>
+    [Fact]
+    public void WithNoActiveWater_EverywhereIsDry()
+    {
+        Assert.True(WaterGeometry.DepthAt(InLake(-70f, -2f)) <= 0f);
+        Assert.Equal(WaterState.Dry, WaterGeometry.ResolveAt(WaterState.Dry, InLake(-70f, -2f)));
     }
 
     [Fact]
@@ -40,7 +58,8 @@ public class WaterGeometryTests
         // Spec §3.1: bed height at SHORE_X is -0.60 against a surface at -0.58. That 0.02 m is
         // what makes the lateral cut at the shoreline continuous in STATE even though it is a
         // hard edge in geometry.
-        float depth = WaterGeometry.DepthAt(InLake(WaterGeometry.ShoreX, -0.60f));
+        float depth = WaterGeometry.DepthAt(
+            InLake(WaterGeometry.ShoreX, -0.60f), WaterGeometry.CampLake);
         Assert.Equal(0.02f, depth, precision: 4);
         Assert.Equal(WaterState.Dry, WaterGeometry.Resolve(WaterState.Dry, depth));
     }

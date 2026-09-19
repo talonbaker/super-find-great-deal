@@ -15,17 +15,18 @@ namespace MpFoundation.Ui;
 /// written from what the build actually does. <b>His own list surfaced on 2026-09-04, and per that
 /// same standing instruction it has replaced them.</b></para>
 ///
-/// <para><b>The "no mechanic the world lacks" rule is OVERRIDDEN for these lines (Talon,
-/// 2026-09-04).</b> This file used to forbid copy naming a mechanic the current world does not
-/// have — the lesson of note 4, and it still governs anything written here on an agent's own
-/// initiative. Talon's copy is deliberately comic: line 3 promises "a bubble death counter for
-/// your satisfaction", which reads at first like copy inventing a system. <b>It is not.</b> Talon,
-/// 2026-09-04: <i>"About the 'death counter' I'm making a joke about the HUD bubble counter. Just
-/// a joke you know."</i> The counter is <c>Hud.HudBubbleCount</c>, already on screen at the head of
-/// the top-centre column (<c>GameHud</c>, behind the profile's <c>BubbleCount</c> flag) — the gag
-/// is that the visible bubble tally is secretly a body count. <b>Nothing here needs building, and
-/// the rule is not repealed</b> — it is suspended for copy Talon authored himself, dated so the
-/// next reader can tell an override from an accident.</para>
+/// <para><b>TWO OF TALON'S THREE LINES WERE REMOVED AT THE FORK, AND NOT REWORDED (BASE-1,
+/// 2026-09-19).</b> They named water that would kill you and bubbles that would also kill you,
+/// and this game has neither — the water service, the drowning clock and the bubbles were all
+/// pruned. The "no mechanic the world lacks" rule (note 4) is the whole reason: copy that
+/// promises a system the build does not have is the defect, and a screen shown to a playtester
+/// is exactly where it costs the most. The one surviving line is about double-tap-to-run, which
+/// is still true.</para>
+///
+/// <para><b>Nobody may write replacement lines here on an agent's own initiative.</b> The
+/// removed lines were Talon's own words in his own comic register; what replaces them is his to
+/// dictate, the way these were (2026-09-04). Until he does, this screen says one true thing
+/// rather than three charming untrue ones.</para>
 ///
 /// <para><b>What still must NOT go here.</b> A new <i>control</i> ("press X to do Y") belongs in
 /// <see cref="ControlGlyphs.Sections"/>, where it gets a real icon resolved from the real
@@ -33,10 +34,8 @@ namespace MpFoundation.Ui;
 /// and warnings — what no glyph can carry. Line 1 is the exception that proves it: double-tap-to-run
 /// is a *timing*, not a binding, and no glyph can draw it.</para>
 ///
-/// <para><b>Verified against shipped code where it can be.</b> Drowning is real:
-/// <c>RespawnCause.Drowned</c> at <c>Water.WaterGeometry.DrownAfterSec</c> = 3.0 s submerged,
-/// server-adjudicated — line 2 is comic but true. The bubbles killing the player (line 3) and the
-/// salt are flourish, not systems.</para>
+/// <para><b>Verified against shipped code.</b> Double-tap-to-run is a real timing in
+/// <c>AvatarMotor</c>. That is the standard every line here is held to.</para>
 ///
 /// <para><b>What left with the rewrite, deliberately.</b> The five previous lines carried the
 /// objective ("collect all the bubbles", pinned to <see cref="PhaseToastText.BubbleGoalToast"/>),
@@ -54,16 +53,13 @@ public static class HowToPlayContent
     /// <summary>
     /// One paragraph per entry, in reading order. Rendered as wrapped body text.
     ///
-    /// <para><b>Talon's words, 2026-09-04, verbatim — do not edit, reorder or re-spell.</b>
-    /// <c>ForewordCopyTests</c> pins each one character-for-character and fails on any drift.</para>
+    /// <para><b>Talon's words, 2026-09-04, verbatim — do not edit or re-spell.</b>
+    /// <c>ForewordCopyTests</c> pins what is left character-for-character and fails on any drift.
+    /// Two lines were REMOVED at the fork because their subjects no longer exist; see the class
+    /// doc. Removing untrue copy is not the same as rewording his.</para>
     /// </summary>
     public static readonly string[] Lines =
     {
         "Double tapping a directional key will let you run in that direction.",
-
-        "Water will kill you if you breath it in. The game is realistic like that.",
-
-        "The bubbles will also kill you, but I coated the player in a fine dusting of salt which "
-            + "kills the bubbles first. I've included a bubble death counter for your satisfaction.",
     };
 }

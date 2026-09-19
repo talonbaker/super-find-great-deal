@@ -1,6 +1,5 @@
 using Godot;
 using MpFoundation.Net;
-using Sail.Game.World.BubbleTest;
 using Xunit;
 
 namespace SailNet.Tests;
@@ -163,52 +162,16 @@ public class MotorArcTests
     // =============================================================================================
     // 3. The seam: the level reads the motor, not a remembered number.
     // =============================================================================================
-
-    /// <summary>
-    /// <b>Acceptance criterion 5: change one constant, the level's number moves.</b> The assertion
-    /// is not that <c>BubbleTestLayout.SprintRange</c> equals 4.053 — that would be a second
-    /// literal, exactly what MOVE-8 removed — but that it tracks a tuning it was never told about.
-    /// A knob is moved here and the layout's derived value is required to follow it.
-    /// </summary>
-    [Fact]
-    public void TheLayoutsArcIsTheMotorsArc_AndItTracksAChangeToTheTuning()
-    {
-        Assert.Equal(MotorArc.HeldSprint(MotorTuning.Default).ApexM, BubbleTestLayout.SprintApex);
-        Assert.Equal(MotorArc.HeldSprint(MotorTuning.Default).RangeM, BubbleTestLayout.SprintRange);
-        Assert.Equal(MotorArc.JogTap(MotorTuning.Default).ApexM, BubbleTestLayout.TapApex);
-        Assert.Equal(MotorArc.JogTap(MotorTuning.Default).RangeM, BubbleTestLayout.TapRange);
-        Assert.Equal(MotorArc.DoubleJumpAtApex(MotorTuning.Default).ApexM, BubbleTestLayout.DoubleApex);
-        Assert.Equal(MotorArc.DoubleJumpAtApex(MotorTuning.Default).RangeM, BubbleTestLayout.DoubleRange);
-
-        // THE TRACKING PROOF. Halve the ground speed and the flat ranges must halve with it, while
-        // the apexes — which do not depend on horizontal speed at all — must not move a millimetre.
-        // Both halves matter: a "derived" value wired to the wrong row would move when it should
-        // not, and this catches that as readily as it catches one that is still a literal.
-        MotorTuning slower = MotorTuning.Default with { MoveSpeed = MotorTuning.Default.MoveSpeed * 0.5f };
-        Near(0.5f * BubbleTestLayout.SprintRange, MotorArc.HeldSprint(slower).RangeM, Mm,
-            "the held range must halve with the ground speed");
-        Near(0.5f * BubbleTestLayout.TapRange, MotorArc.JogTap(slower).RangeM, Mm,
-            "the tap range must halve with the ground speed");
-        Near(BubbleTestLayout.SprintApex, MotorArc.HeldSprint(slower).ApexM, Mm,
-            "the apex must NOT move with the ground speed");
-
-        // And the other way: raise gravity and the apex must fall while the ranges follow the
-        // shortened airtime.
-        MotorTuning heavier = MotorTuning.Default with { Gravity = MotorTuning.Default.Gravity * 1.5f };
-        Assert.True(MotorArc.HeldSprint(heavier).ApexM < BubbleTestLayout.SprintApex);
-        Assert.True(MotorArc.HeldSprint(heavier).RangeM < BubbleTestLayout.SprintRange);
-    }
-
-    /// <summary><b>The ceiling really is the double jump now.</b> Stated as its own assertion
-    /// because every reachability judgement in the level — and every line of MOVE-8's changed-class
-    /// list — depends on which of the two numbers is the ceiling, and before MOVE-8 the answer was
-    /// the other one.</summary>
-    [Fact]
-    public void TheReachabilityCeilingIsTheDoubleJump_NotTheHeldSprintJump()
-    {
-        Assert.True(BubbleTestLayout.DoubleApex > BubbleTestLayout.SprintApex);
-        Assert.True(BubbleTestLayout.DoubleRange > BubbleTestLayout.SprintRange);
-        Assert.True(BubbleTestLayout.SprintApex > BubbleTestLayout.TapApex);
-        Assert.True(BubbleTestLayout.SprintRange > BubbleTestLayout.TapRange);
-    }
+    //
+    // THE TWO TESTS THAT LIVED HERE ARE GONE WITH THE LEVEL THEY MEASURED (BASE-1, 2026-09-19),
+    // and what they were defending is worth restating before any room in this game is sized by
+    // eye. The old level published its gap widths and ledge heights as constants DERIVED from
+    // MotorArc rather than typed beside it, and these tests proved the derivation by moving a
+    // tuning knob and requiring the level's numbers to follow: halving the ground speed had to
+    // halve the flat ranges and leave the apexes untouched. A second literal is the defect; a
+    // number that moves when it should not is the same defect wearing a derivation.
+    //
+    // The supermarket is three boxes on one floor and has no reachability numbers at all yet, so
+    // there is nothing here to pin. The day a room has a gap, a ledge or a shelf a player is
+    // meant to clear, it reads MotorArc and this section comes back.
 }
