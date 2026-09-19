@@ -40,7 +40,7 @@ scenes/game/Gameplay.tscn            the match; Gameplay.cs is the hub node
 scenes/game/world/supermarket/       the level: a seam file + three room scenes
 scripts/net/                         transport, handshake, snapshots, AvatarMotor, Steam, hosting
 scripts/game/props/, sandbox/feel/   networked carry authority + the hand-held carry feel
-scripts/game/round/                  the engine-free round loop (imported, not yet wired)
+scripts/game/round/                  the hide-seek round: engine-free loop + wire + server driver
 scripts/game/world/                  SupermarketWorld, RoomTeleport, the cycle/audio plumbing
 scripts/ui/                          the design system and every screen
 scripts/voice/, telemetry/, controls/

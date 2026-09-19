@@ -490,3 +490,35 @@ file under `scripts/net/**`, no `CycleDriver`, and no part of the reconnect path
 a rate worth knowing, and an illegal-instruction crash is a different animal from a scheduling
 flake. Whoever picks it up: capture the Windows fault log alongside the bot's stdout, and check
 whether it only ever happens to a bot that has already printed `done`.
+
+## ROUND-1's baseline, and a suite whose red is a DISTANCE (measured 2026-09-19)
+
+`Run-RoundLoopSmoke.ps1` (port 7896) joins the list. It is a server plus two bots on
+`--world supermarket`, driven end to end by `--round-script`, and **its failures are metre
+readings rather than verdicts** — read them the way the carry family's are read.
+
+Baseline on `feat/2026-09-19-round-1`, machine busy (another lane's suite held the mutex
+immediately before):
+
+| Quantity | Value |
+|---|---|
+| worst closest-approach to a server-named destination | **1.10 m** (bar 3 m) |
+| server-decided moves checked against a bot's own log | 6 |
+| phase transitions | 5 (`Holding->Hiding->Seeking->Together->Tally->Holding`) |
+| named refusals the server logged | 1 (`HiderMustHoldAnObject`) |
+| room separations, measured from the destinations the run used | holding↔search 38.08 m, task↔search 42.07 m, holding↔task 80 m, task↔vestibule **9.73 m** |
+
+**The vestibule's 9.73 m is not a red.** It is a 3 × 3 m alcove authored behind the task room's
++Z wall — the far side of the door DOOR-1 bursts — so it is SUPPOSED to be adjacent. The suite's
+20 m separation bar covers the three rooms only; the vestibule has a clearance bar against the
+arrival radius instead. The first run of this suite failed on exactly that and the level was
+right.
+
+**How to read a red here.** A teleport that silently never happens produces closest approaches in
+the TENS of metres (measured, on a deliberately planted fault: 38.08 / 80 / 31.05 / 76.07 m) and
+both bots reported as never having left one room. A number that has crept from 1.1 m to 2.5 m is a
+slow machine; a number in the tens is the thing this suite exists for. The phase, card and score
+assertions stayed green under that same fault, so a red in those is a different animal again.
+
+**`dotnet test` after ROUND-1: Failed: 0, Passed: 1296, Skipped: 0, Total: 1296.** BASE-1's
+baseline was 1254; `RoundLoopTests.cs`'s 30 went with the loop they tested and 72 landed.
