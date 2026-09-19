@@ -88,6 +88,11 @@ try {
         # bots, no network at all -- so its position is free and the rule is what decides it.
         @{ Name = "World: supermarket (BASE-1)";         Script = "Run-SupermarketWorldTest.ps1" }
 
+        # Appended after it, same rule. This one DOES run a server and two bots, on its own port
+        # (7896), so it takes its place at the end of the network suites rather than anywhere
+        # convenient.
+        @{ Name = "Round: hide-seek loop (ROUND-1)";     Script = "Run-RoundLoopSmoke.ps1" }
+
         # WHAT WAS REMOVED HERE AT THE FORK (BASE-1, 2026-09-19), so a reader of an old handoff
         # can tell "deleted" from "lost": the bubble-test world, the shared bubble counter and the
         # last-bubble celebration, the TV portal, the Puffin Lab, the watcher's night gate, the

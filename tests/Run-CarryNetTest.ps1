@@ -60,9 +60,20 @@
     is not launched until the server itself reports C gone. The remaining numbers are ceilings,
     and a ceiling being reached is a real failure rather than a slow machine.
 
-    PHASE 3 was the carry-through-a-TV-portal proof and was REMOVED at the fork (BASE-1,
-    2026-09-19) with the level and the portal host it drove. See the note where it stood, above
-    the summary block: the property is still live and ROUND-1 is where it comes back.
+    PHASE 3 -- A CARRIED PROP SURVIVING ITS HOLDER'S SERVER TELEPORT (world supermarket, one
+    seeded Crate in the holding room). It was the carry-through-a-TV-portal proof, removed at the
+    fork with the level and the portal host it drove, and restored here by ROUND-1 (2026-09-19)
+    because the PROPERTY never went anywhere: a server teleport moves the AVATAR
+    (SandboxAvatar.ServerTeleportTo, reached through RoomTeleport) and says nothing at all about
+    the thing in its hands -- the prop follows only because NetworkedProp.BindToHolder re-derives
+    its transform from the holder's carry anchor every frame. The failures it guards are specific:
+    the prop left standing in the room the player just left, or eaten by Carryable.KillPlaneY on
+    the way.
+
+    The trigger is now the round. Bot P connects first, so it is the first round's HIDER; it picks
+    the crate up and is still holding it when --round-script presses Start, and the Holding ->
+    Hiding transition teleports it 40 m into the search room. The witness W connects second, never
+    grabs anything, and is the only view that can tell a real teleport from a local prediction.
 
     EVERY DETECTOR IS PROVEN TO FIRE, IN THE SAME RUN.
     "A test that has never once failed has not been shown to work" -- and this repo has paid for a
@@ -85,10 +96,11 @@ param(
     # into its own later phases.
     [int]$ContentionPort = 7893,
     [int]$AuthorityPort = 7894,
-    # 7895 was PHASE 3's (the TV-portal carry, removed at the fork). Left unclaimed rather than
-    # handed to something else: ports in tests/ are unique per phase on purpose, and ROUND-1's
-    # teleport phase is the one that wants it back.
-    [ValidateSet("all", "contention", "authority")]
+    # 7895 was PHASE 3's, was left unclaimed at the fork for exactly this, and is claimed back
+    # here: the phase is the same property (a carried prop surviving its holder's server teleport)
+    # driven by the round's phase change instead of by walking into a screen.
+    [int]$TeleportPort = 7895,
+    [ValidateSet("all", "contention", "authority", "teleport")]
     [string]$Phase = "all",
     [switch]$SkipBuild
 )
@@ -301,18 +313,41 @@ function Measure-HoldTracking($Samples, [int]$PropId, [long]$HolderId, [double]$
     return @{ Failures = $f; Checked = $checked; Worst = $worst }
 }
 
-# The prop must END this log below $MaxY -- it went through the portal with its holder rather than
-# being left standing in the hub.
-function Test-PropWentDown($Samples, [int]$PropId, [double]$MaxY, [int]$MinSamples, [string]$ViewName) {
+# The prop must be observed, on this peer's view, within $Radius of a point the SERVER named --
+# it travelled with its holder rather than being left standing in the room they left.
+#
+# A point rather than a plane, and the point comes out of the server's own log, because the rooms
+# are laid out along +X and a y-threshold (the shape this analyser had when a TV portal dropped
+# people through a floor) says nothing about a 40 m sideways move.
+function Test-PropReached($Samples, [int]$PropId, [double]$X, [double]$Y, [double]$Z,
+                          [double]$Radius, [int]$MinSamples, [string]$ViewName) {
     $f = @()
-    $below = @($Samples | ForEach-Object {
-        $p = Get-Prop $_ $PropId
-        if ($null -ne $p -and [double]$p.y -lt $MaxY) { $p }
-    })
-    if ($below.Count -lt $MinSamples) {
-        $f += "${ViewName}: prop $PropId was below y=$MaxY in only $($below.Count) sample(s) (need $MinSamples) -- the carried prop did not go through the portal with its holder"
+    $near = 0
+    $closest = [double]::MaxValue
+    foreach ($s in $Samples) {
+        $p = Get-Prop $s $PropId
+        if ($null -eq $p) { continue }
+        $d = Dist3 ([double]$p.x) ([double]$p.y) ([double]$p.z) $X $Y $Z
+        if ($d -lt $closest) { $closest = $d }
+        if ($d -le $Radius) { $near++ }
+    }
+    if ($near -lt $MinSamples) {
+        $f += ("{0}: prop {1} came within {2} m of the destination its holder was teleported to in only {3} sample(s) (need {4}); closest approach {5:F2} m -- the carried prop was left behind" -f `
+            $ViewName, $PropId, $Radius, $near, $MinSamples, $closest)
     }
     return $f
+}
+
+# The first second, ON THIS LOG'S OWN CLOCK, at which this log saw $PeerId within $Radius of a
+# point. -1 if never. Per log, for the reason Get-FirstSecPeerBelow below states at length:
+# two bot processes do not share a clock.
+function Get-FirstSecPeerNear($Samples, [long]$PeerId, [double]$X, [double]$Y, [double]$Z, [double]$Radius) {
+    foreach ($s in $Samples) {
+        $r = Get-PeerRow $s $PeerId
+        if ($null -eq $r) { continue }
+        if ((Dist3 ([double]$r.x) ([double]$r.y) ([double]$r.z) $X $Y $Z) -le $Radius) { return [double]$s.Sec }
+    }
+    return -1.0
 }
 
 # The first second, ON THIS LOG'S OWN CLOCK, at which this log saw $PeerId below $Y. -1 if never.
@@ -698,20 +733,156 @@ if ($Phase -eq "all" -or $Phase -eq "authority") {
 }
 
 # --------------------------------------------------------------------------------------------------
-# PHASE 3 -- CARRIED THROUGH A TV PORTAL: REMOVED AT THE FORK (BASE-1, 2026-09-19)
+# PHASE 3 -- A CARRIED PROP SURVIVING ITS HOLDER'S SERVER TELEPORT
+#
+# Restored by ROUND-1 (2026-09-19) on the port the fork left unclaimed for it. Same property,
+# different trigger: the round's Holding -> Hiding transition moves the hider 40 m into the search
+# room, and the crate in its hands has to come too.
 # --------------------------------------------------------------------------------------------------
-# It ran in the old level and drove TvPortalHost, both of which were pruned. THE PROPERTY IT
-# PROVED IS STILL LIVE AND STILL UNTESTED: teleport-while-holding is a classic way to lose an
-# object. A server teleport moves the AVATAR (SandboxAvatar.ServerTeleportTo, now reached through
-# RoomTeleport) and says nothing at all about the thing in its hands -- the prop follows only
-# because NetworkedProp.BindToHolder re-derives its transform from the holder's carry anchor every
-# frame. The failures it guarded are specific: the prop left standing in the room the player just
-# left, or eaten by Carryable.KillPlaneY on the way. And the witness has to be an INDEPENDENT
-# peer, because that is the only view that can tell a real teleport from a local prediction.
-#
-# ROUND-1 teleports players between rooms on every phase change, carrying the target object, so
-# this phase comes back there -- on --world supermarket, with the round driver as the trigger.
-#
+if ($Phase -eq "all" -or $Phase -eq "teleport") {
+    Write-Host "[3/3] teleport: the hider is moved 40 m to another room while holding a crate..." -ForegroundColor Cyan
+
+    # The crate goes in the holding room, inside reach of a spawn marker (BASE-1's holding markers
+    # are at +/-2.5 on both axes; PropManager.GrabRange is 2.25 m and the bot walks to it anyway).
+    $SeedX = -1.0; $SeedY = 0.6; $SeedZ = -1.0
+
+    # BUDGETS, NOT PREDICTIONS -- phase 2's lesson, applied. P presses on a CADENCE
+    # (--carry-grab-retry) rather than once, because a single press decides on a predicted
+    # position; its grab window is 3 s..Start, and the only number that has to be right is that
+    # the round's Start comes after it. 12 s of grabbing against a ~2 m walk is a ceiling.
+    $StartAtSec = 12
+    $dur = 34
+
+    $pLog = Join-Path $script:LogDir "carrynet.portP.jsonl"
+    $wLog = Join-Path $script:LogDir "carrynet.portW.jsonl"
+    $serverOut = Join-Path $script:LogDir "carrynet.port.server.out.log"
+    $procs = @()
+    try {
+        $server = Start-Godot @("--server", "--port", $TeleportPort, "--world", "supermarket",
+            "--seed-test-props", "$SeedX,$SeedY,$SeedZ",
+            # Start only. Confirm is deliberately never pressed: this phase is about ONE teleport,
+            # and a second one (Hiding -> Seeking, 30 s later) would move the holder again inside
+            # the window the assertions sample.
+            "--round-script", "start@$StartAtSec") "carrynet.port.server"
+        $procs += $server
+        if (-not (Wait-ForLogLine $serverOut "\[server\] listening" 40)) {
+            Write-Fail "teleport server never reported listening; see $serverOut"
+        }
+
+        # P FIRST, and the stagger is load-bearing rather than politeness: the round's roster is in
+        # JOIN order and the first joiner is the first round's hider, which is the peer that gets
+        # teleported. A race here would make which bot is the subject a coin flip.
+        $botP = Start-Godot @("--bot", "--address", "127.0.0.1:$TeleportPort", "--name", "PortalP",
+            "--log", $pLog, "--duration", $dur, "--world", "supermarket",
+            "--carry-script", "$SeedX,$SeedY,$SeedZ,3.0,-1",
+            "--carry-grab-retry", "0.5") "carrynet.portP"
+        $procs += $botP
+        Start-Sleep -Milliseconds 2000
+        $botW = Start-Godot @("--bot", "--address", "127.0.0.1:$TeleportPort", "--name", "PortalW",
+            "--log", $wLog, "--duration", $dur, "--world", "supermarket") "carrynet.portW"
+        $procs += $botW
+
+        foreach ($proc in @($botP, $botW)) {
+            if (-not (Wait-ForExit $proc ($dur + 90))) { Write-Fail "a teleport bot never exited" }
+        }
+        foreach ($pair in @(@{ P = $botP; N = "PortalP" }, @{ P = $botW; N = "PortalW" })) {
+            if ($pair.P.ExitCode -ne 0) {
+                # A bot that printed its own done line and then died on the way out is a teardown
+                # artifact, not a check (.claude/rules/test-suite.md, BASE-1's -1073741795 entry).
+                Write-Host "        NOTE: $($pair.N) exited $($pair.P.ExitCode); read its .out.log for its own done line before calling that a red" -ForegroundColor Yellow
+            }
+        }
+    } finally {
+        Stop-Procs $procs
+    }
+
+    $sp = Get-Samples $pLog
+    $sw = Get-Samples $wLog
+    $peerP = [long]$sp[0].self
+    $peerW = [long]$sw[0].self
+    Write-Host "        peers: PortalP=$peerP (the hider) PortalW=$peerW (witness)" -ForegroundColor DarkGray
+
+    # The crate, identified by where it was SEEDED rather than by an id typed here -- the level is
+    # about to gain a hundred authored props (SHELF-1) and "the only prop in this world is mine"
+    # stops being true the day it does.
+    $found = Find-PropNear $sw $SeedX $SeedY $SeedZ
+    if ($null -eq $found -or $found.Dist -gt 2.0) {
+        Write-Fail "STAGING: the witness never saw a prop near the seed point ($SeedX,$SeedY,$SeedZ) -- --seed-test-props did not land"
+    }
+    $CarriedId = $found.Id
+    Add-Measured "teleport: carried prop id $CarriedId, first seen $([math]::Round($found.Dist,2)) m from its seed point"
+
+    # Where the server actually sent the hider. Read from the driver's own line rather than typed,
+    # so a room moved in the editor moves this assertion with it.
+    $destX = $null; $destY = $null; $destZ = $null
+    foreach ($line in @(Get-Content $serverOut)) {
+        if ($line -match '\[round\] peer (\d+) -> search\[\d+\] \(([-0-9.eE]+), ([-0-9.eE]+), ([-0-9.eE]+)\)') {
+            if ([long]$matches[1] -eq $peerP) {
+                $destX = [double]$matches[2]; $destY = [double]$matches[3]; $destZ = [double]$matches[4]
+                break
+            }
+        }
+    }
+    if ($null -eq $destX) {
+        Write-Fail ("STAGING: the server never logged a move of peer $peerP into the search room -- the round " +
+                    "never started, so no teleport happened. Check $serverOut for a [round] refused: line.")
+    }
+    Add-Measured "teleport: the server sent peer $peerP to ($destX, $destY, $destZ)"
+
+    # --- positive control: P was actually HOLDING it, and the witness agreed ----------------------
+    $pHeld = @($sp | Where-Object { [int]$_.heldPropId -eq $CarriedId }).Count
+    if ($pHeld -eq 0) {
+        Write-Fail "STAGING: PortalP never held prop $CarriedId -- the grab never landed, so nothing below is about a teleport"
+    }
+    Add-Failures (Test-HolderSet $sw $CarriedId $peerP "PortalW (witness)")
+
+    # --- the move itself, on the WITNESS's own clock ---------------------------------------------
+    # Per log, always. Two bot processes do not share a clock, and anchoring one log's window with
+    # another log's elapsed seconds is the category error that made this very phase's mutation
+    # control pass on a mutant the first time it was written (see Get-FirstSecPeerBelow's note).
+    $arrivedSec = Get-FirstSecPeerNear $sw $peerP $destX $destY $destZ 8.0
+    if ($arrivedSec -lt 0) {
+        Add-Failure "PortalW never saw peer $peerP anywhere near the search room -- the teleport did not replicate to the witness at all"
+    } else {
+        Add-Measured "teleport: the witness first saw the hider in the search room at $([math]::Round($arrivedSec,2))s on its own clock"
+    }
+
+    # --- THE ASSERTION: the crate came too --------------------------------------------------------
+    Add-Failures (Test-PropReached $sw $CarriedId $destX $destY $destZ 3.0 5 "PortalW (witness)")
+
+    # ...and kept tracking its holder on the far side, rather than arriving and then detaching.
+    if ($arrivedSec -ge 0) {
+        $track = Measure-HoldTracking $sw $CarriedId $peerP ($arrivedSec + 0.5) $HoldRadius 5 "PortalW (witness)"
+        Add-Failures $track.Failures
+        Add-Measured ("teleport: after the move the witness measured the held crate at worst {0:F2} m from its holder over {1} sample(s) (bar {2} m)" -f $track.Worst, $track.Checked, $HoldRadius)
+    }
+
+    # The prop must not have been eaten on the way: the count never moves on either peer.
+    $counts = @(@(@($sp | ForEach-Object { [int]$_.propCount }) + @($sw | ForEach-Object { [int]$_.propCount })) | Sort-Object -Unique)
+    if ($counts.Count -ne 1) {
+        Add-Failure "prop count varied across the teleport run: [$($counts -join ', ')] -- a networked prop was duplicated or lost across the move"
+    } else {
+        Add-Measured "teleport: prop count stable at $($counts[0]) on both peers for the whole run"
+    }
+
+    # --- mutation control: leave the crate behind -------------------------------------------------
+    # Applied to a freshly re-parsed copy so it cannot leak into the assertions above.
+    $mut = Get-Samples $wLog
+    $moved = $false
+    foreach ($s in $mut) {
+        $pr = Get-Prop $s $CarriedId
+        if ($null -eq $pr) { continue }
+        # Put it back where it was seeded -- exactly the defect this phase exists to catch.
+        $pr.x = $SeedX; $pr.y = $SeedY; $pr.z = $SeedZ
+        $moved = $true
+    }
+    if (-not $moved) {
+        Add-Failure "MUTATION CONTROL could not be staged: the witness's log has no samples carrying prop $CarriedId at all"
+    } else {
+        $null = Assert-DetectorFires "teleport: the carried crate left behind in the room the holder left" (Test-PropReached $mut $CarriedId $destX $destY $destZ 3.0 5 "mutant")
+    }
+}
+
 # ==================================================================================================
 Write-Host ""
 Write-Host "MEASURED QUANTITIES (compare these across runs, NOT the verdict --" -ForegroundColor White
@@ -729,7 +900,7 @@ if ($script:Failures.Count -gt 0) {
     exit 1
 }
 
-Write-Host "PASS: a contested grab produces exactly one holder and a told loser; a disconnecting holder releases its prop and the next player can pick it up. Every detector was re-run against a mutated copy of its own logs and went red." -ForegroundColor Green
+Write-Host "PASS: a contested grab produces exactly one holder and a told loser; a disconnecting holder releases its prop and the next player can pick it up; a crate held through a 40 m server teleport arrives with its holder and keeps tracking it. Every detector was re-run against a mutated copy of its own logs and went red." -ForegroundColor Green
 Write-Host ""
 Write-Host "CARRYNET-TEST OVERALL: PASS" -ForegroundColor Green
 exit 0
