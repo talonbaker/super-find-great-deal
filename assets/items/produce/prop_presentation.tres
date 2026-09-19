@@ -1,0 +1,53 @@
+[gd_resource type="Resource" load_steps=7 format=3]
+
+[ext_resource type="Script" path="res://scripts/game/presentation/PresentationProfile.cs" id="1"]
+[ext_resource type="Script" path="res://scripts/game/presentation/EventResponse.cs" id="2"]
+
+; PRODUCE — fruit and veg (SFX-1, 2026-09-19).
+;
+; Sound ordinals: 32 ProducePick, 33 ProduceThump, 34 ProducePlop, 35 Whoosh (shared).
+; Event ordinals: 6 PickedUp, 8 Thrown, 9 Impact, 14 Placed.
+; Both enums are append-only .tres contracts — see Sfx and ActorEvent. NEVER renumber.
+;
+; SOFT, ORGANIC, AND IT ABSORBS THE HIT. Like cardboard this never rings and has no
+; high-intensity layer, but where cardboard is hollow (a panel with air behind it) produce is
+; solid and damped: the recipes differ in the fundamental (95 Hz against 128 Hz) and in how much
+; noise sits under it. IntensityPitchRange is -0.12, slightly less than cardboard's, because
+; flesh does not lower in pitch as far as a panel does — it just gets quieter faster.
+;
+; This is also the quietest of the three profiles by intent. An apple knocked off a shelf should
+; be the thing a seeker ALMOST hears.
+
+[sub_resource type="Resource" id="produce_pick"]
+script = ExtResource("2")
+Event = 6
+Sound = 32
+VolumeDb = -8.0
+PitchJitter = 0.09
+
+[sub_resource type="Resource" id="produce_thump"]
+script = ExtResource("2")
+Event = 9
+Sound = 33
+VolumeDb = -8.0
+PitchJitter = 0.07
+IntensityVolumeBoostDb = 7.0
+IntensityPitchRange = -0.12
+
+[sub_resource type="Resource" id="produce_plop"]
+script = ExtResource("2")
+Event = 14
+Sound = 34
+VolumeDb = -11.0
+PitchJitter = 0.1
+
+[sub_resource type="Resource" id="produce_whoosh"]
+script = ExtResource("2")
+Event = 8
+Sound = 35
+VolumeDb = -13.0
+PitchJitter = 0.1
+
+[resource]
+script = ExtResource("1")
+Responses = [SubResource("produce_pick"), SubResource("produce_thump"), SubResource("produce_plop"), SubResource("produce_whoosh")]

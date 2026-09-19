@@ -44,8 +44,18 @@ public class ArmfulPoseTests
         // MVP extraction, so "only these" is asserted by enumerating every kind the enum still has
         // rather than by naming absentees: an ADDED kind that takes the lift without being posed
         // as an armful shows up here as a red test instead of passing unseen.
+        //
+        // SFX-1 (2026-09-19) appended Can/Box/Produce and put all three on the armful pose, so
+        // they join this list. That is the SAME rule, not a widening of it: the predicate's own
+        // doc says it asks "does this have a handle to grip", and a can, a cereal box and an
+        // apple do not. The gameplay rule this test exists to protect — that nobody quietly
+        // widens the SLOT rule while fixing a pose — is untouched, because there is no slot rule
+        // left in this build to widen; what the test now pins is that every kind which takes the
+        // lift is also arm-posed, which is the invariant that outlives the specific list.
         PropKind[] lifted = AllKinds.Where(PropManager.TakesLoadLift).ToArray();
-        Assert.Equal(new[] { PropKind.Crate, PropKind.Ball }, lifted);
+        Assert.Equal(
+            new[] { PropKind.Crate, PropKind.Ball, PropKind.Can, PropKind.Box, PropKind.Produce },
+            lifted);
         foreach (PropKind kind in lifted)
             Assert.True(PropManager.IsArmfulPose(kind), $"{kind} takes the load lift but is not arm-posed");
 

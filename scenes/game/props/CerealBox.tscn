@@ -1,0 +1,55 @@
+[gd_scene load_steps=6 format=3 uid="uid://cerealbox0sfgdmvp"]
+
+[ext_resource type="Script" path="res://scripts/game/sandbox/Carryable.cs" id="1_carryable"]
+[ext_resource type="Script" path="res://scripts/game/sandbox/feel/Interactable.cs" id="2_interactable"]
+
+[sub_resource type="BoxMesh" id="BoxMesh_cereal"]
+size = Vector3(0.19, 0.28, 0.06)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_cereal"]
+size = Vector3(0.19, 0.28, 0.06)
+
+; ONE FLAT COLOUR, per the packet, and a warm mid red — not a print, not a logo, not a second
+; albedo. The search room's whole premise is aisles of near-identical product that the hider's
+; one object has to hide among, so a box that is individually interesting is a box that ruins
+; the level. Roughness 0.85, metallic 0: paper does not shine. Emission 0.14 for the same
+; reason as the can's 0.18.
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_cereal"]
+resource_local_to_scene = true
+albedo_color = Color(0.78, 0.26, 0.2, 1)
+roughness = 0.85
+metallic = 0.0
+emission_enabled = true
+emission = Color(0.78, 0.26, 0.2, 1)
+emission_energy_multiplier = 0.14
+
+; SFX-1 (2026-09-19). A cereal box: cardboard, 0.4 kg, 190 x 280 x 60 mm.
+;
+; Structure, the mass note and the render-layer-19 note are Can.tscn's, verbatim in intent; read
+; them there rather than having three copies drift.
+;
+; THE ONE THING SPECIFIC TO THIS PREFAB: its collider is a box, and so is the foundation crate's,
+; so the shape alone cannot tell them apart. What can is that a crate is a CUBE (0.44 on every
+; axis) and a cereal box is emphatically not — Carryable.ShapeFromCollider tests exactly that,
+; "are all three extents equal", which is a meaningful question rather than a magic threshold.
+; A future box-shaped product that happens to be cubic would break that and must set its own
+; Profile export instead; that is the escape hatch, and it is why the export wins over the
+; collider rather than the other way round.
+[node name="CerealBox" type="RigidBody3D"]
+mass = 0.4
+script = ExtResource("1_carryable")
+kind = 3
+material = 2
+tint = Color(0.78, 0.26, 0.2, 1)
+
+[node name="Visual" type="Node3D" parent="."]
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Visual"]
+mesh = SubResource("BoxMesh_cereal")
+material_override = SubResource("StandardMaterial3D_cereal")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("BoxShape3D_cereal")
+
+[node name="Interactable" type="Node" parent="."]
+script = ExtResource("2_interactable")

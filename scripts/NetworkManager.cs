@@ -141,6 +141,10 @@ public partial class NetworkManager : Node
     {
         Instance = this;
         Options = LaunchOptions.Parse(OS.GetCmdlineUserArgs());
+        // --log-sfx, latched once here rather than read per sound: ActorFx.FireCore runs per
+        // footstep for every avatar in earshot, and its doc promises that path allocates
+        // nothing. See ActorFx.LogSfx.
+        Game.Presentation.ActorFx.LogSfx = Options.LogSfx;
     }
 
     public override void _Ready() => ConfigureAuth();

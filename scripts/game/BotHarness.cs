@@ -89,6 +89,12 @@ public partial class BotHarness : Node
             return;
         _elapsed += delta;
         _sinceLog += delta;
+        // Per-frame high-water sample of the 3D voice count (SFX-1). Free unless asked for, and
+        // it has to be per-frame as well as per-fire: a steal happens when a NEW sound arrives at
+        // a full pool, so sampling only at fire time would record the count after the steal has
+        // already made room, never the pressure that caused it.
+        if (_options.LogSfx)
+            SfxLab.SamplePeak();
         if (_sinceLog >= LogIntervalSec)
         {
             _sinceLog = 0;
@@ -570,6 +576,11 @@ public partial class BotHarness : Node
         WriteSample(); // final settled sample
         _writer?.Dispose();
         _writer = null;
+        // --log-sfx (SFX-1): the voice-budget figures, once, at the end. PeakLive3DVoices is a
+        // running high-water mark sampled in _Process (and again the instant any sound starts),
+        // so the number printed here covers the whole run rather than the last frame of it.
+        if (_options.LogSfx)
+            GD.Print(Presentation.ActorFx.BudgetSummaryLine());
         GD.Print($"[bot] {_options.DisplayName} done");
         GetTree().Quit(0);
     }

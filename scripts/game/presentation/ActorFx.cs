@@ -76,12 +76,68 @@ public static class ActorFx
 
             AudioStream? stream = r.CustomSound ?? (r.Sound != Sfx.None ? SfxLab.Get(r.Sound) : null);
             if (stream != null)
-                SfxLab.PlayStream3D(context, position, stream,
-                    r.VolumeDb + r.IntensityVolumeBoostDb * intensity + volumeTrimDb, r.PitchJitter);
+            {
+                SfxLab.PlayStream3D(context, position,
+                    stream,
+                    VolumeDbFor(r.VolumeDb, r.IntensityVolumeBoostDb, intensity, volumeTrimDb),
+                    r.PitchJitter,
+                    pitchScale: PitchScaleFor(r.IntensityPitchRange, intensity));
+                Fires++;
+                SfxLab.SamplePeak();
+                if (LogSfx)
+                {
+                    GD.Print($"[sfx] sfx {r.Sound} event={evt} intensity={intensity:F3} "
+                        + $"at ({position.X:F2},{position.Y:F2},{position.Z:F2}) src={context.Name}");
+                }
+            }
 
             if (r.PuffCount > 0)
                 JuiceFx.Puff(context, position, r.PuffCount, r.PuffColor,
                     r.PuffSize, r.PuffSpeed, r.PuffLifetime);
         }
     }
+
+    // --- The intensity mapping, as arithmetic a Godot-free test can reach (SFX-1) -------------
+    //
+    // Both of these were expressions inlined in FireCore. They are named functions now for one
+    // reason: FireCore needs a live AudioStream and a Node in a tree, so nothing in tests/unit can
+    // call it, and "intensity is monotonic and clamped" is a gate SFX-1 owes. Free statics over
+    // primitives rather than methods on EventResponse, because EventResponse is a Godot Resource
+    // and constructing one needs the native engine the unit suite does not have.
+
+    /// <summary>The final volume in dB: the response's own level, plus its intensity boost scaled
+    /// by a CLAMPED intensity, plus the caller's listener trim. The clamp is what makes this
+    /// monotonic-and-bounded rather than merely monotonic — an intensity of 4 must not be four
+    /// times as loud as an intensity of 1, and a negative one must not invert the boost.</summary>
+    public static float VolumeDbFor(float volumeDb, float intensityBoostDb, float intensity, float trimDb = 0f)
+        => volumeDb + intensityBoostDb * Mathf.Clamp(intensity, 0f, 1f) + trimDb;
+
+    /// <summary>The deliberate pitch multiplier for a hit of this intensity:
+    /// <c>1 + range × clamp(i)</c>, floored at a hard 0.25 so a pathological authored range can
+    /// never produce a zero or negative pitch scale (which is silence or a reversed stream, not a
+    /// quiet sound).</summary>
+    public static float PitchScaleFor(float intensityPitchRange, float intensity)
+        => Mathf.Max(0.25f, 1f + intensityPitchRange * Mathf.Clamp(intensity, 0f, 1f));
+
+    // --- --log-sfx instrumentation (SFX-1) ----------------------------------------------------
+
+    /// <summary><c>--log-sfx</c>: print one line per sound actually played. Set once at boot from
+    /// <c>LaunchOptions</c> rather than read per fire, because this sits inside the per-footstep
+    /// hot path that <see cref="FireCore"/>'s doc promises is allocation-free, and a
+    /// <c>NetworkManager.Instance?.Options</c> walk per sound is a property chain in that path for
+    /// a flag no shipped launch ever sets.</summary>
+    public static bool LogSfx { get; set; }
+
+    /// <summary>How many sounds this class has actually played since the process started — the
+    /// denominator for <c>SfxLab.OneShotSteals</c>. Counts sounds, not events: an event whose
+    /// response is particle-only, or which every response's MinIntensity gated away, adds
+    /// nothing.</summary>
+    public static long Fires { get; private set; }
+
+    /// <summary>The one line a <c>--log-sfx</c> run prints at exit. Assembled here rather than at
+    /// the call site so the harness does not have to know which counters exist.</summary>
+    public static string BudgetSummaryLine()
+        => $"[sfx] SUMMARY fires={Fires} peakLive3DVoices={SfxLab.PeakLive3DVoices} "
+            + $"oneShotSteals={SfxLab.OneShotSteals} poolSize={SfxLab.PoolSize} "
+            + $"ceiling={AudioVoiceBudget.Ceiling}";
 }

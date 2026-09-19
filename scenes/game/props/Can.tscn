@@ -1,0 +1,67 @@
+[gd_scene load_steps=6 format=3 uid="uid://can0sfgdmvp"]
+
+[ext_resource type="Script" path="res://scripts/game/sandbox/Carryable.cs" id="1_carryable"]
+[ext_resource type="Script" path="res://scripts/game/sandbox/feel/Interactable.cs" id="2_interactable"]
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_can"]
+top_radius = 0.035
+bottom_radius = 0.035
+height = 0.12
+
+[sub_resource type="CylinderShape3D" id="CylinderShape3D_can"]
+height = 0.12
+radius = 0.035
+
+; Silver-grey, and metallic where the crate is not: metallic 0.85 / roughness 0.28 is what makes
+; a cylinder read as a can rather than as a grey peg under the search room's lights. Emission is
+; ON but at 0.18 — an order below the crate's 0.55 — because THRILL-BIBLE Part II's 2026-08-30
+; ruling is that a prop may glow and may not light, and a whole aisle of these glowing like the
+; four gold crates would flatten the room the hider is meant to hide in.
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_can"]
+resource_local_to_scene = true
+albedo_color = Color(0.74, 0.76, 0.79, 1)
+roughness = 0.28
+metallic = 0.85
+emission_enabled = true
+emission = Color(0.74, 0.76, 0.79, 1)
+emission_energy_multiplier = 0.18
+
+; SFX-1 (2026-09-19). A can: tin, 0.35 kg, 35 mm radius, 120 mm tall.
+;
+; STRUCTURE IS CRATE.TSCN'S, EXACTLY: a RigidBody3D root carrying Carryable, a Visual/
+; MeshInstance3D pair, a CollisionShape3D, and an Interactable child. A level places it the way
+; SearchRoom.tscn places a crate — a Node3D with the NetworkedProp script whose child is
+; literally named "Body" and instances this scene.
+;
+; `mass` IS THE ONE PROPERTY HERE THAT RELIABLY ARRIVES, and that is why it is worth saying:
+; mass is a native RigidBody3D property, and native properties survive nested-PackedScene
+; instancing on this build. The `kind` and `material` lines below are C# script exports and
+; PropManager.AuthoredKindOf has measured that those DO NOT — Crate.tscn's own authored `kind`
+; reads back as the field default on every authored prop. They are written anyway (they are
+; true, they are documentation, and they apply on the code-built path), but nothing depends on
+; them: Carryable.ShapeFromCollider reads the CYLINDER below, which is a native property and is
+; unique to a can, and both the wire kind and the sound profile are resolved from that.
+;
+; NO `layers` LINE ON THE MESH. Render layer 19 is FP-1's first-person self-cull, and a prop on
+; it vanishes from the hands of whoever is carrying it — for that player only (INT-0 §3.4). The
+; default layer 1 is correct and the absence of the line is deliberate.
+[node name="Can" type="RigidBody3D"]
+mass = 0.35
+script = ExtResource("1_carryable")
+kind = 2
+material = 1
+tint = Color(0.74, 0.76, 0.79, 1)
+
+[node name="Visual" type="Node3D" parent="."]
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Visual"]
+mesh = SubResource("CylinderMesh_can")
+material_override = SubResource("StandardMaterial3D_can")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("CylinderShape3D_can")
+
+; The feel component — see Crate.tscn's own note. HeftKg reads this body's Mass, so the 0.35 kg
+; above is what makes a can lag less in the hand than a 1 kg crate.
+[node name="Interactable" type="Node" parent="."]
+script = ExtResource("2_interactable")

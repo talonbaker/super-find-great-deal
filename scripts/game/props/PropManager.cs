@@ -265,14 +265,16 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
         // portal, portals live only in bubbletest, and bubbletest is deliberately prop-free. Empty
         // on every launch that did not ask, so this loop does nothing in a real session.
         //
-        // Ordinary ServerSpawn, ordinary PropKind.Crate: a seeded crate is indistinguishable from
-        // a propsync crate the moment it is in someone's hands, which is the whole point — a
-        // fixture with its own carry path would prove nothing about carry.
+        // Ordinary ServerSpawn, ordinary PropKind: a seeded prop is indistinguishable from an
+        // authored one the moment it is in someone's hands, which is the whole point — a fixture
+        // with its own carry path would prove nothing about carry. SFX-1 added the per-entry
+        // kind so the material suite can seed a mixed heap; the default is still Crate, so every
+        // caller written before it is unchanged.
         if (NetworkManager.Instance?.Options.SeedTestProps is { Count: > 0 } seeded)
         {
-            foreach (Vector3 at in seeded)
-                ServerSpawn(PropKind.Crate, PlaceAt(at));
-            GD.Print($"[props] --seed-test-props: seeded {seeded.Count} test crate(s) in world '{world}'");
+            foreach ((Vector3 at, PropKind kind) in seeded)
+                ServerSpawn(kind, PlaceAt(at));
+            GD.Print($"[props] --seed-test-props: seeded {seeded.Count} test prop(s) in world '{world}'");
         }
 
         if (world != "propsync")
@@ -332,8 +334,12 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
     /// <i>"It names a POSE, never a rule about what may be carried"</i> — the pose layer simply
     /// had no predicate of its own to ask. Every shipped kind is an armful today; the predicate
     /// stays so a future handled kind is one line here rather than a scattered special case.</summary>
+    /// <remarks>SFX-1 appended the three product kinds. None of them has a handle either — a can
+    /// and an apple are small enough to palm, but the body's pose layer has exactly two poses and
+    /// "both hands, under it" is the less wrong of the two for a thing with no grip. A one-handed
+    /// pose is a pose-layer packet, not a sound packet.</remarks>
     public static bool IsArmfulPose(PropKind kind) =>
-        kind is PropKind.Crate or PropKind.Ball;
+        kind is PropKind.Crate or PropKind.Ball or PropKind.Can or PropKind.Box or PropKind.Produce;
 
     /// <summary>Which prop kinds ride slightly ABOVE the carry mount so the armful hands end up
     /// under the load instead of inside it — see <c>Carryable.ArmfulLoadLiftFraction</c> for the
@@ -639,10 +645,15 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
     /// native engine properties like <c>mass</c>/<c>transform</c> on the same instanced nodes are
     /// unaffected). <see cref="CollisionShape3D.Shape"/> is itself a native property, so it
     /// reliably survives instancing and needs no scene-authoring workaround.</summary>
+    /// <remarks>SFX-1 (2026-09-19) moved the rule itself into
+    /// <see cref="Carryable.ShapeFromCollider"/> and extended it to the three product shapes,
+    /// so the sound layer and the authority layer read one table instead of two. This method
+    /// keeps its name, its doc above and its job — mapping the body's shape onto the wire enum —
+    /// and is now one cast, because <c>Carryable.Shape</c> mirrors <see cref="PropKind"/> 1:1 by
+    /// construction (the mirror is stated on both enums).</remarks>
     private static PropKind AuthoredKindOf(Carryable body) =>
-        body.GetNodeOrNull<CollisionShape3D>("CollisionShape3D")?.Shape is SphereShape3D
-            ? PropKind.Ball
-            : PropKind.Crate;
+        (PropKind)(int)Carryable.ShapeFromCollider(
+            body.GetNodeOrNull<CollisionShape3D>("CollisionShape3D")?.Shape);
 
     private static void CollectNetworkedProps(Node n, System.Collections.Generic.List<NetworkedProp> found)
     {

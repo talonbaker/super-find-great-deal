@@ -115,11 +115,17 @@ public partial class NetworkedProp : Node3D
         // we get here. Reuse it; never `new` a Carryable over an authored one. Runtime-spawned
         // props (SpawnFromData -> Init, before this node is even in the tree) have no such child
         // yet, so this falls back to building one exactly as before.
-        Body = GetNodeOrNull<Carryable>("Body") ?? Kind switch
-        {
-            PropKind.Ball => new Carryable { Kind = Carryable.Shape.Ball },
-            _ => new Carryable { Kind = Carryable.Shape.Crate },
-        };
+        // Carryable.Shape mirrors PropKind 1:1 by construction — both enums say so, and SFX-1's
+        // three appended members kept the mirror — so this is one cast rather than a switch that
+        // has to be remembered on every append. The `Material` that rides with it is what makes
+        // a code-built (--seed-test-props) can sound like tin: an authored prefab resolves its
+        // material from its collider instead, because a nested PackedScene instance's exported
+        // script properties are not applied on this build (see Carryable.Material).
+        Carryable.Shape shape = System.Enum.IsDefined(typeof(Carryable.Shape), (int)Kind)
+            ? (Carryable.Shape)(int)Kind
+            : Carryable.Shape.Crate;
+        Body = GetNodeOrNull<Carryable>("Body")
+            ?? new Carryable { Kind = shape, Material = Carryable.MaterialFor(shape) };
         if (Body.GetParent() == null)
         {
             Body.Name = "Body";
