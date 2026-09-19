@@ -100,8 +100,10 @@ try {
         # headless process has neither. It opens a small window, runs for twelve seconds and closes
         # itself -- still zero human interaction, but it does need a desktop session, so a marathon
         # driven from a detached/headless shell will report this one red with "a missing display or
-        # GPU is the first suspect" in its own words. CI does not run this file at all (the
-        # workflow runs only the xUnit half), so nothing in .github is affected.
+        # GPU is the first suspect" in its own words. CI does not run this file at all -- and as of
+        # INT-0 (2026-09-19) there is no CI: .github/workflows/build.yml is deleted, so there is no
+        # .github to be affected. FP-1's sentence is kept rather than rewritten because it records
+        # what was true when the suite was written.
         # Last, per the standing rule. It takes a server and one bot client, so it DOES take part
         # in the join-index spawn dealing -- which is the other reason it goes at the end.
         @{ Name = "First person: rig + cull (FP-1)";     Script = "Run-FirstPersonTest.ps1" }
