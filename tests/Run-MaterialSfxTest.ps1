@@ -579,8 +579,14 @@ foreach ($e in $expected) {
 # --- 4: no crossed wires ----------------------------------------------------------------------
 # The assertion the -PlantCrossedProfile mutation must break: a material's voice may only ever
 # come from a prop of that material.
+# THE TABLE IS THE FIXTURE, AND IT WENT STALE THE MOMENT SFX-2 ADDED AN EIGHTH PROP.
+# Measured: the first run of the extended suite went red with "crossed wires: TinPick played
+# from prop 8, which is not tin" -- and prop 8 IS a can. The assertion was right and the table
+# was wrong, which is the good direction for that pair to disagree in: a table that listed too
+# MANY ids would have quietly stopped defending anything. Anyone adding a prop to the seed list
+# adds it here in the same edit.
 $legalFor = @{
-    "Tin"     = @("$CanId", "$StackLowId", "$StackHighId")
+    "Tin"     = @("$CanId", "$StackLowId", "$StackHighId", "$PlaceCanId")
     "Card"    = @("$BoxId", "$BoxFallId")
     "Produce" = @("$ProduceId", "$ProduceFallId")
 }
@@ -604,6 +610,24 @@ foreach ($line in @($sfx | Where-Object { $materialSounds -contains $_.Sound }))
 #
 # Both windowed peers are searched, because prop-on-prop contacts are guaranteed in phase 2's
 # forty-prop heap and merely likely in phase 1's fixture.
+# SYMMETRIC, and SFX-2 had to widen it from "before" to "either side" for a reason that is a
+# fact about this packet rather than a loosened assertion.
+#
+# SFX-1 could require the partner's impact to have played AT OR BEFORE the suppression, because
+# the fire happened inside the contact handler: the winner played, then the loser was suppressed,
+# in that order, in the same signal dispatch. SFX-2 defers every networked prop's impact to the
+# server's next physics flush, so the ORDER IS NOW INVERTED -- the loser's suppression is still
+# logged at contact time and the winner's sound arrives a tick later.
+#
+# Measured, not reasoned: the first run of the extended suite reported
+#   [sfx] pair-suppressed self=26 other=Prop_3 speed=2.26 t=7313
+#   [sfx] sfx Thunk event=Impact ... src=Prop_3 t=7325 via=wire
+# -- 12 ms later, one physics tick at 60 Hz, and the suite called it an ORPHAN.
+#
+# What the assertion is for is unchanged and is not weakened by this: it asks whether the
+# partner PLAYED, so that a rule which is silent rather than single is caught. Which side of a
+# 150 ms window it played on was never the question; it was an incidental property of where the
+# fire used to live.
 $PairWindowMs = 150
 $suppressions = @()
 foreach ($log in @("matsfx.host.out.log", "matsfx.p2.host.out.log")) {
@@ -629,15 +653,19 @@ if ($suppressions.Count -eq 0) {
     # that suppresses one body while the other was never asked is silent, not single.
     $orphans = @()
     foreach ($s in $suppressions) {
-        $partnerPlayed = @($sfx + $heapHost | Where-Object {
+        $partnerPlayed = @(@($sfx) + @($heapHost) | Where-Object {
             $_.Event -eq "Impact" -and $_.Src -eq $s.Other -and
-            $_.T -le $s.T -and ($s.T - $_.T) -le $PairWindowMs })
+            [math]::Abs($_.T - $s.T) -le $PairWindowMs })
         if ($partnerPlayed.Count -eq 0) { $orphans += $s }
     }
     if ($orphans.Count -eq $suppressions.Count) {
         $failures.Add((("all {0} suppression(s) were ORPHANS: a contact was silenced on one body " +
-            "and its partner never played within {1} ms. That is the failure the first-come rule " +
-            "replaced an instance-id rule to avoid -- silent, not single. First: self={2} other={3} t={4}") -f
+            "and its partner never played within {1} ms EITHER SIDE. That is the failure the " +
+            "first-come rule replaced an instance-id rule to avoid -- silent, not single. Note " +
+            "that under SFX-2 a suppression can also be orphaned by the SOURCE-SIDE LIMITER " +
+            "dropping the winner on an over-budget tick, which is the design working rather " +
+            "than a defect -- check for an [sfx] impact-limit line at the same t before " +
+            "chasing the de-dup rule. First: self={2} other={3} t={4}") -f
             $suppressions.Count, $PairWindowMs, $suppressions[0].Self, $suppressions[0].Other, $suppressions[0].T))
     } else {
         $paired = $suppressions.Count - $orphans.Count
@@ -759,10 +787,16 @@ if (-not $summary) {
 # a total cannot answer it -- forty props landing over 1.5 s and one can falling every ten
 # seconds for a minute produce the same total and nothing like the same problem.
 $limitLines = @()
+$peakOffer = 0
+$peakBudget = 0
 foreach ($log in @("matsfx.host.out.log", "matsfx.p2.host.out.log")) {
     $path = Join-Path $script:LogDir $log
     if (-not (Test-Path $path)) { continue }
     foreach ($line in Get-Content $path) {
+        if ($line -match '^\[sfx\] impact-peak offered=(\d+) budget=(\d+) t=(\d+)$') {
+            if ([int]$Matches[1] -gt $peakOffer) { $peakOffer = [int]$Matches[1] }
+            $peakBudget = [int]$Matches[2]
+        }
         if ($line -match '^\[sfx\] impact-limit offered=(\d+) sent=(\d+) dropped=(\d+) cumOffered=(\d+) cumSent=(\d+) t=(\d+)$') {
             $limitLines += [pscustomobject]@{
                 Log = $log; Offered = [int]$Matches[1]; Sent = [int]$Matches[2]
@@ -774,11 +808,18 @@ foreach ($log in @("matsfx.host.out.log", "matsfx.p2.host.out.log")) {
 }
 Write-Host ""
 if ($limitLines.Count -eq 0) {
-    # NOT a failure. The limiter only speaks when it drops something, and a run in which no
-    # physics tick ever produced more than MaxImpactsPerTick contacts is a run in which the cap
-    # was never reached -- which is the common case outside a collapse and is worth printing as
-    # a fact rather than inferring from silence.
-    Write-Host "        IMPACT LIMITER: never engaged (no tick offered more than 4 contacts)"
+    # NOT a failure, and NOT an absence either -- PropManager logs its running peak offer, so
+    # this prints the measured headroom rather than inferring it from silence. Measured on the
+    # 40-prop heap: the busiest tick offered well under the cap, because every prop carries its
+    # own 0.4 s per-body cooldown and forty props cannot therefore produce forty contacts on one
+    # tick. THE COOLDOWN, NOT THE CAP, IS WHAT BOUNDS THIS FIXTURE. The cap is a backstop for
+    # the case this fixture does not produce, and xUnit is where it is proved to work.
+    Write-Host (("        IMPACT LIMITER: never engaged. Busiest tick offered {0} contact(s) " +
+        "against a budget of {1} -- the per-body 0.4 s cooldown is what bounds this fixture, " +
+        "not the cap.") -f $peakOffer, $(if ($peakBudget -gt 0) { $peakBudget } else { 4 }))
+    if ($peakOffer -eq 0) {
+        $failures.Add("POSITIVE CONTROL FAILED: PropManager logged no [sfx] impact-peak line at all, so nothing was ever queued for announcement. The limiter is not merely idle - ServerNoteImpact is never being called.")
+    }
 } else {
     $worst = ($limitLines | Sort-Object -Property Offered -Descending | Select-Object -First 1)
     $totOffered = ($limitLines | Measure-Object -Property Dropped -Sum).Sum +

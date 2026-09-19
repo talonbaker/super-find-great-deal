@@ -782,3 +782,46 @@ lanes' handoffs for the same clock minute.** SFX-2 re-ran the suite standalone u
 a quiet machine on `feat/2026-09-19-sfx-2` and quotes the result in its own handoff; that is the
 clean datum INT-1 should use. The `Carry: drift` half of SFX-1's entry above stands — it was
 discriminated from the server log, not from timing.
+
+## Deferring a sound by one tick broke an assertion about ORDER, not about the sound (SFX-2, measured 2026-09-19)
+
+SFX-2 moved every networked prop's impact off the contact handler and onto a server announcement
+flushed at the top of the next physics tick, so that the other player hears it at all. One
+assertion in `tests/Run-MaterialSfxTest.ps1` went red, and it was not about the impact:
+
+```
+[sfx] pair-suppressed self=26 other=Prop_3 speed=2.26 t=7313
+[sfx] sfx Thunk event=Impact intensity=0.043 at (38.00,0.22,0.00) src=Prop_3 t=7325 via=wire
+```
+
+SFX-1's once-per-contact assertion required the winner's sound to have played **at or before**
+the loser's suppression (`$_.T -le $s.T`), which was true by construction when the fire happened
+inside the signal dispatch. Twelve milliseconds — one tick at 60 Hz — and the suite called a
+correctly-paired suppression an ORPHAN, i.e. reported the exact failure mode the first-come rule
+was written to avoid.
+
+**The assertion's question was never about order.** It asks whether the partner PLAYED, so that a
+de-duplication rule which is silent rather than single is caught. "Before" was an incidental
+property of where the fire lived. The window is symmetric now.
+
+**Generalises past sound: an assertion that pins the ORDER of two events pins the code path that
+produced that order.** When a lane moves work onto a later tick, a queue, or a network hop —
+which is what most "the other player should see this too" packets do — every before/after window
+in the suite becomes a claim about latency that nobody meant to make. Grep for `-le $s.T`,
+`-lt $x.T` and their kin when a fire moves, and ask of each one whether the direction was the
+point or the accident.
+
+**A second orphan cause now exists and the suite names it in its own failure text**: source-side
+limiting can drop the winner on an over-budget tick, which leaves a real suppression with no
+partner. That is the design working. The discriminator is an `[sfx] impact-limit` line at the
+same `t`.
+
+### A cap that never engages must still print a number
+
+`ImpactBudget.MaxImpactsPerTick` is 4, and on the packet's own 40-prop collapse fixture **it never
+engaged**: every prop carries a 0.4 s per-body cooldown, so forty props cannot offer forty
+contacts on one tick. The first version of the reporting printed "never engaged", which reads
+identically to *the limiter is not wired up* — the same absence-without-a-control trap this file
+records for headless probes and for `FootstepAudioTests`' positive control. `PropManager` now
+logs its running peak offer (`[sfx] impact-peak offered=N budget=4`), the suite prints the
+measured headroom, and a peak of **zero** is a hard failure rather than a quiet pass.

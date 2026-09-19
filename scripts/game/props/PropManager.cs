@@ -256,6 +256,13 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
     private long _impactsOffered;
     private long _impactsSent;
 
+    // The largest number of contacts any single tick has offered. Tracked because a cap that is
+    // never reached reports NOTHING, and "the limiter never engaged" is indistinguishable in a
+    // log from "the limiter is not wired up". Measured on the 40-prop heap: the peak offer was
+    // under the cap, so the per-body 0.4 s cooldown -- not this cap -- is what bounds that
+    // fixture. That is a finding, and it needs a number rather than a silence.
+    private int _impactsPeakOffered;
+
     public override void _ExitTree()
     {
         if (Instance == this)
@@ -1315,6 +1322,15 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
         if (_pendingImpacts.Count == 0)
             return;
         int offered = _pendingImpacts.Count;
+        if (offered > _impactsPeakOffered)
+        {
+            _impactsPeakOffered = offered;
+            if (ActorFx.LogSfx)
+            {
+                GD.Print($"[sfx] impact-peak offered={offered} budget={ImpactBudget.MaxImpactsPerTick} "
+                    + $"t={Time.GetTicksMsec()}");
+            }
+        }
         int kept = ImpactBudget.KeepLoudest(_pendingImpacts, ImpactBudget.MaxImpactsPerTick);
         _impactsOffered += offered;
         _impactsSent += kept;
