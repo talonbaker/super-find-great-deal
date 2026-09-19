@@ -1,0 +1,87 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/PlaytestForewordPanel.cs" id="1_panel"]
+[ext_resource type="Script" path="res://scripts/ui/MenuButton.cs" id="2_btn"]
+[ext_resource type="Script" path="res://scripts/ui/PillToggle.cs" id="3_toggle"]
+
+[node name="PlaytestForewordPanel" type="CanvasLayer"]
+layer = 97
+script = ExtResource("1_panel")
+
+[node name="Scrim" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Center" type="CenterContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Panel" type="VBoxContainer" parent="Center"]
+custom_minimum_size = Vector2(720, 0)
+theme_override_constants/separation = 12
+
+[node name="Header" type="HBoxContainer" parent="Center/Panel"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Title" type="Label" parent="Center/Panel/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"SectionLabel"
+text = "Watis this game?"
+vertical_alignment = 1
+autowrap_mode = 3
+
+[node name="CloseButton" type="Button" parent="Center/Panel/Header"]
+layout_mode = 2
+theme_type_variation = &"TertiaryAction"
+text = "X"
+script = ExtResource("2_btn")
+
+[node name="Body" type="Label" parent="Center/Panel"]
+layout_mode = 2
+theme_type_variation = &"Body"
+autowrap_mode = 3
+text = "Pop bubbles...with friends! Can YOU pop them all...?
+
+No, you cannot pop them all because I've hidden some of the bubbles in places impossible to find. So just run around, enjoy! Check out what's on TV.
+
+When it gets dark, don't forget to press 'F' to turn on your flashlight or you'll get caught by the Night Lurker!
+
+Proximity voice is part of this playtest. For the mic-less or shy, a pressing 'H' will act as a kind of psydo-proximity voice for testing purposes.
+
+Also, I'm collecting **anonymous telemetry playtest data** for improving the game experience.........and I'm 100% going to sell that data the moment I get the chance, so you should opt out now, which you can do from the settings menu!
+
+Thank you for playing.
+
+Love,
+Talon."
+
+[node name="DontShowRow" type="HBoxContainer" parent="Center/Panel"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="DontShowToggle" type="Button" parent="Center/Panel/DontShowRow"]
+layout_mode = 2
+size_flags_vertical = 4
+script = ExtResource("3_toggle")
+
+[node name="DontShowLabel" type="Label" parent="Center/Panel/DontShowRow"]
+layout_mode = 2
+theme_type_variation = &"Body"
+text = "Don't show this again"
+vertical_alignment = 1
+
+[node name="EscHint" type="Label" parent="Center/Panel"]
+layout_mode = 2
+theme_type_variation = &"Caption"
+text = "Press ESC to close"
+horizontal_alignment = 1

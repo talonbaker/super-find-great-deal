@@ -1,0 +1,15 @@
+# Keep line endings stable across Windows and Linux checkouts. Godot rewrites .import/.uid
+# sidecars on every run; with autocrlf these show as spurious diffs.
+* text=auto eol=lf
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.png binary
+*.jpg binary
+*.glb binary
+*.blend binary
+*.woff2 binary
+*.ttf binary
+*.res binary
+*.dll binary
+*.so binary
+*.dylib binary

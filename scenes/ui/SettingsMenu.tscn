@@ -1,0 +1,75 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/SettingsMenu.cs" id="1_settings"]
+[ext_resource type="PackedScene" path="res://scenes/ui/SettingsPanel.tscn" id="2_panel"]
+[ext_resource type="Texture2D" path="res://resources/UIBackground.tres" id="3_bgtex"]
+[ext_resource type="Script" path="res://scripts/ui/MenuButton.cs" id="4_btn"]
+
+[node name="SettingsMenu" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_settings")
+
+[node name="Background" type="TextureRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+texture = ExtResource("3_bgtex")
+expand_mode = 1
+
+[node name="TopBar" type="HBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_left = 24.0
+offset_top = 24.0
+offset_right = -24.0
+offset_bottom = 64.0
+grow_horizontal = 2
+theme_override_constants/separation = 16
+alignment = 0
+
+[node name="BackButton" type="Button" parent="TopBar"]
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"TertiaryAction"
+text = "‹  Back"
+script = ExtResource("4_btn")
+
+[node name="Crumb" type="Label" parent="TopBar"]
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"Crumb"
+text = "SETTINGS"
+
+[node name="Center" type="CenterContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="SettingsPanel" parent="Center" instance=ExtResource("2_panel")]
+custom_minimum_size = Vector2(560, 0)
+layout_mode = 2
+
+[node name="Title" parent="Center/SettingsPanel" index="0"]
+visible = false
+
+[node name="TitleGap" parent="Center/SettingsPanel" index="1"]
+visible = false
+
+[node name="BackGap" parent="Center/SettingsPanel" index="6"]
+visible = false
+
+[node name="BackButton" parent="Center/SettingsPanel" index="7"]
+visible = false

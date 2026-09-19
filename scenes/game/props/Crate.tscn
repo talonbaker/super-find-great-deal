@@ -1,0 +1,55 @@
+[gd_scene load_steps=5 format=3 uid="uid://crate0foundation"]
+
+[ext_resource type="Script" path="res://scripts/game/sandbox/Carryable.cs" id="1_carryable"]
+
+[sub_resource type="BoxMesh" id="BoxMesh_crate"]
+size = Vector3(0.44, 0.44, 0.44)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_crate"]
+size = Vector3(0.44, 0.44, 0.44)
+
+; W7-3 (2026-08-30): emission_energy_multiplier 2.5 -> 0.55, against Talon's playtest notes 7
+; AND 16. It is one number answering both, which is why they are one change.
+;
+; Note 7, verbatim: "The golden cubes, in the day, are overblown like too bright." At 2.5 the
+; faces clip to a single flat yellow and the bloom halo runs ~40% past the silhouette, so the
+; cube stops reading as a cube (docs/qa/W7-3/before/crate-day).
+;
+; Note 16, verbatim: the cube "will grow in size ... and if the player puts it back down again,
+; the cube stays grown larger." MEASURED (docs/qa/W7-3/before/scale, one camera, three marks):
+; nothing writes a durable scale. Carryable.PunchScale's 1.25x pickup pop springs back to 1
+; within a second. What persists is this material's HIGHLIGHT: Carryable's pulse drives emission
+; to base + pulse*(1 + base), so at base 2.5 a highlighted cube sits at 3.03-4.43 and its bloom
+; swallows the geometry -- the t=16 frame shows the cube as a featureless BALL, edges gone, with
+; the "E" prompt beside it. A scaled cube would still be a cube; a bloomed one is round. After a
+; drop the player is by definition standing next to it, so it is highlighted exactly when they
+; look at it, and it never goes back while they stand there.
+;
+; 0.55 keeps a legible highlight (0.78-1.40, i.e. 1.4-2.5x rest) with headroom to spare, and the
+; highlighted value is now below what the cube used to sit at while IDLE. Emission alone casts
+; no light in Forward+, so this satisfies THRILL-BIBLE Part II's 2026-08-30 ruling structurally:
+; the cube may GLOW, it may not LIGHT -- a free, permanent, never-expiring lamp would defuse the
+; camp glow stick and take Canopy-as-spatial-darkness and Landform-as-disorientation with it.
+; ONE number, deliberately: a day-aware emission would be a second lighting authority for a crate.
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_crate"]
+resource_local_to_scene = true
+albedo_color = Color(0.87, 0.69, 0.13, 1)
+roughness = 0.35
+metallic = 0.4
+emission_enabled = true
+emission = Color(0.87, 0.69, 0.13, 1)
+emission_energy_multiplier = 0.55
+
+[node name="Crate" type="RigidBody3D"]
+script = ExtResource("1_carryable")
+kind = 0
+tint = Color(0.87, 0.69, 0.13, 1)
+
+[node name="Visual" type="Node3D" parent="."]
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Visual"]
+mesh = SubResource("BoxMesh_crate")
+material_override = SubResource("StandardMaterial3D_crate")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("BoxShape3D_crate")

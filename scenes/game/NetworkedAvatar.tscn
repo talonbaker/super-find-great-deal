@@ -1,0 +1,19 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/game/sandbox/SandboxAvatar.cs" id="1_av"]
+
+[sub_resource type="SceneReplicationConfig" id="SceneReplicationConfig_avatar"]
+properties/0/path = NodePath(".:DisplayName")
+properties/0/spawn = true
+properties/0/replication_mode = 2
+properties/1/path = NodePath(".:AvatarKey")
+properties/1/spawn = true
+properties/1/replication_mode = 2
+
+[node name="NetworkedAvatar" type="CharacterBody3D"]
+script = ExtResource("1_av")
+
+[node name="Sync" type="MultiplayerSynchronizer" parent="."]
+replication_config = SubResource("SceneReplicationConfig_avatar")
+replication_interval = 0.033
+delta_interval = 0.25

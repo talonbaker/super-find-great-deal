@@ -1,0 +1,161 @@
+[gd_scene load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/JoinMenu.cs" id="1_join"]
+[ext_resource type="FontFile" path="res://assets/fonts/JetBrainsMono.woff2" id="2_mono"]
+[ext_resource type="Script" path="res://scripts/ui/MenuButton.cs" id="3_btn"]
+[ext_resource type="Texture2D" path="res://resources/UIBackground.tres" id="4_bgtex"]
+[ext_resource type="Script" path="res://scripts/ui/PillToggle.cs" id="5_pill"]
+
+[sub_resource type="FontVariation" id="RoomFont"]
+base_font = ExtResource("2_mono")
+variation_opentype = {
+"wght": 700
+}
+spacing_glyph = 6
+
+[node name="JoinMenu" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_join")
+
+[node name="Bg" type="TextureRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+texture = ExtResource("4_bgtex")
+expand_mode = 1
+
+[node name="TopBar" type="HBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_left = 24.0
+offset_top = 24.0
+offset_right = -24.0
+offset_bottom = 64.0
+grow_horizontal = 2
+theme_override_constants/separation = 16
+alignment = 0
+
+[node name="BackButton" type="Button" parent="TopBar"]
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"TertiaryAction"
+text = "‹  Back"
+script = ExtResource("3_btn")
+
+[node name="Crumb" type="Label" parent="TopBar"]
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"Crumb"
+text = "JOIN A MATCH"
+
+[node name="Column" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchor_left = 0.5
+anchor_top = 0.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -170.0
+offset_top = 96.0
+offset_right = 170.0
+grow_horizontal = 2
+grow_vertical = 2
+alignment = 1
+theme_override_constants/separation = 12
+
+[node name="NameCap" type="Label" parent="Column"]
+layout_mode = 2
+theme_type_variation = &"FieldLabel"
+text = "YOUR NAME"
+horizontal_alignment = 1
+
+[node name="NameEdit" type="LineEdit" parent="Column"]
+custom_minimum_size = Vector2(340, 0)
+layout_mode = 2
+size_flags_horizontal = 4
+alignment = 1
+placeholder_text = "e.g. Sable"
+
+[node name="Gap2" type="Control" parent="Column"]
+custom_minimum_size = Vector2(0, 24)
+layout_mode = 2
+
+[node name="RoomLabel" type="Label" parent="Column"]
+layout_mode = 2
+theme_type_variation = &"FieldLabel"
+text = "ROOM CODE"
+horizontal_alignment = 1
+
+[node name="RoomEdit" type="LineEdit" parent="Column"]
+custom_minimum_size = Vector2(340, 0)
+layout_mode = 2
+size_flags_horizontal = 4
+theme_override_fonts/font = SubResource("RoomFont")
+theme_override_font_sizes/font_size = 28
+alignment = 1
+max_length = 6
+placeholder_text = "ABCDEF"
+
+[node name="AddressLabel" type="Label" parent="Column"]
+visible = false
+layout_mode = 2
+theme_type_variation = &"FieldLabel"
+text = "SERVER ADDRESS"
+horizontal_alignment = 1
+
+[node name="AddressEdit" type="LineEdit" parent="Column"]
+visible = false
+custom_minimum_size = Vector2(340, 0)
+layout_mode = 2
+size_flags_horizontal = 4
+text = "127.0.0.1:7777"
+alignment = 1
+placeholder_text = "host:port"
+
+[node name="Gap3" type="Control" parent="Column"]
+custom_minimum_size = Vector2(0, 8)
+layout_mode = 2
+
+[node name="DirectRow" type="HBoxContainer" parent="Column"]
+layout_mode = 2
+size_flags_horizontal = 4
+theme_override_constants/separation = 8
+alignment = 1
+
+[node name="DirectToggle" type="Button" parent="Column/DirectRow"]
+layout_mode = 2
+size_flags_vertical = 4
+script = ExtResource("5_pill")
+
+[node name="DirectLabel" type="Label" parent="Column/DirectRow"]
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"Body"
+text = "Direct connect (advanced)"
+
+[node name="ErrorLabel" type="Label" parent="Column"]
+custom_minimum_size = Vector2(340, 0)
+layout_mode = 2
+theme_type_variation = &"Danger"
+text = ""
+horizontal_alignment = 1
+autowrap_mode = 2
+
+[node name="Gap4" type="Control" parent="Column"]
+custom_minimum_size = Vector2(0, 12)
+layout_mode = 2
+
+[node name="ConnectButton" type="Button" parent="Column"]
+layout_mode = 2
+size_flags_horizontal = 4
+theme_type_variation = &"PrimaryAction"
+text = "Join"
+script = ExtResource("3_btn")

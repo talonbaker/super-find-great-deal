@@ -1,0 +1,21 @@
+; TANGLE NIGHT EDGE. Program decision D10; the fifth member of the `night_edge_*` set.
+;
+; Matte neutral by day, an emissive Fresnel rim once `bt_darkness` rises. Every parameter of HOW
+; it behaves lives in `night_edge.gdshader` -- this file overrides two colours and nothing else,
+; which is why the whole set behaves identically and a tuning pass is one file rather than five.
+;
+; Worn by ONE mesh: the summit tread. At night the tangle is a black mass against a black sky
+; and the summit bubble's glow is the only thing in it -- a bubble hanging over nothing reads as
+; unreachable rather than as a reward. The rim says there is a floor under it.
+[gd_resource type="ShaderMaterial" load_steps=2 format=3]
+
+[ext_resource type="Shader" path="res://resources/shaders/night_edge.gdshader" id="1_edge"]
+
+[resource]
+render_priority = 0
+shader = ExtResource("1_edge")
+; The DAYLIGHT body: the shared mid grey, as on the other four.
+shader_parameter/albedo = Color(0.227, 0.227, 0.23, 1)
+; The NIGHT edge: the section goal HUE at the set's shared HSV(.., 0.86, 0.85) -- the same
+; construction as night_edge_{red,green,blue,cyan}, so the five differ only in hue.
+shader_parameter/edge_color = Color(0.85, 0.119, 0.85, 1)

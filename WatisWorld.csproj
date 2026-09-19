@@ -1,0 +1,32 @@
+<Project Sdk="Godot.NET.Sdk/4.7.0">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <AssemblyName>WatisWorld</AssemblyName>
+    <RootNamespace>MpFoundation</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <!-- The Godot.NET.Sdk compiles **/*.cs from the project root by default. The additive
+       Godot-free unit/fuzz suite lives under tests/unit/ and is its own net8.0 test
+       project (tests/unit/SailNet.Tests.csproj); keep its sources out of the game build. -->
+  <ItemGroup>
+    <Compile Remove="tests/**/*.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Concentus" Version="2.2.2" />
+    <!-- Steam transport (relay P2P + anonymous game-server login). Steamworks.NET over
+         GodotSteam: this is an all-C# codebase and the transport needs compile-time access
+         to the GameServer APIs; see docs/STEAM.md for the App ID / steam_appid.txt setup. -->
+    <PackageReference Include="Steamworks.NET" Version="2024.8.0" />
+  </ItemGroup>
+  <!-- Valve's native steam_api redistributables (the NuGet package ships only the managed
+       wrapper). Copied beside the game assembly; SteamService registers a DllImportResolver
+       that loads the right one per-OS, so the editor, headless runs, and exports all resolve
+       it without touching PATH. -->
+  <ItemGroup>
+    <None Include="thirdparty/steamworks/win-x64/steam_api64.dll" CopyToOutputDirectory="PreserveNewest" Link="steam_api64.dll" />
+    <None Include="thirdparty/steamworks/osx/libsteam_api.dylib" CopyToOutputDirectory="PreserveNewest" Link="libsteam_api.dylib" />
+    <None Include="thirdparty/steamworks/linux-x64/libsteam_api.so" CopyToOutputDirectory="PreserveNewest" Link="libsteam_api.so" />
+  </ItemGroup>
+</Project>

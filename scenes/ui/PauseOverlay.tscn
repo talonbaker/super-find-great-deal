@@ -1,0 +1,127 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/PauseOverlay.cs" id="1_pause"]
+[ext_resource type="PackedScene" path="res://scenes/ui/SettingsPanel.tscn" id="2_panel"]
+[ext_resource type="Script" path="res://scripts/ui/MenuButton.cs" id="3_btn"]
+
+[node name="PauseOverlay" type="CanvasLayer"]
+layer = 96
+script = ExtResource("1_pause")
+
+[node name="Dim" type="ColorRect" parent="."]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Center" type="CenterContainer" parent="Dim"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Panel" type="PanelContainer" parent="Dim/Center"]
+layout_mode = 2
+
+[node name="Margin" type="MarginContainer" parent="Dim/Center/Panel"]
+layout_mode = 2
+theme_override_constants/margin_left = 2
+theme_override_constants/margin_top = 0
+theme_override_constants/margin_right = 2
+theme_override_constants/margin_bottom = 0
+
+[node name="Menu" type="VBoxContainer" parent="Dim/Center/Panel/Margin"]
+custom_minimum_size = Vector2(356, 0)
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="PausedLabel" type="Label" parent="Dim/Center/Panel/Margin/Menu"]
+layout_mode = 2
+theme_type_variation = &"Display"
+theme_override_font_sizes/font_size = 20
+text = "PAUSED"
+
+[node name="PausedGap" type="Control" parent="Dim/Center/Panel/Margin/Menu"]
+custom_minimum_size = Vector2(0, 4)
+layout_mode = 2
+
+[node name="RoomHint" type="Label" parent="Dim/Center/Panel/Margin/Menu"]
+visible = false
+layout_mode = 2
+theme_type_variation = &"FieldLabel"
+text = "ROOM CODE — SHARE TO INVITE"
+
+[node name="CodeRow" type="HBoxContainer" parent="Dim/Center/Panel/Margin/Menu"]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="RoomCodeLabel" type="Label" parent="Dim/Center/Panel/Margin/Menu/CodeRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+theme_type_variation = &"Mono"
+theme_override_font_sizes/font_size = 28
+text = "----"
+
+[node name="CopyButton" type="Button" parent="Dim/Center/Panel/Margin/Menu/CodeRow"]
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"SecondaryAction"
+text = "Copy"
+script = ExtResource("3_btn")
+
+[node name="RoomGap" type="Control" parent="Dim/Center/Panel/Margin/Menu"]
+visible = false
+custom_minimum_size = Vector2(0, 4)
+layout_mode = 2
+
+[node name="MuteHeader" type="Label" parent="Dim/Center/Panel/Margin/Menu"]
+layout_mode = 2
+theme_type_variation = &"FieldLabel"
+text = "PLAYERS"
+
+[node name="MuteList" type="VBoxContainer" parent="Dim/Center/Panel/Margin/Menu"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="MuteGap" type="Control" parent="Dim/Center/Panel/Margin/Menu"]
+custom_minimum_size = Vector2(0, 4)
+layout_mode = 2
+
+[node name="ResumeButton" type="Button" parent="Dim/Center/Panel/Margin/Menu"]
+layout_mode = 2
+theme_type_variation = &"PrimaryAction"
+text = "Resume"
+script = ExtResource("3_btn")
+
+[node name="ResetButton" type="Button" parent="Dim/Center/Panel/Margin/Menu"]
+layout_mode = 2
+theme_type_variation = &"GhostAction"
+text = "Reset Position"
+script = ExtResource("3_btn")
+
+[node name="SettingsButton" type="Button" parent="Dim/Center/Panel/Margin/Menu"]
+layout_mode = 2
+theme_type_variation = &"GhostAction"
+text = "Settings"
+script = ExtResource("3_btn")
+
+[node name="HowToPlayButton" type="Button" parent="Dim/Center/Panel/Margin/Menu"]
+layout_mode = 2
+theme_type_variation = &"GhostAction"
+text = "How to Play"
+script = ExtResource("3_btn")
+
+[node name="QuitButton" type="Button" parent="Dim/Center/Panel/Margin/Menu"]
+layout_mode = 2
+theme_type_variation = &"DangerAction"
+text = "Leave"
+script = ExtResource("3_btn")
+
+[node name="Settings" parent="Dim/Center/Panel/Margin" instance=ExtResource("2_panel")]
+visible = false
+layout_mode = 2

@@ -1,0 +1,59 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/CrashReportDialog.cs" id="1_dlg"]
+[ext_resource type="Script" path="res://scripts/ui/MenuButton.cs" id="2_btn"]
+
+[node name="CrashReportDialog" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_dlg")
+
+[node name="Scrim" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="Center" type="CenterContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="Panel" type="VBoxContainer" parent="Center"]
+custom_minimum_size = Vector2(460, 0)
+theme_override_constants/separation = 16
+
+[node name="Title" type="Label" parent="Center/Panel"]
+layout_mode = 2
+theme_type_variation = &"SectionLabel"
+text = "CRASH REPORT"
+horizontal_alignment = 1
+
+[node name="Body" type="Label" parent="Center/Panel"]
+layout_mode = 2
+theme_type_variation = &"Body"
+autowrap_mode = 3
+horizontal_alignment = 1
+text = "The game didn't close cleanly last time. Send an anonymous crash report (error details, hardware info, and a short excerpt of the game's log with identifiers removed) so it can be fixed?"
+
+[node name="Buttons" type="HBoxContainer" parent="Center/Panel"]
+layout_mode = 2
+alignment = 1
+theme_override_constants/separation = 16
+
+[node name="SendButton" type="Button" parent="Center/Panel/Buttons"]
+layout_mode = 2
+theme_type_variation = &"PrimaryAction"
+text = "Send report"
+script = ExtResource("2_btn")
+
+[node name="DiscardButton" type="Button" parent="Center/Panel/Buttons"]
+layout_mode = 2
+theme_type_variation = &"TertiaryAction"
+text = "Discard"
+script = ExtResource("2_btn")

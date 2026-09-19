@@ -1,0 +1,72 @@
+; BT-9. THE BUBBLE. Soap film, thin-film interference, driven by BT-6's bubble script.
+;
+; THE SHADER WAS ALREADY IN SAIL AND THIS FILE DELIBERATELY DOES NOT DUPLICATE IT.
+; The packet asked for a port to `resources/shaders/bubble_film.gdshader`, but the lab's
+; `shaders/material/bubble_film.gdshader` had ALREADY been ported -- by MOVE-6, commit b63f5007 --
+; to `res://resources/shaders/iridescent/bubble_film.gdshader`, where `IridescentProps.cs` (the
+; scramble course) already loads it by that path. The two files were diffed and are identical
+; apart from the include path the earlier port had already fixed. A second copy would have been a
+; second place to change one shader; this points at the existing one. See the BT-9 report's
+; Corrections.
+;
+; WHAT BT-9 ADDED TO THAT SHADER: one uniform, `emission_energy` (0..0.8), defaulting to 0.0 --
+; an exact no-op, which is the only reason it was safe to touch a shared shader. It is D10's
+; "bubbles glow faintly at night". BT-6's script drives it.
+;
+; DELIBERATELY MINIMAL, following `assets/materials/water/water_surface.tres`'s stated rule: the
+; tuning lives in the shader's uniform defaults and this file overrides only what it means to
+; change. The bubble's look is the shader's defaults; the overrides below are size-related.
+[gd_resource type="ShaderMaterial" load_steps=2 format=3]
+
+[ext_resource type="Shader" path="res://resources/shaders/iridescent/bubble_film.gdshader" id="1_bubble"]
+
+[resource]
+; SHADER-1 (2026-09-04). 0 -> 1. THE BUBBLE ALWAYS COMPOSITES LAST AMONG TRANSPARENTS.
+;
+; THE BUG THIS FIXES, in Talon's words from a live playtest: "the bubbles image when they're
+; overlapping the water is not visible." Reproduced in docs/qa/SHADER-1/before/lake-se -- one
+; bubble is drawn in full where its silhouette crosses the bank and DISAPPEARS along a line that
+; is exactly the shoreline, with only a trace of its rim left over the water.
+;
+; THE MECHANISM IS THE TRANSPARENT SORT, NOT DEPTH AND NOT ALPHA. Both surfaces are in the alpha
+; queue and NEITHER writes depth: `bubble_film.gdshader:2` is `depth_draw_never`, and
+; `lake_murk.gdshader:212` is `depth_draw_opaque`, which on a transparent material means it does
+; not write depth either (that shader's own header says so, lines 196-198). So nothing can be
+; depth-culled here; the only thing that decides the outcome is WHICH IS BLENDED SECOND.
+;
+; Godot sorts the alpha queue by render_priority first and by depth to the object's SORTING
+; POINT second, and a MeshInstance3D's default sorting point is its AABB CENTRE
+; (`GeometryInstance3D.sorting_use_aabb_center`, default true). Green's lake is ONE 33.9 m mesh
+; (`WaterGeometry.BubbleTestLakeRadiusM`, measured 16.96 m about (-95, 0, 0)), so the whole
+; surface sorts at a single point in the middle of it while the bubbles are spread all over it.
+; Every bubble further from the camera than that one point is drawn BEFORE the water and the
+; water then blends over it -- and the film's own `alpha_center` is 0.06, so 6% coverage under a
+; near-opaque murk composite is nothing a player can see. A per-object sort simply cannot resolve
+; a 34 m plane against objects distributed across it; priority is the only tool that can.
+;
+; WHY THE BUBBLE AND NOT THE WATER. Setting `render_priority = -1` on `lake_murk.tres` would fix
+; the same frame, but that material is ALSO GreenHills' SunkenTvPlinth column, which is
+; genuinely UNDER the surface and must stay murked -- pushing the water earlier would leave the
+; plinth compositing on top of the lake it is sunk in. This file is used by exactly one scene
+; (`scenes/game/props/Bubble.tscn`) and by nothing else, so the blast radius is the bubbles and
+; only the bubbles. `IridescentProps` loads the SHADER directly and never this material, so the
+; scramble course is untouched.
+;
+; WHAT IT COSTS. A bubble now composites over the lake even in the ~7 cm case where it is
+; slightly under the surface (Bubble_Green_16, y -0.65 against WaterY -0.58), so that one loses
+; its murk tint. That is the trade the packet names: bubbles are the level's whole objective and
+; visibility beats subtlety. It costs NOTHING in occlusion -- render_priority only reorders
+; inside the transparent queue, the depth TEST is still on, and opaque geometry still writes
+; depth, so a bubble behind a wall is still behind the wall. `SecretBubble` builds its own
+; StandardMaterial3D in code and is deliberately not changed here: it hangs 0.77 m under the
+; surface and is meant to read as a light UNDER the water.
+render_priority = 1
+shader = ExtResource("1_bubble")
+; A poppable bubble is roughly a 0.35 m sphere; the wobble onset/full pair is authored in metres
+; and the shader's defaults put a bubble that size in the middle of the wobble ramp, which is
+; where it looks alive. Pinned here so a later prefab resize is a visible decision rather than a
+; silent change of character.
+shader_parameter/wobble_onset_m = 0.12
+shader_parameter/wobble_full_m = 0.55
+; D10's night glow. 0.0 is the day value and the shader's default; BT-6 drives it to at most 0.8.
+shader_parameter/emission_energy = 0.0

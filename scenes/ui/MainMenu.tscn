@@ -1,0 +1,22 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/menu/MainMenu.cs" id="1_campfire"]
+
+; Deliberately empty apart from the root. Every layer of this screen — the 3D world, the blur
+; chains, the bubble field, the scrim, the grain and the type column — is built in code by
+; MainMenu.cs and MenuBackdrop.cs.
+;
+; That is a considered choice, not laziness. The backdrop is six chained SubViewports feeding each
+; other's textures, plus 56 blocks whose placements are a baked table; expressing it as .tscn nodes
+; would be a wall of Transform3D literals and NodePath wiring that nobody could tune, and this repo
+; has been bitten twice by hand-authored Transform3D rows (the basis is stored as ROWS, so a pure
+; rotation typed by hand comes out inverted and only a render shows it). Code keeps the composition
+; legible and the picture reproducible.
+;
+; The FILE NAME is historical. This screen no longer has a campfire in it — the night woods, the
+; fire and the plank lettering were replaced on 2026-08-28 by the light world Talon approved at
+; previz. Renaming the scene touches the boot path and every scene-path constant, which is a
+; separate and larger change than a look.
+
+[node name="MainMenu" type="Node3D"]
+script = ExtResource("1_campfire")

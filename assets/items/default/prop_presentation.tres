@@ -1,0 +1,22 @@
+[gd_resource type="Resource" load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://scripts/game/presentation/PresentationProfile.cs" id="1"]
+[ext_resource type="Script" path="res://scripts/game/presentation/EventResponse.cs" id="2"]
+
+[sub_resource type="Resource" id="pickup_pop"]
+script = ExtResource("2")
+Event = 6
+Sound = 6
+VolumeDb = -6.0
+PitchJitter = 0.08
+
+[sub_resource type="Resource" id="impact_thunk"]
+script = ExtResource("2")
+Event = 9
+Sound = 7
+VolumeDb = -8.0
+PitchJitter = 0.08
+
+[resource]
+script = ExtResource("1")
+Responses = [SubResource("pickup_pop"), SubResource("impact_thunk")]

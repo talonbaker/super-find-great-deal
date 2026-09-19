@@ -1,0 +1,127 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/UsageNoticePanel.cs" id="1_panel"]
+[ext_resource type="Script" path="res://scripts/ui/MenuButton.cs" id="2_btn"]
+
+[node name="UsageNoticePanel" type="CanvasLayer"]
+layer = 97
+script = ExtResource("1_panel")
+
+[node name="Scrim" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Center" type="CenterContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Panel" type="VBoxContainer" parent="Center"]
+custom_minimum_size = Vector2(640, 0)
+theme_override_constants/separation = 12
+
+[node name="Header" type="HBoxContainer" parent="Center/Panel"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Title" type="Label" parent="Center/Panel/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"SectionLabel"
+text = "ANONYMOUS USAGE REPORTING IS ON"
+vertical_alignment = 1
+autowrap_mode = 3
+
+[node name="CloseButton" type="Button" parent="Center/Panel/Header"]
+layout_mode = 2
+theme_type_variation = &"TertiaryAction"
+text = "X"
+script = ExtResource("2_btn")
+
+[node name="Intro" type="Label" parent="Center/Panel"]
+layout_mode = 2
+theme_type_variation = &"Body"
+autowrap_mode = 3
+text = "To help development, this build sends one anonymous report when you quit. It is on by default — turn it off in Settings, under ANONYMOUS USAGE REPORT. Once it is off it stays off, including after a restart."
+
+[node name="Facts" type="VBoxContainer" parent="Center/Panel"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Fact1" type="VBoxContainer" parent="Center/Panel/Facts"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="Heading" type="Label" parent="Center/Panel/Facts/Fact1"]
+layout_mode = 2
+theme_type_variation = &"SectionLabel"
+theme_override_font_sizes/font_size = 15
+text = "THE SESSION"
+
+[node name="Body" type="Label" parent="Center/Panel/Facts/Fact1"]
+layout_mode = 2
+theme_type_variation = &"Body"
+autowrap_mode = 3
+text = "How long you played, whether you hosted or joined, the transport, how many players were in it, whether voice chat was used, and how many props you picked up, threw and dropped."
+
+[node name="Fact2" type="VBoxContainer" parent="Center/Panel/Facts"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="Heading" type="Label" parent="Center/Panel/Facts/Fact2"]
+layout_mode = 2
+theme_type_variation = &"SectionLabel"
+theme_override_font_sizes/font_size = 15
+text = "THE MACHINE"
+
+[node name="Body" type="Label" parent="Center/Panel/Facts/Fact2"]
+layout_mode = 2
+theme_type_variation = &"Body"
+autowrap_mode = 3
+text = "Operating system and version, CPU, graphics card, memory, window resolution, renderer, system language and region, and this build's version."
+
+[node name="Fact3" type="VBoxContainer" parent="Center/Panel/Facts"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="Heading" type="Label" parent="Center/Panel/Facts/Fact3"]
+layout_mode = 2
+theme_type_variation = &"SectionLabel"
+theme_override_font_sizes/font_size = 15
+text = "NOT WHO YOU ARE"
+
+[node name="Body" type="Label" parent="Center/Panel/Facts/Fact3"]
+layout_mode = 2
+theme_type_variation = &"Body"
+autowrap_mode = 3
+text = "A random tag made on this machine the first time you play, so two sessions can be told apart. No account, no name, no email, no address. Voice chat is never recorded — only whether a microphone was used."
+
+[node name="Footer" type="Label" parent="Center/Panel"]
+layout_mode = 2
+theme_type_variation = &"Body"
+autowrap_mode = 3
+text = "Crash reports and the feedback box at quit are separate and both ask you first; turning this off strips the machine details out of those too."
+
+[node name="AckRow" type="HBoxContainer" parent="Center/Panel"]
+layout_mode = 2
+alignment = 1
+theme_override_constants/separation = 8
+
+[node name="AckButton" type="Button" parent="Center/Panel/AckRow"]
+layout_mode = 2
+theme_type_variation = &"PrimaryAction"
+text = "Don't show this message again"
+script = ExtResource("2_btn")
+
+[node name="EscHint" type="Label" parent="Center/Panel"]
+layout_mode = 2
+theme_type_variation = &"Caption"
+text = "Press ESC to close"
+horizontal_alignment = 1

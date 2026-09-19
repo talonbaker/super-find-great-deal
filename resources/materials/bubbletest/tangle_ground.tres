@@ -1,0 +1,53 @@
+; ============================================================================================
+; TANGLE SECTION PALETTE -- the seventh section on BT-9b's value ladder, at DARK-1b's grade.
+; (TANGLE-1, 2026-08-29.) THIS FILE IS THE TANGLE PALETTE'S HEADER; the other five
+; `tangle_*.tres` cite it rather than repeating it.
+;
+; THE LADDER ITSELF IS NOT RESTATED HERE, DELIBERATELY. It is authored in `red_ground.tres`
+; and its siblings, and copying that hundred-line preamble into a seventh section is how a
+; palette comes to have two authorities. Read it there. What this file records is only what is
+; true of the TANGLE and nowhere else.
+;
+; THE RUNGS, RE-SOLVED FOR A NEW HUE RATHER THAN COPIED FROM A NEIGHBOUR:
+;
+;     RUNG 1  GROUND    L* 41.67   HSV(300, 0.30, 0.482)   (the five shipped grounds: 41.65-41.73)
+;     RUNG 2  NEUTRAL   L* 24.39   the shared mid grey, byte-identical to every other section
+;     RUNG 3  GOAL      L* 34.28   HSV(300, 0.86, 0.555)   (the five shipped goals: 34.23-34.31)
+;
+; V is solved per hue, exactly as BT-9b solved it per hue for the other five, because at equal
+; HSV V a violet and a green land at different lightnesses. The tangle's ground and goal are
+; therefore ISO-LIGHTNESS with the other five to within 0.06 L* and 0.05 L* -- the ladder now
+; has seven entries and no rung spacing moved.
+;
+; WHY HUE 300. The five shipped hues are hub (untinted), red 15, green 129, cyan 183, blue 225.
+; The only gap left on the wheel is 225 -> 375, and 300 is its midpoint: 75 degrees from blue
+; and 75 from red, the largest minimum separation any seventh hue can have. It is also far from
+; the hub's amber goal (38), the only other warm surface in the level.
+;
+; CORRECTION TO THE TANGLE-1 PACKET, STATED RATHER THAN QUIETLY WORKED AROUND. The packet says
+; the ladder "guarantees >= 20.9 L* adjacent separation" and asks for that to be re-run with a
+; seventh entry. 20.9 is BT-9b's figure and DARK-1b superseded it the day before this packet was
+; written: the SHIPPED adjacent separations are ground->goal 7.39 L* and goal->neutral 9.89 L*,
+; because a uniform darkening compresses a ladder in L* while leaving its luminance RATIOS
+; intact -- DARK-1b's own amendment says so in as many words and calls it "the one thing that
+; got worse". Re-deriving 20.9 for the tangle would have meant either lifting one section back
+; out of the grade, or moving the grade, which is not this packet's file to move. The tangle
+; matches what shipped. The invariant that survives the night curve -- the linear-Y ratio --
+; is ground:neutral 2.91x, the same as the other six.
+;
+; TANGLE GROUND -- HSV(300, 0.30, 0.482). Chroma 0.145.
+; It carries DARK-1b's 1 m world-space checker like every other ground plate: the checker is the
+; second channel that buys back the 17.3 L* ground-to-neutral gap, and a section without it
+; would be the one place in the level where a run has no ruler under it.
+; RUNG 1. Measured L* = 41.67.
+[gd_resource type="ShaderMaterial" load_steps=2 format=3]
+
+[ext_resource type="Shader" path="res://resources/shaders/bubbletest_ground_checker.gdshader" id="1_chk"]
+
+[resource]
+shader = ExtResource("1_chk")
+shader_parameter/base_color = Color(0.482, 0.337, 0.482, 1)
+shader_parameter/cell = 1.0
+shader_parameter/strength = 0.09
+shader_parameter/roughness_value = 0.92
+shader_parameter/metallic_specular = 0.35

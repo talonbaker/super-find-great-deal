@@ -1,0 +1,253 @@
+[gd_scene load_steps=29 format=3]
+
+[ext_resource type="Script" path="res://scripts/game/sandbox/SandboxWorld.cs" id="1_world"]
+[ext_resource type="PackedScene" path="res://scenes/game/props/Crate.tscn" id="2_crate"]
+[ext_resource type="PackedScene" path="res://scenes/game/props/Sphere.tscn" id="3_sphere"]
+[ext_resource type="Script" path="res://scripts/game/sandbox/SandboxCamera.cs" id="4_camera"]
+[ext_resource type="Script" path="res://scripts/game/sandbox/SandboxAvatar.cs" id="5_avatar"]
+
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_sky"]
+sky_top_color = Color(0.55, 0.74, 0.95, 1)
+sky_horizon_color = Color(0.92, 0.88, 0.86, 1)
+ground_bottom_color = Color(0.78, 0.82, 0.76, 1)
+ground_horizon_color = Color(0.92, 0.88, 0.86, 1)
+
+[sub_resource type="Sky" id="Sky_1"]
+sky_material = SubResource("ProceduralSkyMaterial_sky")
+
+[sub_resource type="Environment" id="Environment_1"]
+background_mode = 2
+sky = SubResource("Sky_1")
+ambient_light_source = 2
+ambient_light_energy = 0.55
+tonemap_mode = 2
+
+[sub_resource type="BoxMesh" id="BoxMesh_ground"]
+size = Vector3(64, 1, 64)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_ground"]
+size = Vector3(64, 1, 64)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_ground"]
+albedo_color = Color(0.55, 0.78, 0.47, 1)
+roughness = 0.9
+
+[sub_resource type="BoxMesh" id="BoxMesh_pillar"]
+size = Vector3(1.2, 2.4, 1.2)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_pillar"]
+size = Vector3(1.2, 2.4, 1.2)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_pillarA"]
+albedo_color = Color(0.95, 0.82, 0.72, 1)
+roughness = 0.9
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_pillarB"]
+albedo_color = Color(0.8, 0.86, 0.94, 1)
+roughness = 0.9
+
+[sub_resource type="BoxMesh" id="BoxMesh_stepA"]
+size = Vector3(3, 1, 3)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_stepA"]
+size = Vector3(3, 1, 3)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_stepA"]
+albedo_color = Color(0.9, 0.84, 0.9, 1)
+roughness = 0.9
+
+[sub_resource type="BoxMesh" id="BoxMesh_stepB"]
+size = Vector3(3, 2.2, 3)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_stepB"]
+size = Vector3(3, 2.2, 3)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_stepB"]
+albedo_color = Color(0.86, 0.8, 0.88, 1)
+roughness = 0.9
+
+[sub_resource type="BoxMesh" id="BoxMesh_tower"]
+size = Vector3(3, 4.4, 3)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_tower"]
+size = Vector3(3, 4.4, 3)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_tower"]
+albedo_color = Color(0.82, 0.76, 0.86, 1)
+roughness = 0.9
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_crateA"]
+resource_local_to_scene = true
+albedo_color = Color(0.91, 0.66, 0.33, 1)
+roughness = 0.75
+emission_enabled = true
+emission = Color(0.91, 0.66, 0.33, 1)
+emission_energy_multiplier = 0.0
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_crateB"]
+resource_local_to_scene = true
+albedo_color = Color(0.42, 0.68, 0.88, 1)
+roughness = 0.75
+emission_enabled = true
+emission = Color(0.42, 0.68, 0.88, 1)
+emission_energy_multiplier = 0.0
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_crateC"]
+resource_local_to_scene = true
+albedo_color = Color(0.7, 0.52, 0.86, 1)
+roughness = 0.75
+emission_enabled = true
+emission = Color(0.7, 0.52, 0.86, 1)
+emission_energy_multiplier = 0.0
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_ballA"]
+resource_local_to_scene = true
+albedo_color = Color(0.95, 0.5, 0.58, 1)
+roughness = 0.75
+emission_enabled = true
+emission = Color(0.95, 0.5, 0.58, 1)
+emission_energy_multiplier = 0.0
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_ballB"]
+resource_local_to_scene = true
+albedo_color = Color(0.45, 0.78, 0.55, 1)
+roughness = 0.75
+emission_enabled = true
+emission = Color(0.45, 0.78, 0.55, 1)
+emission_energy_multiplier = 0.0
+
+[node name="Sandbox" type="Node3D"]
+script = ExtResource("1_world")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_1")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+rotation_degrees = Vector3(-48, 35, 0)
+light_color = Color(1, 0.96, 0.88, 1)
+light_energy = 1.3
+shadow_enabled = false
+
+[node name="Ground" type="StaticBody3D" parent="."]
+position = Vector3(0, -0.5, 0)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Ground"]
+shape = SubResource("BoxShape3D_ground")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Ground"]
+mesh = SubResource("BoxMesh_ground")
+material_override = SubResource("StandardMaterial3D_ground")
+
+[node name="PillarA" type="StaticBody3D" parent="."]
+position = Vector3(5, 1.2, -3)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="PillarA"]
+shape = SubResource("BoxShape3D_pillar")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="PillarA"]
+mesh = SubResource("BoxMesh_pillar")
+material_override = SubResource("StandardMaterial3D_pillarA")
+
+[node name="PillarB" type="StaticBody3D" parent="."]
+position = Vector3(-6, 1.2, 4)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="PillarB"]
+shape = SubResource("BoxShape3D_pillar")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="PillarB"]
+mesh = SubResource("BoxMesh_pillar")
+material_override = SubResource("StandardMaterial3D_pillarB")
+
+[node name="StepA" type="StaticBody3D" parent="."]
+position = Vector3(-8, 0.5, -7)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="StepA"]
+shape = SubResource("BoxShape3D_stepA")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="StepA"]
+mesh = SubResource("BoxMesh_stepA")
+material_override = SubResource("StandardMaterial3D_stepA")
+
+[node name="StepB" type="StaticBody3D" parent="."]
+position = Vector3(-11, 1.1, -7)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="StepB"]
+shape = SubResource("BoxShape3D_stepB")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="StepB"]
+mesh = SubResource("BoxMesh_stepB")
+material_override = SubResource("StandardMaterial3D_stepB")
+
+[node name="Tower" type="StaticBody3D" parent="."]
+position = Vector3(-14, 2.2, -7)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Tower"]
+shape = SubResource("BoxShape3D_tower")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Tower"]
+mesh = SubResource("BoxMesh_tower")
+material_override = SubResource("StandardMaterial3D_tower")
+
+[node name="CrateA" parent="." instance=ExtResource("2_crate")]
+position = Vector3(2.5, 0.5, -2)
+tint = Color(0.91, 0.66, 0.33, 1)
+mass = 4.0
+
+[node name="MeshInstance3D" parent="CrateA/Visual"]
+material_override = SubResource("StandardMaterial3D_crateA")
+
+[node name="CrateB" parent="." instance=ExtResource("2_crate")]
+position = Vector3(-2, 0.5, -3.5)
+tint = Color(0.42, 0.68, 0.88, 1)
+mass = 4.0
+
+[node name="MeshInstance3D" parent="CrateB/Visual"]
+material_override = SubResource("StandardMaterial3D_crateB")
+
+[node name="CrateC" parent="." instance=ExtResource("2_crate")]
+position = Vector3(4, 0.5, 2.5)
+tint = Color(0.7, 0.52, 0.86, 1)
+mass = 6.0
+
+[node name="MeshInstance3D" parent="CrateC/Visual"]
+material_override = SubResource("StandardMaterial3D_crateC")
+
+[node name="BallA" parent="." instance=ExtResource("3_sphere")]
+position = Vector3(-3.5, 0.5, 1.5)
+tint = Color(0.95, 0.5, 0.58, 1)
+mass = 1.5
+
+[node name="MeshInstance3D" parent="BallA/Visual"]
+material_override = SubResource("StandardMaterial3D_ballA")
+
+[node name="BallB" parent="." instance=ExtResource("3_sphere")]
+position = Vector3(1.5, 0.5, 4)
+tint = Color(0.45, 0.78, 0.55, 1)
+mass = 1.5
+
+[node name="MeshInstance3D" parent="BallB/Visual"]
+material_override = SubResource("StandardMaterial3D_ballB")
+
+[node name="Camera" type="Node3D" parent="."]
+script = ExtResource("4_camera")
+
+[node name="Player" type="CharacterBody3D" parent="."]
+script = ExtResource("5_avatar")
+body_color = Color(0.62, 0.83, 0.72, 1)
+position = Vector3(0, 1, 0)
+
+[node name="DummyA" type="CharacterBody3D" parent="."]
+script = ExtResource("5_avatar")
+body_color = Color(0.98, 0.75, 0.62, 1)
+position = Vector3(4, 1, -6)
+
+[node name="DummyB" type="CharacterBody3D" parent="."]
+script = ExtResource("5_avatar")
+body_color = Color(0.97, 0.88, 0.58, 1)
+position = Vector3(-5, 1, -2)
+
+[node name="DummyC" type="CharacterBody3D" parent="."]
+script = ExtResource("5_avatar")
+body_color = Color(0.78, 0.72, 0.92, 1)
+position = Vector3(2, 1, 6)
+

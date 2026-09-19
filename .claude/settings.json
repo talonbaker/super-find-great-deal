@@ -1,0 +1,44 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh"
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(git status*)",
+      "Bash(git log*)",
+      "Bash(git diff*)",
+      "Bash(git show*)",
+      "Bash(git branch --show-current)",
+      "Bash(git branch -a*)",
+      "Bash(git rev-parse*)",
+      "Bash(git cat-file*)",
+      "Bash(git ls-files*)",
+      "Bash(git worktree list*)",
+      "Bash(git fetch*)",
+      "Bash(gh pr list*)",
+      "Bash(gh pr view*)",
+      "Bash(gh issue list*)",
+      "Bash(gh issue view*)",
+      "PowerShell(git status*)",
+      "PowerShell(git log*)",
+      "PowerShell(git diff*)",
+      "PowerShell(git show*)",
+      "PowerShell(git branch --show-current)",
+      "Bash(dotnet build*)",
+      "Bash(powershell -File tests/Run-*)",
+      "Bash(powershell -NoProfile -ExecutionPolicy Bypass -File tests/Run-*)",
+      "PowerShell(dotnet build*)",
+      "PowerShell(powershell -File tests\\Run-*)",
+      "PowerShell(powershell -NoProfile -ExecutionPolicy Bypass -File .\\tests\\Run-*)"
+    ]
+  }
+}

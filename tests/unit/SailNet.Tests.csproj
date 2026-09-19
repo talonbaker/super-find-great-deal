@@ -1,0 +1,64 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Godot-free unit + fuzz suite for the pure networking foundation (scripts/net/).
+
+    Referencing mechanism for Godot types:
+    The foundation classes under test (NetCodec, SnapshotBuffer, MoveState, ...) use
+    Godot value types such as Godot.Vector3 and the pure static math in Godot.Mathf.
+    Those live in GodotSharp.dll, an ordinary managed assembly with NO native engine
+    dependency for the struct math and codec paths these tests exercise, so they run
+    without a Godot editor or runtime present.
+
+    We take a ProjectReference on the game's WatisWorld.csproj. That does three things
+    in one line: (1) builds the game so its output is fresh, (2) exposes every public
+    foundation type, and (3) flows GodotSharp.dll in transitively as a runtime dependency.
+    So MpFoundation.dll and GodotSharp.dll both land next to the test assembly.
+
+    The game project is a Godot.NET.Sdk project; a plain Microsoft.NET.Sdk project can
+    still reference it because the produced MpFoundation.dll / GodotSharp.dll are normal
+    .NET 8 managed assemblies. No Godot editor, runtime, or ProjectSettings are touched
+    by anything these tests call (all targets are static/pure or plain data structs).
+
+    Scope / one skipped test:
+    Every target parses/round-trips without a live engine, so nothing was skipped for
+    engine reasons. There is ONE [Fact(Skip=...)]:
+    ServerInputQueueTests.SeqApproachingUintMax_InOrderStream_DrainsInsteadOfWedging.
+    It encodes the correct non-wedge invariant for the uint sequence boundary, but the
+    overflow-safe guard it needs (`seq - _lastConsumed > MaxSeqLead`) is NOT present in
+    this branch: ServerInputQueue still uses `seq > _lastConsumed + MaxSeqLead`, whose
+    addition overflows near uint.MaxValue. The current (buggy) behavior is pinned green by
+    the companion test SeqNearUintMax_CurrentBranch_WedgesQueue_RegressionMarker. When the
+    guard lands, that marker goes red: delete it and un-skip the invariant test. (Fixing
+    ServerInputQueue is out of scope here — tests are additive only.)
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+
+    <RootNamespace>SailNet.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.6.0" />
+    <PackageReference Include="xunit" Version="2.4.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.4.5">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="coverlet.collector" Version="6.0.0">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\WatisWorld.csproj" />
+  </ItemGroup>
+
+</Project>

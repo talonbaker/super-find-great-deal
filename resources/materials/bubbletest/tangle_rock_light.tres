@@ -1,0 +1,27 @@
+; TANGLE ROCK, LIGHT -- rung 2 plus 5.0 L*. NOT A FOURTH RUNG, and the distinction is the
+; reason this file carries an explanation at all. Palette header: `tangle_ground.tres`.
+;
+; WHY THREE ROCK TONES EXIST. The lab authored the pile in three greys (0.66 / 0.52 / 0.38 sRGB)
+; and it is the only reason a hundred and seven overlapping boxes read as a pile rather than as
+; one lump: the eye needs some variation to separate a near block from the one behind it, and
+; this zone offers no other cue -- no silhouette break, no edge line, no texture. Porting the
+; geometry without the tones would have ported the shape and dropped the thing that made it
+; legible.
+;
+; WHY THEY ARE COMPRESSED, and the number is chosen rather than inherited. The lab's spread is
+; 1.65x / 1.00x / 0.51x in linear luminance, which at DARK-1b's grade puts the light tone at
+; L* 31.7 -- 2.6 L* under the GOAL rung, i.e. a near-grey block sitting at the value of the one
+; saturated surface the section owns. At +/-5.0 L* instead, the light tone stays 4.9 L* below
+; the goal and the dark tone 22.3 L* below the ground, so the three TONES read as rock variation
+; and the three RUNGS keep their jobs.
+;
+; WHICH BLOCKS WEAR IT is the lab's own rule, ported unchanged: every third spine block, and
+; every stair tread but the last ("large clean blocks -- reads as steppable").
+; Rung 2 + 5.0. Measured L* = 29.37.
+[gd_resource type="StandardMaterial3D" format=3]
+
+[resource]
+albedo_color = Color(0.271, 0.271, 0.275, 1)
+roughness = 0.88
+metallic = 0.0
+metallic_specular = 0.35

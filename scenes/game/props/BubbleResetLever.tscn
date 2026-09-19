@@ -1,0 +1,133 @@
+[gd_scene load_steps=8 format=3 uid="uid://bt8lever00"]
+
+[ext_resource type="Script" path="res://scripts/game/bubble/BubbleResetLever.cs" id="1_lever"]
+
+[sub_resource type="BoxMesh" id="BoxMesh_base"]
+size = Vector3(0.7, 0.9, 0.5)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_base"]
+size = Vector3(0.7, 0.9, 0.5)
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_shaft"]
+top_radius = 0.045
+bottom_radius = 0.055
+height = 0.7
+radial_segments = 10
+
+[sub_resource type="SphereMesh" id="SphereMesh_knob"]
+radius = 0.09
+height = 0.18
+radial_segments = 12
+rings = 6
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_base"]
+albedo_color = Color(0.16, 0.17, 0.19, 1)
+roughness = 0.85
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_handle"]
+albedo_color = Color(0.85, 0.55, 0.25, 1)
+roughness = 0.5
+emission_enabled = true
+emission = Color(1, 0.78, 0.42, 1)
+emission_energy_multiplier = 0.25
+
+[node name="BubbleResetLever" type="Node3D"]
+script = ExtResource("1_lever")
+
+[node name="Base" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.45, 0)
+
+[node name="Mesh" type="MeshInstance3D" parent="Base"]
+mesh = SubResource("BoxMesh_base")
+material_override = SubResource("StandardMaterial3D_base")
+
+[node name="Shape" type="CollisionShape3D" parent="Base"]
+shape = SubResource("BoxShape3D_base")
+
+[node name="Handle" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
+
+[node name="Mesh" type="MeshInstance3D" parent="Handle"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.35, 0)
+mesh = SubResource("CylinderMesh_shaft")
+material_override = SubResource("StandardMaterial3D_handle")
+
+[node name="Knob" type="MeshInstance3D" parent="Handle"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.72, 0)
+mesh = SubResource("SphereMesh_knob")
+material_override = SubResource("StandardMaterial3D_handle")
+
+; LEVER-1 (2026-08-29) -- the sign Talon asked for, and the surface his warning lands on.
+;
+;   "There needs to be a sign at least that it will reset the bubble counter and a warning ...
+;    because I would be upset if I spent hours collecting all the bubbles and then someone reset
+;    my progress."
+;
+; FOUR faces, not one. This lever stands free in the open 1.5 m east of the plinth, so it is
+; walked up to from every direction; the hub's own plinth signs get away with two because a
+; plinth has a front. One plate per face of the base, 12 mm proud of it, so the lever says what
+; it does from wherever a player arrives.
+;
+; NOT BILLBOARDED, and the mode is written out explicitly below rather than left to the engine
+; default so the intent is legible in the file: UI-1 removed five camera-facing SectionLabels
+; from this very level on 2026-08-28 because Talon objected to hover UI, and adding one back in
+; the same week would be undoing his note with his other note. Godot may strip an explicit
+; default on an editor re-save, so the test guarding this asserts the ABSENCE of any ENABLED
+; billboard mode -- with the five in scenes/dev/ArcheryLab.tscn as its positive control --
+; rather than the presence of the line below.
+;
+; TEXT is authored here AND written at runtime by BubbleResetLever.ApplySigns. The scene copy is
+; what the editor and the packed-scene test see; the runtime copy is what swaps in the warning
+; and the live tally. They must say the same idle words -- BubbleResetLever.SignIdleText is the
+; source and a unit test pins the two together.
+;
+; SIZE is measured, not guessed. font_size 96 x pixel_size 0.00035 = 0.0336 m/em, so a cap is
+; ~23 mm and the longest line (18 characters) is ~0.41 m -- inside the 0.5 m narrow face. At the
+; 1.6 m PressRadius a player actually stands at, a 23 mm cap subtends ~50 arcmin, against the
+; ~20 arcmin that reads as comfortable and the ~5 arcmin acuity limit. See the LEVER-1 report
+; for the rendered measurement.
+;
+; UNSHADED (Label3D's default) is deliberate and is the reason there is no light here: the sign
+; has to be readable in this hub at night, and BT-8's "the display is the only light in the
+; scene it ships with" is still true -- an unshaded label emits nothing and lights nothing.
+
+[node name="Signs" type="Node3D" parent="."]
+
+[node name="North" type="Label3D" parent="Signs"]
+position = Vector3(0, 0.55, -0.262)
+rotation = Vector3(0, 3.1415927, 0)
+billboard = 0
+pixel_size = 0.00035
+double_sided = false
+text = "RESET\nALL BUBBLES RETURN\nCOUNT BACK TO ZERO"
+font_size = 96
+outline_size = 8
+
+[node name="South" type="Label3D" parent="Signs"]
+position = Vector3(0, 0.55, 0.262)
+billboard = 0
+pixel_size = 0.00035
+double_sided = false
+text = "RESET\nALL BUBBLES RETURN\nCOUNT BACK TO ZERO"
+font_size = 96
+outline_size = 8
+
+[node name="East" type="Label3D" parent="Signs"]
+position = Vector3(0.362, 0.55, 0)
+rotation = Vector3(0, 1.5707963, 0)
+billboard = 0
+pixel_size = 0.00035
+double_sided = false
+text = "RESET\nALL BUBBLES RETURN\nCOUNT BACK TO ZERO"
+font_size = 96
+outline_size = 8
+
+[node name="West" type="Label3D" parent="Signs"]
+position = Vector3(-0.362, 0.55, 0)
+rotation = Vector3(0, -1.5707963, 0)
+billboard = 0
+pixel_size = 0.00035
+double_sided = false
+text = "RESET\nALL BUBBLES RETURN\nCOUNT BACK TO ZERO"
+font_size = 96
+outline_size = 8

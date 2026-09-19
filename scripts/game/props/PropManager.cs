@@ -1,0 +1,1029 @@
+using Godot;
+using MpFoundation.Net;
+using MpFoundation.Game.Sandbox;
+
+namespace MpFoundation.Game.Props;
+
+/// <summary>
+/// The single netcode funnel for objects, living under <c>Gameplay</c>. On the server it owns the
+/// authoritative <see cref="PropRegistry"/> and drives the <c>PropSpawner</c>; on every peer it
+/// provides the shared spawn function so a prop is born identically everywhere. The reliable
+/// ownership/discrete events, the late-join dump, and the loose-transform stream all hang off
+/// this same node (a stable node name means its RPCs route on every peer).
+/// </summary>
+public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
+{
+    public const string NodeName = "PropManager";
+
+    /// <summary>How much further than the client's own reach the server will accept a grab.
+    ///
+    /// Client and server reach are ONE number with a stated tolerance, not two independently
+    /// authored constants — they were 1.5 m client and 3.0 m server, a 2x divergence nobody
+    /// had actually decided on (INTERACTION-BIBLE 4).
+    ///
+    /// The tolerance is not slack for its own sake: the client tests reach against its
+    /// *predicted* position and the server against the *authoritative* one, and those differ
+    /// by up to a round trip of movement. At the 4.86 m/s sprint ceiling
+    /// (<c>AvatarMotor.MoveSpeed</c> x <c>SprintMultiplier</c>), 0.75 m is ~155 ms of travel
+    /// — enough that a legitimately in-range grab is never rejected for lag, tight enough
+    /// that the server is not quietly handing out double reach.</summary>
+    internal const float GrabRangeTolerance = 0.75f;
+
+    /// <summary>Server-side grab range: the client's reach plus the latency tolerance.</summary>
+    private const float GrabRange = SandboxAvatar.PickupRadius + GrabRangeTolerance;
+
+    /// <summary>Grab range, squared (server-side proximity check uses authoritative positions).</summary>
+    private const float GrabRangeSq = GrabRange * GrabRange;
+
+    /// <summary>Test hook: the derived server reach, so the self-test can assert it stays
+    /// tied to the client's without reaching into private state.</summary>
+    internal const float TestGrabRange = GrabRange;
+
+    /// <summary>Why a grab request was refused. Ordinals cross the wire — append only.</summary>
+    public enum GrabDenial
+    {
+        None = 0,
+        /// <summary>The single-slot rule: holding anything refuses every further grab. Put the
+        /// thing in your hand down (drop or throw) to take another. A refusal rather than a
+        /// silent swap, so nothing a player is carrying is ever released by a press that was
+        /// meant as a pickup.</summary>
+        HandsFull = 1,
+        /// <summary>Outside the server's authoritative reach.</summary>
+        OutOfRange = 2,
+        /// <summary>Someone else won the first-grab-wins race.</summary>
+        Taken = 3,
+        /// <summary>The prop is unknown, despawned, or has no node.</summary>
+        Gone = 4,
+
+        /// <summary>You are already carrying this exact prop. Reachable whenever the client's
+        /// view of its own hand lags the server's — press E, packet in flight, press E again —
+        /// and the honest answer is neither "taken" (nobody stole it) nor silence. It used to be
+        /// a bare return, which meant that second press produced literally nothing: no cue, no
+        /// reason, indistinguishable from an unresponsive game (INTERACTION-BIBLE 2, the same
+        /// defect class the other four ordinals exist to avoid). Appended; ordinals ride the
+        /// wire.</summary>
+        AlreadyHeld = 5,
+    }
+
+    /// <summary>Raised on the requesting peer when the server refuses a grab. The avatar
+    /// subscribes to turn it into a cue the player can actually perceive.</summary>
+    public event System.Action<GrabDenial>? GrabDenied;
+
+    /// <summary>Test hook: the most recent denial delivered to this peer.</summary>
+    internal GrabDenial LastDenial { get; private set; } = GrabDenial.None;
+
+    // --- Loose-physics tuning (server-only; see the _PhysicsProcess loop below) -----------
+    /// <summary>Below this linear speed squared (~0.2 m/s), a Loose prop is considered
+    /// candidate-at-rest and starts accumulating settle ticks.</summary>
+    private const float SettleSpeedSq = 0.04f;
+    /// <summary>Consecutive slow ticks (~0.3s at 60 Hz) required before latching to Resting —
+    /// long enough that a prop resting on an unstable stack or mid-bounce doesn't false-latch.</summary>
+    private const int SettleTicks = 18;
+
+    // Throw impulse: mirrors SandboxAvatar's own offline throw constants (ThrowForwardSpeed /
+    // ThrowUpSpeed) so a networked throw feels identical to the sandbox one.
+    private const float ThrowForwardSpeed = 7.5f;
+    private const float ThrowUpSpeed = 3.2f;
+    // Drop is a much gentler toss than a throw — matches Carryable.OnDropped's offline arc
+    // (a light lob off the holder's facing, not a hurl) now that drops go through Loose too.
+    private const float DropForwardSpeed = 1.3f;
+    private const float DropUpSpeed = 2.2f;
+
+    /// <summary>First id handed to an authored (adopted) prop — see <see cref="AdoptAuthoredProps"/>.
+    /// Comfortably above any runtime-spawned prop's id (PropRegistry.Register starts at 1 and a
+    /// world seeds at most a handful), so the two id spaces can never collide.</summary>
+    private const int AuthoredIdBase = 1000;
+
+    private MultiplayerSpawner _spawner = null!;
+    private Node3D _propsRoot = null!;
+    private bool _isServer;
+
+    // Server-only source of truth. Clients learn prop state from spawns + events/dumps.
+    private readonly PropRegistry _registry = new();
+
+    // Authored props adopted (never spawned) into the netcode — see AdoptAuthoredProps. Populated
+    // identically on every peer; on the server each entry is also mirrored into _registry.
+    private readonly System.Collections.Generic.Dictionary<int, NetworkedProp> _adopted = new();
+
+    // Server-only: consecutive low-speed ticks per Loose prop id, toward the settle latch.
+    private readonly System.Collections.Generic.Dictionary<int, int> _looseSettle = new();
+
+    // Reused every physics tick instead of allocating a fresh List<PropState> — this loop needs
+    // a snapshot because a Loose prop settling to Resting mutates the registry mid-iteration, but
+    // the snapshot itself doesn't need to be a new heap allocation every single tick (see
+    // RISK-AUDIT-2026-07-12.md 2.2).
+    private readonly System.Collections.Generic.List<PropState> _loosePropsScratch = new();
+
+    // Server-only loose-stream throttle: a sim-tick counter for the 30 Hz cadence gate, the last
+    // transform actually broadcast per prop (for skip-unchanged), and the position epsilon below
+    // which a re-broadcast is redundant (~0.5 cm).
+    private uint _streamTick;
+    private readonly System.Collections.Generic.Dictionary<int, Transform3D> _lastStreamed = new();
+    private const float StreamPosEpsilonSq = 0.005f * 0.005f;
+
+    // Which prop is in each peer's HAND, ON EVERY PEER (server included) — the replicated answer
+    // to "what is that player carrying". One prop per peer, by rule (see GrabDenial.HandsFull).
+    // Maintained solely inside ApplyPropState (Authority + Reliable + CallLocal), which is the
+    // single funnel every prop-state change runs through: a Held transition binds the holder, a
+    // Resting/Loose transition releases whoever had it. There is no second source of truth for
+    // holder state on a client, and on the server this agrees with the registry by construction
+    // because both are written from the same broadcast. FindHeldBy is O(1) (a dictionary hit
+    // plus NodeFor's own name/adopted lookup) — RISK-AUDIT-2026-07-12.md 2.3's reason for a
+    // held-by-peer cache is preserved.
+    private readonly System.Collections.Generic.Dictionary<int, int> _heldByPeer = new();
+
+    /// <summary>Peer id -> that peer's avatar node, or null if not found. Set by Gameplay after
+    /// avatars are spawnable, so the server can resolve a grabbing/dropping peer's authoritative
+    /// position. Unused on clients (they never arbitrate).</summary>
+    public System.Func<int, Node3D?>? AvatarResolver { get; set; }
+
+    // The world string SpawnInitialProps last seeded (CORE-PROG-A2) — what the boundary restore
+    // re-runs; empty until the server has seeded once.
+    private string _world = "";
+
+    // Adopted authored props' adoption-time transforms (CORE-PROG-A2): the boundary restore
+    // returns them here rather than despawning them (they were never spawner-spawned).
+    private readonly System.Collections.Generic.Dictionary<int, Transform3D> _adoptedInitial = new();
+
+    public void Setup(MultiplayerSpawner spawner, Node3D propsRoot, bool isServer)
+    {
+        _spawner = spawner;
+        _propsRoot = propsRoot;
+        _isServer = isServer;
+        // Every peer runs its own copy of this to build the replicated prop locally.
+        _spawner.SpawnFunction = new Callable(this, MethodName.SpawnFromData);
+        // CORE-PROG-A2 (core-spine spec §5.2, "props" row): the map-scoped slice whose
+        // playthrough-boundary reset restores the initial dump. Null-safe: labs and self-tests
+        // construct this manager with no store and keep today's no-reset behavior.
+        Sail.Game.Run.WorldStateStore.Instance?.Register(this);
+    }
+
+    /// <summary>Server: spawns the initial networked props for a world. Only the dedicated
+    /// "propsync" CI world seeds test props (keeping the plain "open" replication test
+    /// prop-free and unperturbed) — a neutral crate/ball pair plus a third crate placed to
+    /// prove out-of-bounds recovery (see the throw-test comment below). Every other world
+    /// string starts prop-free; a game built on this foundation calls ServerSpawn itself
+    /// (or extends this method) to seed its own layout.</summary>
+    public void SpawnInitialProps(string world)
+    {
+        if (!_isServer)
+            return;
+        // Captured for the playthrough boundary's initial-dump restore (CORE-PROG-A2):
+        // ResetForNewPlaythrough re-runs this exact method with this exact string.
+        _world = world;
+
+        // --seed-test-props: a CI fixture, in whatever world is running, ahead of the per-world
+        // block below (CARRY-1, 2026-08-29). See LaunchOptions.SeedTestProps for why a launch flag
+        // rather than level content: the networked-carry proof has to carry a prop through a TV
+        // portal, portals live only in bubbletest, and bubbletest is deliberately prop-free. Empty
+        // on every launch that did not ask, so this loop does nothing in a real session.
+        //
+        // Ordinary ServerSpawn, ordinary PropKind.Crate: a seeded crate is indistinguishable from
+        // a propsync crate the moment it is in someone's hands, which is the whole point — a
+        // fixture with its own carry path would prove nothing about carry.
+        if (NetworkManager.Instance?.Options.SeedTestProps is { Count: > 0 } seeded)
+        {
+            foreach (Vector3 at in seeded)
+                ServerSpawn(PropKind.Crate, PlaceAt(at));
+            GD.Print($"[props] --seed-test-props: seeded {seeded.Count} test crate(s) in world '{world}'");
+        }
+
+        if (world != "propsync")
+            return;
+        ServerSpawn(PropKind.Crate, PlaceAt(new Vector3(2.5f, 0.5f, 2.5f)));
+        ServerSpawn(PropKind.Ball, PlaceAt(new Vector3(-2.5f, 0.5f, -2.5f)));
+        // Prop 3: near-zero X, deep +Z, close to the open field's finite ground slab's edge
+        // (a 64x64 box, so the floor ends at |z|=32). Near-zero X keeps every ring spawn
+        // point's straight-line walk to it inside the x in [-4,4] corridor. Run-ThrowTest.ps1's
+        // OOB-recovery bot throws it from here — easily clearing the slab edge — so it falls into
+        // the void and past the shared kill-plane, proving a networked prop recovers to its
+        // spawn transform.
+        ServerSpawn(PropKind.Crate, PlaceAt(new Vector3(2f, 0.5f, 30.5f)));
+    }
+
+    /// <summary>Server: permanently removes a prop — e.g. a game-specific consumable slot
+    /// or hazard claiming it. Frees the server's node, which the MultiplayerSpawner mirrors
+    /// as a despawn on every peer (late joiners simply never see it). No take-backs by
+    /// design.
+    ///
+    /// <b>Releases the prop from its holder first, and that is load-bearing, not tidiness.</b>
+    /// Nothing about a MultiplayerSpawner despawn tells a peer that the prop has left a hand. So
+    /// consuming a prop while somebody was holding it would leave every peer's holder state
+    /// naming a freed <see cref="NetworkedProp"/>, and the very next <see cref="FindHeldBy"/> —
+    /// which <c>SandboxAvatar.HandleCarryIntent</c> calls on the holder's own next Interact press
+    /// — would touch a disposed GodotObject. The release rides a Resting broadcast through
+    /// <see cref="ApplyPropState"/>, the one funnel every peer's held-by-peer view is written
+    /// from, so every peer learns before the node goes away. The registry removal still happens
+    /// first: it is what gates whether this is a real prop at all, and so stops a bogus id from
+    /// emitting anything.</summary>
+    public bool ServerConsume(int propId)
+    {
+        if (!_isServer || !_registry.TryGet(propId, out PropState s) || !_registry.Remove(propId))
+            return false;
+        _looseSettle.Remove(propId);
+        _lastStreamed.Remove(propId);
+        if (s.Mode == PropMode.Held)
+        {
+            Transform3D at = NodeFor(propId)?.Body.GlobalTransform ?? s.Transform;
+            Rpc(MethodName.ApplyPropState, propId, (int)PropMode.Resting, 0, at);
+        }
+        NodeFor(propId)?.QueueFree();
+        return true;
+    }
+
+    /// <summary>Which prop kinds the BODY poses as an armful — both arms under a bulky load —
+    /// rather than as a one-handed grip on a handle.
+    ///
+    /// <b>This is a POSE question, not a carry rule</b> (W7-8, 2026-08-30). A 0.44 m golden cube
+    /// posed <c>CarryPose.Handle</c> put the wrist ~0.22 m INSIDE the mesh with the other arm on
+    /// the gait, which is exactly what Talon saw: <i>"the hands of the player character don't
+    /// actually move to indicate anything is being held."</i> Nothing reads this method except the
+    /// visual pose; it changes no gameplay at all.
+    ///
+    /// <b>The rule is "does it have a handle to grip".</b> A crate and a ball do not: both arms,
+    /// under and either side. <see cref="CarryPose"/>'s own doc already said this is how it works —
+    /// <i>"It names a POSE, never a rule about what may be carried"</i> — the pose layer simply
+    /// had no predicate of its own to ask. Every shipped kind is an armful today; the predicate
+    /// stays so a future handled kind is one line here rather than a scattered special case.</summary>
+    public static bool IsArmfulPose(PropKind kind) =>
+        kind is PropKind.Crate or PropKind.Ball;
+
+    /// <summary>Which prop kinds ride slightly ABOVE the carry mount so the armful hands end up
+    /// under the load instead of inside it — see <c>Carryable.ArmfulLoadLiftFraction</c> for the
+    /// geometry and the value. Exactly the armful-posed kinds, expressed through
+    /// <see cref="IsArmfulPose"/> rather than as a second literal list so it cannot drift out of
+    /// step with the pose predicate.</summary>
+    public static bool TakesLoadLift(PropKind kind) => IsArmfulPose(kind);
+
+    /// <summary>Server-only: drives every Loose prop's physics tick. Streams its live transform
+    /// to every peer (unreliable — the next tick supersedes a dropped one), latches it to Resting
+    /// once it has stayed slow for <see cref="SettleTicks"/> consecutive ticks, and recovers it to
+    /// its spawn transform if it ever falls below the shared out-of-bounds kill-plane (thrown
+    /// through a wall, off a ledge — mirrors the offline Carryable's own OOB fallback) so a
+    /// networked prop can never be permanently lost either.</summary>
+    public override void _PhysicsProcess(double delta)
+    {
+        if (!_isServer)
+            return;
+        _streamTick++;
+        // Reuse a persistent scratch list instead of allocating a fresh List<PropState> every
+        // physics tick (60 Hz) - this loop needs a snapshot because a Loose prop settling to
+        // Resting mutates the registry mid-iteration, but the snapshot itself doesn't need to be
+        // a new heap allocation every single tick (see RISK-AUDIT-2026-07-12.md 2.2). Early-out
+        // entirely when nothing is Loose - the common case is zero loose props on most ticks.
+        _loosePropsScratch.Clear();
+        foreach (PropState p in _registry.All)
+        {
+            if (p.Mode == PropMode.Loose)
+                _loosePropsScratch.Add(p);
+            else
+            {
+                _looseSettle.Remove(p.Id);
+                _lastStreamed.Remove(p.Id);
+            }
+        }
+        if (_loosePropsScratch.Count == 0)
+            return;
+
+        // Broadcast the transform at 30 Hz (every other 60 Hz sim tick) to match the avatar
+        // snapshot cadence — the stream is unreliable latest-wins so clients converge either way,
+        // and the reliable Resting transition carries the exact final pose, so throttling can
+        // never leave a prop visually stuck (see RISK-AUDIT-2026-07-12.md 2.1). Physics, settle
+        // detection, and kill-plane recovery below still run every tick.
+        bool streamThisTick = (_streamTick & 1u) == 0u;
+
+        foreach (PropState p in _loosePropsScratch)
+        {
+            NetworkedProp? node = NodeFor(p.Id);
+            if (node == null)
+                continue;
+
+            if (node.Body.GlobalPosition.Y < Carryable.KillPlaneY)
+            {
+                _registry.SetResting(p.Id, node.HomeTransform);
+                node.SettleToRest(node.HomeTransform);
+                Rpc(MethodName.ApplyPropState, p.Id, (int)PropMode.Resting, 0, node.HomeTransform);
+                _looseSettle.Remove(p.Id);
+                _lastStreamed.Remove(p.Id);
+                continue;
+            }
+
+            Transform3D t = node.Body.GlobalTransform;
+            _registry.SetLooseTransform(p.Id, t);
+            // 30 Hz + skip-unchanged: don't re-broadcast a transform that hasn't meaningfully
+            // moved since the last sample (a near-settled prop barely drifts). The final pose
+            // still arrives reliably via the Resting transition below.
+            if (streamThisTick
+                && (!_lastStreamed.TryGetValue(p.Id, out Transform3D last)
+                    || t.Origin.DistanceSquaredTo(last.Origin) > StreamPosEpsilonSq
+                    || !t.Basis.IsEqualApprox(last.Basis)))
+            {
+                Rpc(MethodName.StreamLoose, p.Id, t);
+                _lastStreamed[p.Id] = t;
+            }
+
+            if (node.Body.LinearVelocity.LengthSquared() < SettleSpeedSq)
+            {
+                int c = _looseSettle.GetValueOrDefault(p.Id) + 1;
+                _looseSettle[p.Id] = c;
+                if (c >= SettleTicks)
+                {
+                    _registry.SetResting(p.Id, t);
+                    node.SettleToRest(t);
+                    Rpc(MethodName.ApplyPropState, p.Id, (int)PropMode.Resting, 0, t);
+                    _looseSettle.Remove(p.Id);
+                    _lastStreamed.Remove(p.Id);
+                }
+            }
+            else
+            {
+                _looseSettle[p.Id] = 0;
+            }
+        }
+    }
+
+    /// <summary>Server: registers a prop (assigning its stable id) and spawns it through the
+    /// spawner, which replicates it to every connected peer and to any that join later. This is
+    /// the single netcode funnel for objects, so the server-authority guard lives here (not just
+    /// in callers like <see cref="SpawnInitialProps"/>): a client-side call would otherwise
+    /// increment this peer's local-only <c>_nextId</c> and spawn a phantom node that desyncs
+    /// <see cref="NodeFor"/> id-resolution on that client. Returns null off-server.</summary>
+    public NetworkedProp? ServerSpawn(PropKind kind, Transform3D at)
+    {
+        if (!_isServer)
+            return null;
+        int id = _registry.Register(kind, at);
+        var data = new Godot.Collections.Array { id, (int)kind, at };
+        return (NetworkedProp)_spawner.Spawn(data);
+    }
+
+    /// <summary>The prop node for an id, or null. Checks adopted (authored) props first, then
+    /// falls back to the runtime-spawned root by node name (the id) — same contract on every
+    /// peer either way, so every grab/drop/throw RPC, the held-dump, and the loose stream all
+    /// work unchanged regardless of which path a prop came from.</summary>
+    public NetworkedProp? NodeFor(int id) =>
+        _adopted.TryGetValue(id, out NetworkedProp? adopted)
+            ? adopted
+            : _propsRoot.GetNodeOrNull<NetworkedProp>(id.ToString());
+
+    /// <summary>Test-only (SandboxSelfTest): force a spawned prop into PropMode.Loose at
+    /// <paramref name="at"/> without a player grab/drop round-trip, so a headless test can set up
+    /// a "loose prop in the field" precondition without a live grab/drop round-trip. Runs the
+    /// registry through the same Held -> Loose path a real drop takes. Server-only; no live peer
+    /// required.</summary>
+    internal void TestForceLoose(int propId, Transform3D at)
+    {
+        if (!_isServer)
+            return;
+        _registry.SetHolder(propId, 1);
+        _registry.Release(propId, at);
+    }
+
+    /// <summary>The prop in this peer's HAND, or null. Every caller (encumbrance prediction, the
+    /// carry-visual pose, HandleCarryIntent's drop/throw branch, BotHarness) means "the thing
+    /// they are actually using", and that is exactly one prop.
+    ///
+    /// Reads the replicated held-by-peer view rather than a private cache, so it is correct on
+    /// every peer (a teammate's hand included).</summary>
+    public NetworkedProp? FindHeldBy(int peerId) =>
+        _heldByPeer.TryGetValue(peerId, out int propId) ? NodeFor(propId) : null;
+
+    /// <summary>Total mass this peer is carrying, for encumbrance. Server and owner-prediction
+    /// both call this so they compute the same number from the same replicated state
+    /// (RISK-AUDIT-2026-07-12.md 4.1: never trust a client-reported speed factor).</summary>
+    public float CarriedMassKgFor(int peerId)
+    {
+        NetworkedProp? node = FindHeldBy(peerId);
+        return node != null && GodotObject.IsInstanceValid(node.Body) ? node.Body.MassKg : 0f;
+    }
+
+    /// <summary>Every known prop on this peer — runtime-spawned (under the PropSpawner) plus
+    /// adopted authored ones — for instrumentation (see BotHarness). Not used by any gameplay
+    /// path; those all go through <see cref="NodeFor"/>/<see cref="FindHeldBy"/> above.</summary>
+    public System.Collections.Generic.IEnumerable<NetworkedProp> AllProps()
+    {
+        foreach (Node child in _propsRoot.GetChildren())
+            if (child is NetworkedProp p)
+                yield return p;
+        foreach (NetworkedProp p in _adopted.Values)
+            yield return p;
+    }
+
+    /// <summary>Count of runtime-spawned props only (children of the PropSpawner's root) —
+    /// excludes adopted authored props, which never live here (see AdoptAuthoredProps). Reconnect
+    /// instrumentation (BotHarness): the teardown Task A1 added frees exactly this container's
+    /// children, so this is what should read back to the pre-drop count after a resume.</summary>
+    public int RuntimePropCount => _propsRoot.GetChildCount();
+
+    /// <summary>Client-only: clears every peer's held-by-peer view (see <see cref="FindHeldBy"/>).
+    /// Called by Gameplay's reconnect teardown right before it frees the stale prop/avatar nodes
+    /// these entries refer to, so nothing here outlives the nodes it names.
+    /// Harmless no-op on the server (the authoritative registry lives in <c>_registry</c> and the
+    /// server's own view is rebuilt from it); the resumed session's dump
+    /// (<see cref="SendDumpTo"/>) rebuilds this dictionary fresh through the normal
+    /// <see cref="ApplyPropState"/> funnel, same as a late joiner. Held-prop RESTORATION across the
+    /// gap (P2) is deliberately not this method's job — see Task A2.
+    ///
+    /// <b>Clears ALL peers' entries, not just the local one.</b> A stale entry surviving a resume
+    /// would name a prop on an avatar node that no longer exists.</summary>
+    public void ClientResetHeldState() => _heldByPeer.Clear();
+
+    // --- The playthrough boundary (CORE-PROG-A2, core-spine spec §5.2 "props" row) ------------
+
+    public string SliceId => "props";
+
+    /// <summary>Reserved across-nights write path (spec §5.5) — no-op today; a dropped prop
+    /// staying where it fell across nights IS the map remembering (canon fact 8), and within
+    /// one server process that persistence is free.</summary>
+    public void CaptureNightSnapshot(int round) { }
+
+    /// <summary>The initial-dump restore. Server-only: every client's view converges through the
+    /// same funnels every live change uses (prop-state broadcasts, spawner despawns/spawns) — a
+    /// client-local clear here would race those in-flight messages across channels, so clients
+    /// deliberately do nothing.
+    ///
+    /// Idempotent (spec §5.3): a second run over an already-restored world despawns the fresh
+    /// dump and seeds an identical one — state-identical, though the ids advance.
+    /// <c>_nextId</c> is NEVER rewound (stated for acceptance criterion 3): PropRegistry ids
+    /// stay monotonic across playthrough boundaries so a straggler packet about a pre-reset
+    /// prop can never alias onto a new one (PropRegistry.Remove's rule), and
+    /// PropRegistry.Register already skips occupied ids so the authored id range (1000+) is
+    /// safe no matter how many boundaries a process lives through.</summary>
+    public void ResetForNewPlaythrough()
+    {
+        if (!_isServer)
+            return;
+
+        // 1. Every hand empties (spec §5.2: a new playthrough starts empty-handed) and every
+        //    runtime-spawned prop despawns (the spawner replicates each removal); adopted
+        //    authored props go HOME to their adoption transform instead. A held prop gets a
+        //    Resting broadcast BEFORE its despawn, because nothing about a spawner despawn tells
+        //    a peer the prop has left a hand — ApplyPropState is the one funnel the held-by-peer
+        //    view is written from, and it updates that view even for a node that has already
+        //    gone.
+        var runtimeIds = new System.Collections.Generic.List<int>();
+        foreach (PropState p in _registry.All)
+        {
+            if (_adopted.ContainsKey(p.Id))
+                continue;
+            runtimeIds.Add(p.Id);
+            if (p.Mode == PropMode.Held)
+            {
+                Transform3D at = NodeFor(p.Id)?.Body.GlobalTransform ?? p.Transform;
+                Rpc(MethodName.ApplyPropState, p.Id, (int)PropMode.Resting, 0, at);
+            }
+        }
+        foreach (int id in runtimeIds)
+        {
+            _registry.Remove(id);
+            _looseSettle.Remove(id);
+            _lastStreamed.Remove(id);
+            NodeFor(id)?.QueueFree();
+        }
+        foreach (System.Collections.Generic.KeyValuePair<int, Transform3D> kv in _adoptedInitial)
+        {
+            _registry.SetResting(kv.Key, kv.Value);
+            Rpc(MethodName.ApplyPropState, kv.Key, (int)PropMode.Resting, 0, kv.Value);
+        }
+
+        // 2. The initial dump, again — exactly as session start seeded it. This is the line that
+        //    makes a second run identical to the first.
+        if (_world.Length > 0)
+            SpawnInitialProps(_world);
+
+        GD.Print($"[worldstate] props restored: {runtimeIds.Count} despawned, " +
+                 $"{_registry.Count} in the fresh dump ({_adoptedInitial.Count} adopted rehomed)");
+    }
+
+    /// <summary>Called on EVERY peer, once, after the world node has been added to the tree (so
+    /// its own _Ready has already bound each authored NetworkedProp's Body — see
+    /// NetworkedProp._Ready). Walks the world's node tree for authored NetworkedProp instances
+    /// (never spawns anything — no MultiplayerSpawner involvement, by design) and assigns each a
+    /// stable id, deterministically, by sorting on its node path: identical on every peer since
+    /// every peer instanced the exact same .tscn. On the server this ALSO seeds the authoritative
+    /// PropRegistry at that same id + kind + current (authored) transform, so grab/drop/throw
+    /// arbitration and the late-join dump work for authored props exactly like runtime-spawned
+    /// ones. A no-op for worlds with no authored props ("open"/"propsync" today).</summary>
+    public void AdoptAuthoredProps(Node worldRoot)
+    {
+        var found = new System.Collections.Generic.List<NetworkedProp>();
+        CollectNetworkedProps(worldRoot, found);
+        found.Sort((a, b) => string.CompareOrdinal(a.GetPath().ToString(), b.GetPath().ToString()));
+        for (int i = 0; i < found.Count; i++)
+        {
+            NetworkedProp prop = found[i];
+            int id = AuthoredIdBase + i;
+            PropKind kind = AuthoredKindOf(prop.Body);
+            Transform3D at = prop.GlobalTransform;
+            prop.InitAuthored(id, kind, at);
+            prop.IsServer = _isServer;
+            _adopted[id] = prop;
+            // The authored placement, remembered (CORE-PROG-A2): adopted props cannot be
+            // despawned by the boundary restore, so they return HOME instead — this transform
+            // is where "the initial dump" puts them.
+            _adoptedInitial[id] = at;
+            if (_isServer)
+            {
+                bool registered = _registry.RegisterAt(id, kind, at);
+                System.Diagnostics.Debug.Assert(registered,
+                    $"authored prop id {id} already occupied — id-space collision (see RISK-AUDIT-2026-07-12.md 5.1d)");
+            }
+        }
+    }
+
+    /// <summary>An authored prop's shape, read from its physical collider rather than
+    /// <see cref="Carryable.Kind"/> — confirmed by direct instrumentation that Godot never applies
+    /// a nested PackedScene instance's own exported script properties on this project's Godot/Mono
+    /// build (Crate.tscn/Sphere.tscn's authored <c>kind</c>/<c>tint</c> both silently read back as
+    /// the C# field's default, `Shape.Crate`, for EVERY authored prop, sphere or crate alike;
+    /// native engine properties like <c>mass</c>/<c>transform</c> on the same instanced nodes are
+    /// unaffected). <see cref="CollisionShape3D.Shape"/> is itself a native property, so it
+    /// reliably survives instancing and needs no scene-authoring workaround.</summary>
+    private static PropKind AuthoredKindOf(Carryable body) =>
+        body.GetNodeOrNull<CollisionShape3D>("CollisionShape3D")?.Shape is SphereShape3D
+            ? PropKind.Ball
+            : PropKind.Crate;
+
+    private static void CollectNetworkedProps(Node n, System.Collections.Generic.List<NetworkedProp> found)
+    {
+        foreach (Node child in n.GetChildren())
+        {
+            if (child is NetworkedProp np)
+                found.Add(np);
+            CollectNetworkedProps(child, found);
+        }
+    }
+
+    // --- Client entry points: request the server, never mutate locally -----------------
+
+    /// <summary>Networked client: ask the server to grab a prop. No local effect until the
+    /// server confirms with <see cref="ApplyPropState"/> — no grab prediction.</summary>
+    public void ClientRequestGrab(int propId) => RpcId(1, MethodName.RequestGrab, propId);
+
+    /// <summary>Networked client: ask the server to drop whatever this peer holds.</summary>
+    public void ClientRequestDrop()
+    {
+        // Telemetry (inert unless this is a real client session): drop and throw both collapse to a
+        // Held->Loose transition at ApplyPropState and are indistinguishable there, so they're
+        // counted here at the owner-only client entry point (called from the local PredictedOwner
+        // avatar's HandleCarryIntent, always while holding) — local player's own actions only.
+        Telemetry.Telemetry.Instance?.NotePropDropped();
+        RpcId(1, MethodName.RequestDrop);
+    }
+
+    /// <summary>Networked client: ask the server to throw whatever this peer holds. No local
+    /// effect until the server confirms with <see cref="ApplyPropState"/> — throw is
+    /// server-confirmed, not predicted, consistent with grab and drop.</summary>
+    public void ClientRequestThrow()
+    {
+        Telemetry.Telemetry.Instance?.NotePropThrown();
+        RpcId(1, MethodName.RequestThrow);
+    }
+
+    // --- Server: reliable grab/drop arbitration -----------------------------------------
+
+    /// <summary>Client -> server: request to grab a prop. Validates sender, prop existence,
+    /// one-item-per-peer, and proximity (authoritative avatar position) before arbitrating
+    /// through the registry's first-grab-wins rule.
+    ///
+    /// Every rejection path reports back (INTERACTION-BIBLE 2). These used to return
+    /// silently, so pressing interact one step too far from a crate produced *nothing* — no
+    /// sound, no flash, no reason — which reads as an unresponsive game rather than a
+    /// refused action. "Silently ignored" is a defect class, not an implementation choice.
+    ///
+    /// The sender-validation returns above the reason paths stay silent on purpose: there is
+    /// no trustworthy peer to answer, and replying to an unidentified sender is a
+    /// reflection surface.</summary>
+    [Rpc(MultiplayerApi.RpcMode.AnyPeer, TransferMode = MultiplayerPeer.TransferModeEnum.Reliable)]
+    private void RequestGrab(int propId)
+    {
+        if (!_isServer)
+            return;
+        int peer = Multiplayer.GetRemoteSenderId();
+        if (peer <= 0 || ControlDenied(peer))
+            return;
+        if (!_registry.TryGet(propId, out PropState s))
+        {
+            DenyGrab(peer, GrabDenial.Gone);
+            return;
+        }
+        // Proximity: the grabber's avatar must be near the prop (authoritative positions).
+        Node3D? avatar = AvatarResolver?.Invoke(peer);
+        NetworkedProp? node = NodeFor(propId);
+        if (avatar == null || node == null)
+        {
+            DenyGrab(peer, GrabDenial.Gone);
+            return;
+        }
+        if (avatar.GlobalPosition.DistanceSquaredTo(node.WorldPosition) > GrabRangeSq)
+        {
+            DenyGrab(peer, GrabDenial.OutOfRange);
+            return;
+        }
+
+        // Re-grabbing something you already hold is a refusal, answered rather than silently
+        // returned: see GrabDenial.AlreadyHeld. Checked before HandsFull so the message names
+        // the actual situation.
+        if (_heldByPeer.TryGetValue(peer, out int heldId))
+        {
+            DenyGrab(peer, heldId == propId ? GrabDenial.AlreadyHeld : GrabDenial.HandsFull);
+            return;
+        }
+
+        // SetHolder is the atomic first-grab-wins gate, and the server processes reliable RPCs
+        // one at a time, so of two peers who pressed interact on the same crate in the same tick
+        // exactly one gets true here.
+        if (!_registry.SetHolder(propId, peer))
+        {
+            DenyGrab(peer, GrabDenial.Taken); // someone else won the race
+            return;
+        }
+        Rpc(MethodName.ApplyPropState, propId, (int)PropMode.Held, peer, node.GlobalTransform);
+    }
+
+    /// <summary>
+    /// <b>The authority half of the interaction-gates cascade row</b> (STATE-CASCADE-TABLE rows 7,
+    /// 9, 14, 22). A body that is knocked out, frozen or momentarily ragdolled cannot grab, drop
+    /// or throw — enforced here, on the server, in the one place every prop verb has to pass
+    /// through.
+    ///
+    /// <para><c>SandboxAvatar</c> gates the same rule client-side so the local player's keys feel
+    /// dead the same instant their steering does. That half is feel; this half is the rule. Both
+    /// read the identical replicated <c>MoveState</c> field, so they cannot disagree, and a
+    /// doctored client that skips its own gate simply gets ignored.</para>
+    ///
+    /// <para>Reads the avatar rather than taking an injected predicate deliberately: the state is
+    /// already replicated onto the very node <see cref="AvatarResolver"/> hands back, so an
+    /// injection would be a second source for a fact that already has one.</para>
+    /// </summary>
+    private bool ControlDenied(int peer)
+        => AvatarResolver?.Invoke(peer) is MpFoundation.Game.Sandbox.SandboxAvatar avatar
+           && avatar.ControlDeniedNow;
+
+    /// <summary>Server -> the one requester whose grab was refused. Reliable: a dropped
+    /// rejection is a silent failure again, which is the thing being fixed.</summary>
+    private void DenyGrab(int peer, GrabDenial reason)
+    {
+        // Server-side trace for every refusal. The player already gets a perceivable cue
+        // (SandboxAvatar.OnGrabDenied's bump), but that cue deliberately does not say WHY, so
+        // from the outside a refused grab and a broken grab look identical — with no way to tell
+        // an out-of-range bot from a broken registry. One line per refusal, and refusals are
+        // rare by construction (a player has to actually miss).
+        ServerLog.Info("grab denied", $"peer={peer} reason={reason}");
+        if (peer == Multiplayer.GetUniqueId())
+            OnGrabDenied((int)reason); // host-as-player: no round trip to itself
+        else
+            RpcId(peer, MethodName.OnGrabDenied, (int)reason);
+    }
+
+    /// <summary>Server -> requester: the grab was refused, and why. Raises
+    /// <see cref="GrabDenied"/> for whatever the local peer wants to do about it.</summary>
+    [Rpc(MultiplayerApi.RpcMode.Authority, TransferMode = MultiplayerPeer.TransferModeEnum.Reliable)]
+    private void OnGrabDenied(int reason)
+    {
+        LastDenial = (GrabDenial)reason;
+        GrabDenied?.Invoke((GrabDenial)reason);
+    }
+
+    /// <summary>Client -> server: drop what is in the sender's hand. Releases into Loose with a
+    /// gentle toss off the holder's facing (the same light-lob feel as the offline
+    /// Carryable.OnDropped arc) rather than snapping straight to Resting, so a dropped prop
+    /// tumbles and settles like the offline path and the server's loose loop (see
+    /// _PhysicsProcess) latches it to Resting once it stops moving. No-op if the hand is
+    /// empty.</summary>
+    [Rpc(MultiplayerApi.RpcMode.AnyPeer, TransferMode = MultiplayerPeer.TransferModeEnum.Reliable)]
+    private void RequestDrop()
+    {
+        if (!_isServer)
+            return;
+        int peer = Multiplayer.GetRemoteSenderId();
+        if (peer <= 0 || ControlDenied(peer))
+            return;
+        ReleaseHeldInto(peer, DropForwardSpeed, DropUpSpeed);
+    }
+
+    /// <summary>Client -> server: throw what is in the sender's hand, along that peer's
+    /// authoritative facing. Same release-into-Loose path as drop, just a harder impulse.</summary>
+    [Rpc(MultiplayerApi.RpcMode.AnyPeer, TransferMode = MultiplayerPeer.TransferModeEnum.Reliable)]
+    private void RequestThrow()
+    {
+        if (!_isServer)
+            return;
+        int peer = Multiplayer.GetRemoteSenderId();
+        if (peer <= 0 || ControlDenied(peer))
+            return;
+        float scale = ThrowScale;
+        ReleaseHeldInto(peer, ThrowForwardSpeed * scale, ThrowUpSpeed * scale);
+    }
+
+    /// <summary>Headless-test staging knob (--carry-throw-scale on the SERVER, since the server —
+    /// not the thrower — owns the impulse: RequestThrow is where a networked throw actually
+    /// happens, and the client deliberately never predicts it). Default 1.0, so no real session
+    /// changes; only a test fixture ever passes it.
+    ///
+    /// Exists because Run-RegrabTest has to catch the ball while it is still Loose and rolling. A
+    /// full-strength throw gives the Ball ~7.5 m/s and it sheds speed so slowly that it outruns the
+    /// chasing bot (~3.6 m/s) for ~8s and only gets caught as it decays — by which point it has
+    /// crossed ~45m of a field whose ground slab is 64m wide. A measured run caught it at z=31.81:
+    /// 19cm from the edge. Tip it over and PropManager's own kill-plane recovery below teleports it
+    /// home to the opposite corner, stranding the bot ~44m away with no time left — "never
+    /// completed held -> loose -> held-again". A coin flip decided by 19cm, which is why it only
+    /// ever showed up under a loaded marathon. See issue #4.</summary>
+    private static float ThrowScale =>
+        NetworkManager.Instance?.Options is { } o ? (float)o.CarryThrowScale : 1f;
+
+    /// <summary>Server: drop/throw arbitration. Releases whatever is in the peer's hand into
+    /// Loose. No-op if there is nothing to release.</summary>
+    private void ReleaseHeldInto(int peer, float forwardSpeed, float upSpeed)
+    {
+        if (!_heldByPeer.TryGetValue(peer, out int propId))
+            return;
+        ReleaseIntoLoose(propId, peer, forwardSpeed, upSpeed);
+    }
+
+    /// <summary>Server: releases ONE prop into Loose at its current held transform, with an
+    /// impulse along <paramref name="peer"/>'s authoritative facing, broadcasts the Held -> Loose
+    /// transition (which is what empties the hand on every peer), then kicks off the server's own
+    /// simulation of it.</summary>
+    private void ReleaseIntoLoose(int propId, int peer, float forwardSpeed, float upSpeed)
+        => ReleaseIntoLooseDirected(propId, peer, forwardSpeed, upSpeed, yawOffsetRad: 0f);
+
+    /// <summary>As <see cref="ReleaseIntoLoose"/>, but with the impulse rotated
+    /// <paramref name="yawOffsetRad"/> off the holder's facing. Factored out for
+    /// <see cref="ScatterHeldBy"/>: releasing several props along the identical vector stacks them
+    /// in one spot, and a scatter that leaves a neat pile is not a scatter.</summary>
+    private void ReleaseIntoLooseDirected(int propId, int peer, float forwardSpeed, float upSpeed,
+        float yawOffsetRad)
+    {
+        NetworkedProp? node = NodeFor(propId);
+        if (node == null || !_registry.TryGet(propId, out PropState p) || p.Mode != PropMode.Held)
+            return;
+        Node3D? avatar = AvatarResolver?.Invoke(peer);
+        Vector3 fwd = avatar != null ? -avatar.GlobalBasis.Z : Vector3.Forward;
+        fwd.Y = 0;
+        fwd = fwd.LengthSquared() > 0.0001f ? fwd.Normalized() : Vector3.Forward;
+        if (yawOffsetRad != 0f)
+            fwd = fwd.Rotated(Vector3.Up, yawOffsetRad);
+        Vector3 impulse = fwd * forwardSpeed + Vector3.Up * upSpeed;
+        Transform3D at = node.Body.GlobalTransform;
+        _registry.Release(propId, at);
+        Rpc(MethodName.ApplyPropState, propId, (int)PropMode.Loose, 0, at);
+        node.BeginLooseServer(impulse);
+    }
+
+    /// <summary>Server -> everyone (including itself, CallLocal): the authoritative outcome of
+    /// a grab, drop, throw, or settle. Idempotent — re-applying the same state is a harmless
+    /// no-op, so a duplicated reliable delivery can never corrupt a client's view.
+    ///
+    /// <b>The held-by-peer view is written here, first, and regardless of whether the node still
+    /// exists.</b> A consumed or despawned prop's release arrives as a Resting transition that may
+    /// land after the node has gone (spawner despawns and RPCs are not ordered relative to each
+    /// other), and that transition must still empty the hand — otherwise <see cref="FindHeldBy"/>
+    /// would keep answering with an id whose node has been freed.</summary>
+    [Rpc(MultiplayerApi.RpcMode.Authority, TransferMode = MultiplayerPeer.TransferModeEnum.Reliable, CallLocal = true)]
+    private void ApplyPropState(int propId, int mode, int holderPeerId, Transform3D transform)
+    {
+        if ((PropMode)mode == PropMode.Held)
+        {
+            _heldByPeer[holderPeerId] = propId;
+        }
+        else
+        {
+            // Whoever had it no longer does. A value scan rather than a keyed lookup because a
+            // release does not carry the previous holder; the table is at most a group's worth of
+            // entries, so this is a handful of comparisons per transition.
+            foreach (System.Collections.Generic.KeyValuePair<int, int> kv in _heldByPeer)
+            {
+                if (kv.Value != propId)
+                    continue;
+                _heldByPeer.Remove(kv.Key);
+                break;
+            }
+        }
+
+        NetworkedProp? node = NodeFor(propId);
+        if (node == null)
+            return;
+        switch ((PropMode)mode)
+        {
+            case PropMode.Held:
+                Node3D? holder = AvatarResolver?.Invoke(holderPeerId);
+                if (holder == null)
+                {
+                    // The one transition this funnel can lose permanently instead of converging:
+                    // nothing re-applies a Held bind if the holder avatar isn't in this peer's
+                    // tree yet. Spawner-before-dump ordering makes that unreachable today —
+                    // log loudly so a future ordering regression is a line in the log, not a
+                    // silently unheld prop someone chases for a week.
+                    GD.PushWarning($"[props] Held state for prop {propId} arrived before holder {holderPeerId}'s avatar; bind dropped");
+                }
+                if (holder != null)
+                {
+                    node.BindToHolder(holder);
+                    // Telemetry (inert unless this is a real client session): count only THIS
+                    // client's own confirmed grab, never a teammate's replicated one — this funnel
+                    // runs on every peer via CallLocal, so gating on the local id is what keeps
+                    // props_grabbed the local player's own actions (spec decision 3), not counted
+                    // once per connected peer.
+                    if (holderPeerId == Multiplayer.GetUniqueId())
+                        Telemetry.Telemetry.Instance?.NotePropGrabbed();
+                }
+                break;
+            case PropMode.Resting:
+                node.Unbind(transform);
+                break;
+            case PropMode.Loose:
+                // The reliable transition: begin following the stream. On the server this is
+                // immediately superseded by BeginLooseServer unfreezing the body right after
+                // this call returns.
+                node.BeginLoose(transform);
+                break;
+        }
+    }
+
+    // --- Loose-prop transform stream: server -> clients, unreliable, its own channel ----
+
+    /// <summary>Server -> everyone: the current frame's transform for a Loose prop, broadcast
+    /// every physics tick while the server simulates it (see the server loop in _PhysicsProcess).
+    /// Unreliable and on its own channel — a dropped or reordered sample costs nothing since the
+    /// next tick supersedes it, and it never queues behind movement or reliable RPCs. The server
+    /// itself is the source of truth and never applies its own broadcast (CallLocal is off).</summary>
+    [Rpc(MultiplayerApi.RpcMode.Authority, TransferMode = MultiplayerPeer.TransferModeEnum.Unreliable, TransferChannel = NetCodec.PropChannel)]
+    private void StreamLoose(int propId, Transform3D t) => NodeFor(propId)?.ApplyLooseStream(t);
+
+    // --- Server: peer lifecycle -----------------------------------------------------------
+
+    /// <summary>Server: called (by Gameplay) when a peer disconnects, BEFORE its avatar node is
+    /// freed, so the drop position derives from its still-valid last authoritative transform.
+    /// Every prop that peer held latches to Resting and every peer converges on the release.</summary>
+    public void OnPeerLeft(int peerId)
+    {
+        if (!_isServer)
+            return;
+        ReleaseHeldBy(peerId);
+        // ReleaseHeldBy's Resting broadcasts have already emptied this peer's hand on every peer
+        // (the funnel drops the entry); this is belt and braces so the dictionary cannot grow
+        // without bound across a long session of joins and leaves.
+        _heldByPeer.Remove(peerId);
+    }
+
+    /// <summary>Server: releases whatever peerId currently holds back to Resting — at the peer's
+    /// avatar transform if it can still be resolved, or the prop's own spawn transform otherwise.
+    /// Factored out of <see cref="OnPeerLeft"/> (disconnect) as its own reusable release funnel.
+    /// Bible §6.2: an item released this way drops in place or returns to a known spawn — never
+    /// anywhere else.</summary>
+    public void ReleaseHeldBy(int peerId)
+    {
+        if (!_isServer)
+            return;
+        Node3D? avatar = AvatarResolver?.Invoke(peerId);
+        foreach (int id in HeldPropIdsFor(peerId))
+        {
+            // If the avatar can't resolve (double-disconnect race, failed spawn), fall back to
+            // the prop's own spawn transform rather than DropTransformFor's Transform3D.Identity
+            // (the world origin).
+            Transform3D at = avatar != null
+                ? DropTransformFor(avatar)
+                : (NodeFor(id)?.HomeTransform ?? Transform3D.Identity);
+            _registry.SetResting(id, at);
+            Rpc(MethodName.ApplyPropState, id, (int)PropMode.Resting, 0, at);
+        }
+    }
+
+    /// <summary>
+    /// Server: <b>everything <paramref name="peerId"/> is carrying scatters</b> — the carried-item
+    /// cascade row (STATE-CASCADE-TABLE row 8, BEHAVIOR-BIBLE §10.2's fourth missing API) for the
+    /// failure states (beta plan §10).
+    ///
+    /// <para><b>Loose, not Resting, and that difference is the gameplay.</b> Its sibling
+    /// <see cref="ReleaseHeldBy"/> sets props Resting where the body stands, which is right for a
+    /// disconnect — an absent player's stuff should be tidy and findable. Going down is the
+    /// opposite: the plan says the items <i>scatter</i>, and somebody has to come and get them
+    /// while whatever put you down is still out there. Each prop leaves along its own bearing,
+    /// fanned by the golden angle off the holder's facing, so more than one lands as a spread
+    /// rather than a stack.</para>
+    ///
+    /// <para>Everything lands re-pickup-able by construction: Loose is the same mode a thrown
+    /// prop is in, it uses the same server-simulated settle-and-latch loop, and it honours the
+    /// same out-of-bounds recovery. This adds no new prop lifecycle — it reuses the one that has
+    /// been carrying thrown items all along.</para>
+    /// </summary>
+    public void ScatterHeldBy(int peerId)
+    {
+        if (!_isServer)
+            return;
+        int index = 0;
+        foreach (int id in HeldPropIdsFor(peerId))
+        {
+            // 2.39996 rad — the golden angle. Deterministic (no RNG on the server's authoritative
+            // path, so every peer's replay of this is identical) and non-repeating, so two props
+            // never leave along the same bearing however many a future carry rule allows.
+            ReleaseIntoLooseDirected(id, peerId, ScatterForwardSpeed, ScatterUpSpeed,
+                yawOffsetRad: index * 2.39996f);
+            index++;
+        }
+    }
+
+    /// <summary>Horizontal impulse on a scattered prop. Gentler than a throw
+    /// (<see cref="DropForwardSpeed"/> is the comparison) — items should end up around the body,
+    /// within sight of whoever comes back for them, not flung across the map.</summary>
+    private const float ScatterForwardSpeed = 1.8f;
+
+    /// <summary>Vertical impulse on a scattered prop — enough of a tumble to read as "dropped
+    /// everything" rather than "set down".</summary>
+    private const float ScatterUpSpeed = 2.4f;
+
+    /// <summary>Server: called (by Gameplay) once a newly-joined peer's avatar exists, so the
+    /// late joiner's client-side dictionary of prop nodes catches every current prop state —
+    /// held props attach to their holders, resting props place at their latched transform.</summary>
+    public void SendDumpTo(int peerId)
+    {
+        if (!_isServer)
+            return;
+        foreach (PropState p in _registry.All)
+            RpcId(peerId, MethodName.ApplyPropState, p.Id, (int)p.Mode, p.HolderPeerId, p.Transform);
+    }
+
+    /// <summary>Server: ids of every prop peerId currently holds (single-slot in practice, so
+    /// at most one, but returns every match rather than assuming that invariant here), snapshotted
+    /// (safe to mutate the registry while iterating). Two callers: <see cref="ReleaseHeldBy"/>
+    /// (the existing disconnect-release path, unchanged) and, as of Task A2 (P2), Gameplay's
+    /// disconnect handler — which MUST call this BEFORE <see cref="OnPeerLeft"/>, since a release
+    /// clears the held state this queries (see ReconnectRegistry.Capture's doc comment on the
+    /// ordering fix). Off-server returns empty, never null.</summary>
+    public int[] HeldPropIdsFor(int peerId)
+    {
+        if (!_isServer)
+            return System.Array.Empty<int>();
+        var ids = new System.Collections.Generic.List<int>();
+        foreach (PropState p in _registry.All)
+            if (p.Mode == PropMode.Held && p.HolderPeerId == peerId)
+                ids.Add(p.Id);
+        return ids.ToArray();
+    }
+
+    /// <summary>Server: re-grants a prop peerId held before a disconnect, on a successful
+    /// reconnect resume (P2 — see ReconnectRegistry's captured HeldPropIds, consumed by
+    /// Gameplay.OnPeerConnected). Release-then-restore by design, not a new held state (Task
+    /// A2's binding plan self-review note): the prop already dropped to Resting at disconnect
+    /// time (OnPeerLeft/ReleaseHeldBy, unchanged, still runs unconditionally) — this simply
+    /// re-grants it through the exact same <see cref="PropRegistry.SetHolder"/> +
+    /// <see cref="ApplyPropState"/>(Held) path a live grab (<see cref="RequestGrab"/>) uses, once
+    /// the resumed peer's avatar exists.
+    ///
+    /// First-grab-wins fairness, no steal-back: a no-op if the prop is currently Held by ANYONE
+    /// (including, harmlessly, a re-entrant call for the same resumed peer) — whoever grabbed it
+    /// during the gap keeps it. Also a no-op if the prop no longer exists (consumed/freed during
+    /// the gap), or if the resumed peer's hand is already full — a resume is a restoration, never
+    /// a pickup, and a restoration that displaced something would be a silent theft. Every
+    /// outcome routes through a transition that already exists; no "held by a ghost" state is
+    /// introduced.</summary>
+    public void TryRestoreHeldProp(int propId, int peerId)
+    {
+        if (!_isServer)
+            return;
+        // The disconnect path always leaves the prop Resting, so Resting is the precise
+        // restore precondition: Held means someone re-grabbed it during the gap (no
+        // steal-back), and Loose means someone grabbed AND threw it — yanking it out of
+        // mid-air into the resumed player's hands would be the same steal, one state later.
+        if (!_registry.TryGet(propId, out PropState s) || s.Mode != PropMode.Resting)
+            return; // consumed/freed, or touched by someone else during the gap
+        NetworkedProp? node = NodeFor(propId);
+        if (node == null)
+            return;
+        if (_heldByPeer.ContainsKey(peerId))
+            return;
+        if (!_registry.SetHolder(propId, peerId))
+            return;
+        Rpc(MethodName.ApplyPropState, propId, (int)PropMode.Held, peerId, node.GlobalTransform);
+    }
+
+    // Ground position a dropped/released prop rests at: in front of and at the holder's feet.
+    // Height derives from the HOLDER's position, never an absolute world constant — a fixed
+    // y=0.5 assumed "the world is a flat slab at y=0" and teleported a prop released on a tower
+    // or upper floor through the geometry to ground level (it latches Resting and never
+    // simulates again, so nothing could ever rescue it).
+    private static Transform3D DropTransformFor(Node3D? avatar)
+    {
+        if (avatar == null)
+            return Transform3D.Identity;
+        Vector3 fwd = -avatar.GlobalBasis.Z;
+        fwd.Y = 0;
+        Vector3 dir = fwd.LengthSquared() > 0.0001f ? fwd.Normalized() : Vector3.Forward;
+        Vector3 pos = avatar.GlobalPosition + dir * 0.8f;
+        pos.Y = avatar.GlobalPosition.Y + 0.5f;
+        return new Transform3D(Basis.Identity, pos);
+    }
+
+    // Runs on every peer (server included) when the spawner materialises a prop.
+    private Node SpawnFromData(Variant data)
+    {
+        Godot.Collections.Array a = data.AsGodotArray();
+        var prop = new NetworkedProp();
+        prop.Init(a[0].AsInt32(), (PropKind)a[1].AsInt32(), a[2].AsTransform3D());
+        prop.IsServer = _isServer;
+        return prop;
+    }
+
+    private static Transform3D PlaceAt(Vector3 pos) => new(Basis.Identity, pos);
+}

@@ -1,0 +1,1517 @@
+using System.Collections.Generic;
+using System.Threading.Tasks;
+using Godot;
+using MpFoundation.Net;
+using MpFoundation.Net.Steam;
+using MpFoundation.Game.Sandbox;
+using MpFoundation.Game.Props;
+using MpFoundation.Game.World;
+using MpFoundation.Game.Light;
+
+namespace MpFoundation.Game;
+
+/// <summary>
+/// The match scene. On the dedicated server it listens and spawns/despawns avatars —
+/// which then simulate themselves server-authoritatively from client inputs (see
+/// SandboxAvatar; the old plausibility bounds-check is gone because the server now owns
+/// the movement truth outright). On clients it (optionally) resolves a room code to a
+/// server identity via the Steam lobby directory (SteamLobby) and connects with the
+/// Phase 1 flow. The scene is loaded before connecting so replication never races scene
+/// setup. The room code's lifecycle lives entirely client-side with the host (HostMenu
+/// creates the lobby; the server child never knows its own code).
+/// </summary>
+public partial class Gameplay : Node3D
+{
+    private const double ConnectTimeoutSec = 8.0;
+    private const double SteamConnectTimeoutSec = 25.0;
+    private const float SpawnRadius = 4.0f;
+    private const double StatusIntervalSec = 10.0;
+
+    private PackedScene _playerScene = null!;
+    private IGameWorld _world = null!;
+
+    private MultiplayerSpawner _spawner = null!;
+    private Node3D _players = null!;
+
+    /// <summary>Drives the pickup shimmer and the interact key chip for this peer's own
+    /// player. Null on headless peers, which render nothing.</summary>
+    private Sandbox.InteractHighlighter? _highlighter;
+    private MultiplayerSpawner _propSpawner = null!;
+    private Node3D _props = null!;
+    private PropManager _propManager = null!;
+
+    /// <summary>The NetworkedEntity replication funnel. Stays empty in every session today — no
+    /// shipped gameplay spawns entities — but the spawner is wired unconditionally so the first
+    /// real NPC rides the same late-join replay path players and props already use.</summary>
+    private MultiplayerSpawner _entitySpawner = null!;
+    private Node3D _entities = null!;
+    private CycleDriver _cycleDriver = null!;
+    private RunDriver _runDriver = null!;
+    /// <summary>The playthrough state machine (CORE-PROG-A1, core-spine spec §1) — the layer
+    /// above RunDriver exactly as RunDriver sits above CycleDriver. Present in every world.</summary>
+    private Sail.Game.Run.PlaythroughDriver _playthroughDriver = null!;
+
+    /// <summary>The world-state store (CORE-PROG-A2, spec §5.3): the single world-state
+    /// RunReset/dawn-cutoff subscriber every stateful manager registers its slice with, and
+    /// the object PlaythroughDriver runs the §5.4 playthrough-boundary entry guard against.</summary>
+    private Sail.Game.Run.WorldStateStore _worldStateStore = null!;
+    /// <summary>The winter-cache quota ledger (core-spine spec §2). Present in every world.</summary>
+    private Sail.Game.Run.QuotaLedger _quotaLedger = null!;
+    /// <summary>The lake's authority (W2, lake-water contract): the cold clock, the sputter-out,
+    /// Soaked, and the five-event stream W4's splash/audio listener subscribes to. Present in
+    /// every world exactly like PropManager above; a world with no lake leaves it wired but
+    /// inert, because every avatar in it resolves WaterState.Dry forever.</summary>
+    private Sail.Game.Water.WaterService _waterService = null!;
+
+    /// <summary>The player's flashlight: one replicated on/off bit per peer and the shadowless glow
+    /// it renders (NIGHT-2, notes 10/11). Present in every world exactly like WaterService above;
+    /// a world nobody presses F in holds an empty dictionary and no renderer nodes at all.</summary>
+    private FlashlightManager _flashlightManager = null!;
+    private Honk.HonkManager _honkManager = null!;
+
+    /// <summary>The failure-state machine (phase 1c). Present in every world exactly like
+    /// PropManager/WaterService above; a world with nothing driving it leaves it wired but
+    /// idle.</summary>
+    private Sail.Game.Failure.IncapacitationService _incapacitation = null!;
+
+    /// <summary>How far every player can see (canon fact 4, the parity law). Server-authoritative,
+    /// replicated to every peer. Present in every world exactly like WaterService above; a world
+    /// with no light sources leaves it wired and honest, publishing the darkness floor for
+    /// everyone.</summary>
+    private Game.Sight.PlayerSightService _playerSight = null!;
+
+    private Label _connectingLabel = null!;
+    private Label _roomCodeLabel = null!;
+    private int _spawnIndex;
+    private bool _connected;
+    private bool _finished;
+    private bool _serverSignals;
+    private bool _clientSignals;
+
+    // Client-only reconnect state (Steam transport only; see OnServerDisconnected).
+    // Nonzero only once this client has connected via ConnectSteam - an ENet-connected
+    // client (Practice/direct) never sets this and so never enters the retry flow.
+    private ulong _steamServerId;
+    private bool _reconnecting;
+    private ulong _reconnectDeadlineMsec;
+    private int _connectAttempt;
+    private const double ReconnectRetryDelaySec = 2.0;
+
+    // Test-only (--force-reconnect-at, see LaunchOptions): the ENet host/port this client
+    // dialed, remembered so a simulated forced reconnect can redial the same address without a
+    // live Steam relay. Harmless to cache unconditionally - only read when the flag is set.
+    private string _enetHost = "";
+    private int _enetPort;
+    private bool _forceReconnectArmed;
+    // Guards against re-instantiating BotHarness on a resumed OnConnectedToServer (a real
+    // reconnect over Steam is gated off for bots by design, but the --force-reconnect-at test
+    // hook drives a bot through this path anyway - see SimulateForcedReconnect). Without this,
+    // a second BotHarness would try to re-open the SAME --log file the first one still holds
+    // open (FileMode.Create over a handle sharing only FileShare.Read) and crash with a sharing
+    // violation instead of exercising the teardown this task is testing.
+    private BotHarness? _harness;
+
+    // Server-only state.
+    private bool _isServer;
+    private ulong _startTicks;
+    private double _sinceStatus;
+    // Steam-transport-only: SteamID64 -> last authoritative position, expiring 60s after
+    // disconnect (see ReconnectRegistry). Populated by OnPeerDisconnected, consumed by
+    // OnPeerConnected, swept by the existing status tick in _Process.
+    //
+    // Live verification of a real Steam-transport disconnect/reconnect exercising this
+    // registry end-to-end is out of CI scope (no live Steam client/account here); it is
+    // covered by the weekend manual Steam protocol added in Task 3, Step 11 (see
+    // docs/superpowers/plans/2026-07-12-client-reconnection-plan.md).
+    private readonly ReconnectRegistry _reconnects = new();
+    // peer id -> SteamID64, cached at connect time (see OnPeerConnected) rather than
+    // re-resolved at disconnect time. SteamPeer.DropServerSideConnection clears its
+    // connId -> SteamID mapping BEFORE emitting PeerDisconnected, and Godot signal
+    // dispatch is synchronous, so a SteamId64Of((int)id) call from inside
+    // OnPeerDisconnected always resolves to 0 by the time it runs - the mapping it needs
+    // is already gone. Caching the value while it's still reliably resolvable (at connect
+    // time) sidesteps that ordering entirely.
+    private readonly Dictionary<int, ulong> _peerSteamIds = new();
+    // peer id -> the color index actually IN USE for this peer right now (see
+    // SandboxAvatar.PaletteColorFor), cached at connect time for the exact same reason
+    // _peerSteamIds is: the value only exists as an OnPeerConnected local, nowhere retrievable
+    // at disconnect time otherwise. This is the value ResolveColorIndex settled on for THIS
+    // connection - a resumed peer's restored index, or a fresh peer's newly dealt one - so a
+    // later disconnect (see OnPeerDisconnected) captures the peer's actual live color, not
+    // necessarily its raw spawn-order index (P11, Task A3).
+    private readonly Dictionary<int, int> _peerColorIndex = new();
+
+    // BT-7: the seed the random palette deal draws against, chosen ONCE per server process and
+    // LOGGED, so "why was I bone twice in a row" is a question the log can answer and a playtest
+    // colour layout can be reproduced by re-running with the same seed. Server-side only — the
+    // colour itself still travels in the spawn args, so no client ever sees this number.
+    //
+    // A field rather than a per-call Random: see SandboxAvatar.RandomPaletteIndexFor for why the
+    // deal is a pure function of (seed, spawnIndex) and not a running generator.
+    private ulong _colorSeed;
+
+    public override void _Ready()
+    {
+        // The shared replicated clock (ANIM-M3) is a running MAXIMUM, so it has to be cleared at
+        // the top of every session: the gameplay scene can be entered more than once per process,
+        // and the next server's tick series starts again at zero. Without this, a value left over
+        // from a previous connection would swallow every --capture-at-tick mark in the next one.
+        // Presentation only; nothing downstream of it decides anything.
+        Net.NetClock.Reset();
+
+        _playerScene = GD.Load<PackedScene>(ScenePaths.NetworkedAvatar);
+        _spawner = GetNode<MultiplayerSpawner>("PlayerSpawner");
+        _players = GetNode<Node3D>("Players");
+
+        // Authored-model caches parse their glTF on first use; force that use HERE, at
+        // scene setup before connecting, so an avatar/prop arriving mid-play never
+        // stalls prediction with a load hitch (a stall rubberbands the local player).
+        Sandbox.AvatarVisual.WarmModelCache();
+
+        // Build the world locally before connecting (replication must not race scene setup).
+        // Every peer builds its own — the world is static, not replicated.
+        //
+        // Logged because nothing else records it: a session where the client silently built a
+        // different world than the one asked for (HostMenu used to force "playground" over an
+        // explicit --world) is indistinguishable in the logs from one that worked. One line here
+        // makes every log answer "which world was this?" without a repro.
+        string worldId = NetworkManager.Instance.Options.World;
+        GD.Print($"[world] building '{worldId}'");
+        // BT-7: the random palette deal's seed, chosen once and PRINTED, because a random colour
+        // nobody can reproduce is a colour nobody can file a bug about. SAIL_COLOR_SEED overrides
+        // it, which is how a playtest's exact colour layout gets replayed.
+        string seedOverride = OS.GetEnvironment("SAIL_COLOR_SEED");
+        _colorSeed = ulong.TryParse(seedOverride, out ulong parsedSeed)
+            ? parsedSeed
+            : (ulong)Time.GetTicksUsec() ^ 0xD1B54A32D192ED03UL;
+        GD.Print($"[avatar] palette seed {_colorSeed}"
+            + (seedOverride.Length > 0 ? " (SAIL_COLOR_SEED)" : ""));
+        _world = BuildWorld(worldId);
+        var worldNode = (Node3D)_world;
+        worldNode.Name = "World";
+        AddChild(worldNode);
+        _connectingLabel = GetNode<Label>("Hud/ConnectingLabel");
+        _roomCodeLabel = GetNode<Label>("Hud/RoomCodeLabel");
+        // The scene authored this label 14 px off the bottom edge, inside the bottom-left block
+        // world-anchored widgets share, so the room code could render underneath them and not be
+        // read — Talon, 2026-08-14, and a room code you cannot read is a co-op session nobody can
+        // join. Placed from the shared column here rather than left in the .tscn so the two cannot
+        // drift apart; see Ui.Design.UiColumns.
+        Ui.Design.UiColumns.PlaceRoomCode(_roomCodeLabel);
+
+        // §7: the deployment scene measures itself (F3 readout; --perf-log for automated
+        // profiling runs). Headless peers render nothing worth measuring.
+        if (!NetworkManager.Instance.IsHeadless)
+            AddChild(new Ui.PerfHud { Name = "PerfHud" });
+        // INTERACTION-BIBLE 1: an interactable must READ as interactable before the player
+        // touches it. The shimmer and the floating key chip both existed already, but were
+        // only ever driven by the OFFLINE sandbox — so in the actual networked game the
+        // authored props were indistinguishable from scenery until you pressed E and
+        // something happened. Both worlds now drive the same helper. Headless peers render
+        // nothing, so they poll nothing.
+        if (!NetworkManager.Instance.IsHeadless)
+        {
+            Ui.InteractPrompt.Attach(this);
+            // The corner HUD (2026-08-08): the per-world corner widgets, HudProfile deciding which.
+            // Replaces SessionHud and its rotating sun/moon disc, which Talon pulled ("this timer
+            // is not working completely remove it"). Lambda-fed so the HUD never goes looking for
+            // a manager itself — the avatar and the players node are both resolved per poll
+            // because each is replaced outright on a reconnect resume.
+            Ui.Hud.GameHud.Attach(this);
+            _highlighter = new Sandbox.InteractHighlighter(LocalAvatar);
+        }
+        _spawner.SpawnFunction = new Callable(this, MethodName.SpawnPlayer);
+        Voice.VoiceManager.Instance.BindPlayersRoot(_players);
+
+        var net = NetworkManager.Instance;
+
+        // Networked objects: the prop spawner + authoritative registry. Set up before connecting
+        // so a prop spawn replicated to a joining client never races the spawn function being wired.
+        _props = GetNode<Node3D>("Props");
+        _propSpawner = GetNode<MultiplayerSpawner>("PropSpawner");
+
+        // The world-state store (CORE-PROG-A2, core-spine spec §5.3): constructed BEFORE every
+        // stateful manager — not at spec §5.3's "immediately after RunDriver" position, because
+        // PropManager is constructed before RunDriver in this method and could never
+        // self-register from Setup otherwise (the store's class doc records the deviation). Its
+        // RunDriver subscriptions attach below via HookRunDriver, immediately after RunDriver
+        // exists and BEFORE PlaythroughDriver.Setup — that order is a correctness dependency
+        // (dawn cutoffs must read pre-verdict state; see the store's class doc). Every stateful
+        // manager's Setup registers its slice with this instance; registration order = this
+        // method's construction order = the boundary fan order.
+        _worldStateStore = new Sail.Game.Run.WorldStateStore { Name = Sail.Game.Run.WorldStateStore.NodeName };
+        AddChild(_worldStateStore);
+        _worldStateStore.Setup(net.Role == NetworkManager.SessionRole.Server);
+        // The reconnect registry is a plain field, not a manager with a Setup, so Gameplay
+        // registers it directly: a resume ticket into a world that no longer exists must die at
+        // the playthrough boundary (spec §5.2 / §6 case 3 — the live 60 s cross-reset exploit).
+        _worldStateStore.Register(_reconnects);
+
+        _propManager = new PropManager { Name = PropManager.NodeName };
+        AddChild(_propManager);
+        _propManager.Setup(_propSpawner, _props, net.Role == NetworkManager.SessionRole.Server);
+        // Server-side arbitration (grab proximity, disconnect-release drop position) needs a
+        // peer id -> avatar node lookup; avatar node names are the owning peer id (see SpawnPlayer).
+        _propManager.AvatarResolver = id => _players.GetNodeOrNull<Node3D>(id.ToString());
+        // Authored props (a world's placed prop instances) are never spawned — they already exist
+        // identically in every peer's copy of the world scene. This adopts them into the same
+        // netcode funnel runtime-spawned props use (see PropManager.AdoptAuthoredProps); a no-op
+        // for worlds with none, which is every world today (bubbletest is prop-free).
+        _propManager.AdoptAuthoredProps(worldNode);
+
+        // The entity funnel. Wired unconditionally so the spawn function is in place before
+        // connecting — the same race PropSpawner above avoids — but nothing calls Spawn today, so
+        // a normal session pays one GetNode.
+        _entities = GetNode<Node3D>("Entities");
+        _entitySpawner = GetNode<MultiplayerSpawner>("EntitySpawner");
+        _entitySpawner.SpawnFunction = new Callable(this, MethodName.SpawnEntity);
+
+        // The tidal-loop phase clock (BUILD-SPEC §3/§5): present in every world exactly like
+        // PropManager above, so late-join and reconnect delivery ride the
+        // same peer-connect funnel those already use (see the SendPhaseTo call in
+        // OnPeerConnected). Harmless for a world with nothing bound to it — it just ticks.
+        // Lean-MVP run shape (L1, Issue #104): request the session's default cycle period
+        // (720s, design §1's ~7min day + 5min night) — a world that wants its own default
+        // already calls RequestDefaultCyclePeriod from its own _Ready(), which — because
+        // worldNode was already added to the tree above — has already run by the time this
+        // executes, so that request wins; an explicit --cycle-period test hook wins over both
+        // (see RequestDefaultCyclePeriod's own doc for the "0 = unset, first requester wins"
+        // sentinel). This is only ever the fallback default for a world that asked for nothing
+        // of its own.
+        net.Options.RequestDefaultCyclePeriod(RunDriver.DefaultCyclePeriodSec);
+
+        _cycleDriver = new CycleDriver { Name = CycleDriver.NodeName };
+        AddChild(_cycleDriver);
+        _cycleDriver.Setup(net.Role == NetworkManager.SessionRole.Server,
+            net.Options.CyclePeriodSec, net.Options.CycleStartPhase,
+            frozen: net.Options.CycleFreeze);
+        // Print the resolution on whichever half of the session parsed the name, so a launch line
+        // written as "--cycle-start-phase noon" can be checked against the number it became without
+        // anybody having to recompute duskStart*0.5 for the day in play. The server prints the
+        // frozen phase itself from CycleDriver.Setup; this line is about the NAME.
+        if (net.Options.CycleStartPhaseName.Length > 0)
+            GD.Print($"[cycle] --cycle-start-phase {net.Options.CycleStartPhaseName} -> " +
+                     $"{net.Options.CycleStartPhase:F6} (day index {net.Options.CycleStartDay})");
+
+        // BT-6's bubble fixture (--bubble-selftest): six bubbles at known points plus a
+        // BubbleCounter, built identically on every peer that carries the flag. Added AFTER
+        // CycleDriver because the bubbles' idle bob and their night glow both read it, and its
+        // Instance has to exist before their first frame. Nothing here runs on any normal
+        // launch — the level's own bubbles are authored nodes placed by BT-11 and adopted by a
+        // BubbleCounter the world adds (BT-8); this is only the harness that lets
+        // tests/Run-BubbleSyncTest.ps1 prove the tally converges across three peers.
+        // CELEBRATE-1's gate override (--celebrate-force). Set on EVERY launch, not only under the
+        // fixture: it is a static, so a session that left it true would hand the next one a bot
+        // that celebrates. Assigning the option unconditionally makes "off" the state of every
+        // ordinary launch rather than the absence of a write.
+        Sail.Game.Bubble.BubbleCelebration.ForceForTest = net.Options.CelebrateForce;
+        if (net.Options.BubbleSelfTest)
+        {
+            var bubbleFixture = new Sail.Game.Bubble.BubbleSelfTest
+            {
+                Name = Sail.Game.Bubble.BubbleSelfTest.NodeName,
+                IsServer = net.Role == NetworkManager.SessionRole.Server,
+                ResetAtSec = net.Options.BubbleResetAtSec,
+                PopAllAtSec = net.Options.BubblePopAllAtSec,
+            };
+            AddChild(bubbleFixture);
+        }
+        else if (net.Options.BubblePopAllAtSec >= 0)
+        {
+            // CELEBRATE-1: the same scheduled completion, in a world that has its own authored
+            // bubbles rather than the six-bubble fixture — i.e. the REAL level, which is what the
+            // capture in docs/qa/CELEBRATE-1/ is a picture of. Only the first mark: the
+            // recompletion is derived from the fixture's own reset lever and has no meaning here.
+            // Added AFTER the world (see the block above this one) so BubbleCounter.Instance
+            // already exists by the time this node's first frame runs.
+            AddChild(new Sail.Game.Bubble.BubbleCompletionSchedule
+            {
+                Name = Sail.Game.Bubble.BubbleCompletionSchedule.NodeName,
+                IsServer = net.Role == NetworkManager.SessionRole.Server,
+                PopAllAtSec = net.Options.BubblePopAllAtSec,
+            });
+        }
+
+        // The run driver (L1): typed phase-crossing events, the run-length/run-end contract, and
+        // the reset hook — a layer above CycleDriver, present in every world exactly like it (see
+        // RunDriver's own class doc). Added AFTER CycleDriver so it always has a real phase to
+        // read once its own _PhysicsProcess starts (see that method's doc for why the ordering
+        // is a nicety, not a correctness dependency).
+        _runDriver = new RunDriver { Name = RunDriver.NodeName };
+        AddChild(_runDriver);
+        // RunCyclesOrUncapped, not RunCycles (CORE-PROG-A1, spec §1.5 / SD-1 D5): the
+        // open-ended canon retires configured run length, so an unset --run-cycles resolves to
+        // int.MaxValue — RunEndedSignal becomes structurally unreachable in real play without
+        // one byte of RunDriver changing. An explicit --run-cycles keeps legacy semantics for
+        // the existing suites. See RunCyclesOrUncapped's own doc for why the raw sentinel stays.
+        _runDriver.Setup(net.Role == NetworkManager.SessionRole.Server,
+            net.Options.RunCyclesOrUncapped, net.Options.CyclePeriodSec, net.Options.RunResetAtSec);
+        // The store's RunDriver subscriptions (CORE-PROG-A2): MUST run before
+        // _playthroughDriver.Setup below subscribes to PhaseCrossed — C# event order is
+        // subscription order, and the store's dawn-cutoff fan has to read PRE-verdict state at
+        // a real dawn (InRound → band-live → cutoffs fire) or the legitimate glow-stick dawn
+        // cutoff would be skipped on the very crossing that ends a round. See the store's
+        // class doc; the ordering is asserted live by Run-StoreTest.ps1.
+        _worldStateStore.HookRunDriver();
+
+        // The playthrough driver (CORE-PROG-A1, core-spine spec §1): Boot/RoundIntro/InRound/
+        // RoundEnd/UpgradeLobby/Loss, the verdict chain, and the between-rounds clock re-anchor
+        // — a layer above RunDriver exactly as RunDriver sits above CycleDriver. Constructed
+        // IMMEDIATELY after RunDriver and before every manager that will gate on it, and that
+        // ordering is a correctness dependency twice over: (a) its server Setup subscribes to
+        // RunDriver.PhaseCrossed for the verdict instant, so RunDriver.Instance must be live;
+        // (b) QuotaLedger below guards ServerBank on PlaythroughDriver.Instance.State, so the
+        // driver must exist before anything can bank. The store argument is the live
+        // WorldStateStore (CORE-PROG-A2, constructed at the top of this method — before every
+        // stateful manager, see its construction comment for why not literally after
+        // RunDriver): every commit into RoundIntro(1) now fans a real boundary reset (spec
+        // §5.4's entry guard), and Run-FlowTest asserts the old no-store error is ABSENT.
+        _playthroughDriver = new Sail.Game.Run.PlaythroughDriver { Name = Sail.Game.Run.PlaythroughDriver.NodeName };
+        AddChild(_playthroughDriver);
+        _playthroughDriver.Setup(net.Role == NetworkManager.SessionRole.Server,
+            net.Options.CyclePeriodSec, store: _worldStateStore,
+            net.Options.FlowIntroSec, net.Options.FlowTallySec, net.Options.FlowLobbySec);
+
+        // The quota ledger (spec §2): constructed AFTER PlaythroughDriver — it answers to the
+        // driver (its bank guard reads driver state, its round numbers ride the driver's
+        // RoundIntro broadcast), the same "the layer it calls into must already exist" ordering
+        // this method uses throughout. The schedule is DATA: the server loads
+        // assets/run/quota_schedule.tres (a missing/corrupt file falls back to QuotaMath's
+        // defaults and logs — a data file must never crash a session); clients never read
+        // their copy for authority, only broadcasts (spec §2.2). SetQuotaLedger then registers
+        // the ONE shipped loss predicate with the driver's chain (spec §1.6).
+        Sail.Game.Run.QuotaSchedule? quotaSchedule = null;
+        if (net.Role == NetworkManager.SessionRole.Server)
+        {
+            quotaSchedule = GD.Load<Sail.Game.Run.QuotaSchedule>("res://assets/run/quota_schedule.tres");
+            if (quotaSchedule == null)
+                GD.PushError("[quota] assets/run/quota_schedule.tres failed to load - falling back to QuotaMath defaults");
+        }
+        _quotaLedger = new Sail.Game.Run.QuotaLedger { Name = Sail.Game.Run.QuotaLedger.NodeName };
+        AddChild(_quotaLedger);
+        _quotaLedger.Setup(net.Role == NetworkManager.SessionRole.Server, quotaSchedule,
+            net.Options.QuotaEarlyOverride, net.Options.QuotaBankAt);
+        _playthroughDriver.SetQuotaLedger(_quotaLedger);
+
+        // Test-only (--net-probe-at, CORE-PROG-A1): the two wire-mechanism probe nodes the
+        // core-spine verdict design is gated on (CallLocal synchronicity on the authority,
+        // cross-node same-channel ordering on a remote — spec §1.6/§5.4, SD-1 UNVERIFIED list).
+        // Added on EVERY peer that passes the flag (identical paths on every peer);
+        // only the server ever emits. Every real launch path constructs neither node.
+        if (net.Options.NetProbeAtSec >= 0)
+        {
+            var probeA = new Sail.Game.Run.NetOrderProbe { Name = Sail.Game.Run.NetOrderProbe.NodeNameA };
+            var probeB = new Sail.Game.Run.NetOrderProbe { Name = Sail.Game.Run.NetOrderProbe.NodeNameB };
+            AddChild(probeA);
+            AddChild(probeB);
+            bool probeServer = net.Role == NetworkManager.SessionRole.Server;
+            probeA.Setup(probeServer, isPrimary: true, net.Options.NetProbeAtSec, probeB);
+            probeB.Setup(probeServer, isPrimary: false, net.Options.NetProbeAtSec, probeA);
+        }
+
+        // The lake (W2, lake-water contract). Takes providers rather than reaching for node paths
+        // or a static Instance, so it stays inert in a world with no lake.
+        _waterService = new Sail.Game.Water.WaterService { Name = Sail.Game.Water.WaterService.NodeName };
+        AddChild(_waterService);
+        _waterService.Setup(
+            net.Role == NetworkManager.SessionRole.Server,
+            EnumerateAvatars);
+        // The cold's visual + haptic urgency cue (§5.1). Attached HERE rather than up with the
+        // other UI layers because its _Ready subscribes to WaterService.Instance, which does not
+        // exist until the lines above have run. Headless is a no-op inside Attach.
+        Sail.Game.Water.ChillCueOverlay.Attach(this);
+        // The cold's diegetic-readout channel (2026-08-08 playtest fallout, P2) — replaces the
+        // hardware-gated rumble as the third redundant channel. Same placement reason as the
+        // line above.
+        Sail.Game.Water.ChillReadout.Attach(this);
+        // The splash VFX and audio listener (W4, spec §9). Same placement and the same reason as
+        // the line above — its _Ready subscribes to the five WaterService events, which do not
+        // exist until the service has been added. This is the ONLY construction site: there is no
+        // autoload and no scene node, so if this line is ever deleted the feature is silently
+        // gone in the real game while every lab and every test still passes.
+        Sail.Game.Water.Fx.WaterFx.Attach(this);
+
+        // The flashlight (NIGHT-2, Talon's 2026-08-29 notes 10 and 11: "when night falls, it's
+        // extremely difficult to see anything" / "give the player a simple 'glow'"). Canon fact 6's
+        // personal light. It takes the avatar resolver PropManager's own uses, for the same reason
+        // — the light hangs on the server's OWN authoritative avatar node, never on anything a
+        // client asserted.
+        //
+        // THIS IS THE ONLY CONSTRUCTION SITE, the trap WaterFx's and IncapacitationService's
+        // comments name: no autoload, no scene node, so deleting this block removes the feature
+        // from the real game while every arithmetic test still passes.
+        //
+        // PRESENTATION ONLY, deliberately: it lights geometry and contributes NOTHING to
+        // PlayerSightService below — see FlashlightManager's class doc for the three things holding
+        // that, and FlashlightProfile's for the measurement that says this is the fix rather than a
+        // hedge. It is therefore constructed BEFORE _playerSight with no wiring between them, and
+        // there is deliberately no _playerSight.Flashlights line to write.
+        _flashlightManager = new FlashlightManager { Name = FlashlightManager.NodeName };
+        AddChild(_flashlightManager);
+        _flashlightManager.Setup(net.Role == NetworkManager.SessionRole.Server,
+            id => _players.GetNodeOrNull<Node3D>(id.ToString()));
+        // The local input reader (F). No-op headless, same Attach guard as the water overlays above.
+        FlashlightController.Attach(this);
+
+        // The goose honk (HONK-1, 2026-09-04): proximity voice for players without a microphone.
+        // Same construction shape as the flashlight immediately above it — a plain Node holding the
+        // RPCs, an avatar resolver rather than a node path, and a separate local input reader that
+        // is not attached headless. THIS IS THE ONLY CONSTRUCTION SITE, the trap FlashlightManager
+        // and WaterFx both name: no autoload and no scene node, so deleting these three lines
+        // removes the feature from the real game while every arithmetic test still passes.
+        _honkManager = new Honk.HonkManager { Name = Honk.HonkManager.NodeName };
+        AddChild(_honkManager);
+        _honkManager.Setup(net.Role == NetworkManager.SessionRole.Server,
+            id => _players.GetNodeOrNull<Node3D>(id.ToString()));
+        Honk.HonkController.Attach(this);
+
+        // The failure states (phase 1c, beta plan §10). Added AFTER WaterService and RunDriver,
+        // and both are correctness dependencies rather than niceties — the same kind
+        // WaterService's own placement above states:
+        //   - WaterService, because the night-water freeze subscribes to its Sputtered event;
+        //   - RunDriver, because the dawn floor rides its NightToDawn crossing.
+        // Providers rather than node paths or sibling statics, so it stays inert exactly as
+        // WaterService does.
+        //
+        // THIS IS THE ONLY CONSTRUCTION SITE. There is no autoload and no scene node, so if this
+        // block is ever deleted the failure states are silently gone in the real game while every
+        // lab and every arithmetic test still passes — the trap WaterFx's own comment names one
+        // line above.
+        //
+        // THIS IS THE INTERIM DEATH MODEL, AND IT IS LIVE ON PURPOSE (Talon, 2026-08-12).
+        // Canon retired this loss model on 2026-08-11 with the prey pivot — recoverable
+        // incapacitation, the all-incapacitated-at-once hard loss, and dawn-recovers-everyone are
+        // all superseded — and canon 14 replaces it with respawn at the deepest CONNECTED hearth
+        // plus a dropped haul and the walk back. That replacement DOES NOT EXIST IN CODE and has
+        // no spec, so gating this off would leave nothing at all handling a downed player. Talon
+        // ruled it stays live and unchanged until canon 14 is built: this one lands as-is.
+        //
+        // So: if you are here because the shipped behaviour contradicts the canon block, that is
+        // known, dated and deliberate — not a bug to fix in passing. Replacing it is a specced
+        // piece of work (hearth graph, haul drop, walk-back), and the day it lands, this block
+        // and IncapacitationService go with it.
+        _incapacitation = new Sail.Game.Failure.IncapacitationService
+        {
+            Name = Sail.Game.Failure.IncapacitationService.NodeName,
+        };
+        AddChild(_incapacitation);
+        _incapacitation.Setup(
+            net.Role == NetworkManager.SessionRole.Server,
+            EnumerateAvatars,
+            // The warmth probe: is this position inside a lit fire's warmth, the thaw's one
+            // recovery path. No world here has a fire, so nowhere is ever warm — the same answer
+            // a fire registry with no fires in it gave before.
+            _ => false,
+            // Everything you carry scatters (beta plan §10) — a gameplay fact that feeds the fire
+            // economy, not cleanup. See PropManager.ScatterHeldBy for why Loose, not Resting.
+            peerId => _propManager.ScatterHeldBy(peerId));
+
+        // HOW FAR EVERY PLAYER CAN SEE (canon fact 4). AFTER CycleDriver, which it reads through the
+        // static Instance every tick rather than caching, so it recovers on its own if the ordering
+        // ever moves.
+        //
+        // THIS IS THE ONLY CONSTRUCTION SITE. There is no autoload and no scene node — the same trap
+        // WaterFx's and IncapacitationService's comments above name: delete this block and the
+        // feature is silently gone in the real game while every arithmetic test still passes.
+        //
+        // ONE PRODUCER, ONE CONSUMER, AND THE ARROW ONLY POINTS ONE WAY. This block builds the
+        // server-authoritative number and its replication. The renderer that expresses it —
+        // OutdoorAtmosphere's depth fog, via SightPresentation — reads PlayerSightService.Instance
+        // and Synced and takes a float; there is no path back, and there must never be one. A
+        // second derivation of "how far can this player see" anywhere on the client side is the
+        // parity-law violation canon fact 4 exists to prevent, and it would arrive looking like a
+        // convenience. Nothing else consumes this yet.
+        _playerSight = new Game.Sight.PlayerSightService { Name = Game.Sight.PlayerSightService.NodeName };
+        AddChild(_playerSight);
+        _playerSight.Setup(net.Role == NetworkManager.SessionRole.Server);
+        // Positions come from the server's OWN authoritative avatar transforms, never from anything
+        // a client asserted - identical seam to PropManager.AvatarResolver.
+        _playerSight.PeerSource = EnumerateAvatarPositions;
+
+        // L11's session summary seam (Issue #114) — see SessionSummaryProvider's own class doc
+        // for exactly what's real vs. genuinely undefined (MapCoveragePercent — an open question
+        // for Talon, not a value this pass may invent). _players is the exact same Players root
+        // PropManager's own AvatarResolver delegate already reads.
+        World.SessionSummarySource.Current = new World.SessionSummaryProvider(_players);
+
+        // L11 (Issue #114) headless-observable mirror of the loop UI's own dismiss/toast/summary
+        // decisions — present on EVERY peer, including a headless server/bot, unlike the actual
+        // CanvasLayer UI below (which renders nothing there). BotHarness samples it so
+        // Run-LoopUiTest.ps1 can prove the never-strand/toast/summary contract without a
+        // windowed client. Added after RunDriver/CycleDriver so both Instances already exist.
+        AddChild(new World.LoopUiTelemetry { Name = World.LoopUiTelemetry.NodeName });
+
+        // L11 (Issue #114): the loop UI shell — loading/hint overlay, phase toasts, session
+        // summary. Client-rendered only, same gate as PerfHud/SessionHud/InteractPrompt above.
+        // Added after RunDriver/CycleDriver so RunDriver.Instance/CycleDriver.Instance already
+        // exist for these to poll/subscribe against in their own _Ready.
+        if (!NetworkManager.Instance.IsHeadless)
+        {
+            // Toast layer FIRST, loading ground second — the reverse of the order this block
+            // shipped in, and the swap is load-bearing. The goal line below is raised from the
+            // ground's Dismissed event, and that event can fire synchronously inside the ground's
+            // own _Ready (a host is its own authority and is Synced on the first frame), so the
+            // layer that has to receive the line must already exist when the ground is added.
+            // Nothing else cares about the order: two independent CanvasLayers on two numbers.
+            var toasts = new Ui.PhaseToastLayer { Name = "PhaseToastLayer" };
+            AddChild(toasts);
+
+            var loading = new Ui.LoadingHintOverlay { Name = "LoadingHintOverlay" };
+            // The level's goal, said once, at the one moment the player is actually looking at the
+            // level — see LoadingHintOverlay.Dismissed for why _Ready itself is the wrong moment
+            // (this ground is opaque and sits 40 layers above the toast).
+            //
+            // Every session, not once ever: it is a reminder, not onboarding, so there is no
+            // "don't show this again" and nothing persisted. It still obeys the single run-level
+            // suppression every panel obeys, so it can never land on a capture or a bot run.
+            //
+            // Gated on the world THIS PEER BUILT rather than on the autoload's options (see
+            // LaunchOptions.DefaultWorld's trap note): the line names bubbles, and only one
+            // registered world has any — the CI scaffolding worlds "open" and "propsync" do not,
+            // and copy naming a mechanic the running world lacks is the defect note 4 was about.
+            if (worldId == Sail.Game.World.BubbleTest.BubbleTestLayout.WorldId
+                && !Ui.OnboardingSettings.GoalLineSuppressed)
+            {
+                loading.Dismissed += () => toasts.ShowLine(Ui.PhaseToastText.BubbleGoalToast);
+            }
+            AddChild(loading);
+            // CORE-INT-1: one round-flow surface set per launch mode, never both. An explicit
+            // --run-cycles cap is the LEGACY mode (RunDriver ends the run, RunEndedSignal
+            // fires, the session summary owns the end screen — the surviving test hook,
+            // spec §1.5/D5). The default run is uncapped (RunCyclesOrUncapped), RunEndedSignal
+            // is unreachable, and B1's flow screens own every non-InRound moment instead —
+            // attaching the legacy panel there too would put two summary surfaces on one
+            // screen the first time anything else fired it (B1 parked question 2: gated, not
+            // deleted). Wired HERE, at the bottom of the client-UI block: PlaythroughDriver/
+            // QuotaLedger already exist (constructed above — the adapter subscribes in its
+            // ctor), SessionSummarySource.Current is already set (the tally's per-kid lines
+            // read it), and PhaseToastLayer above gets its FlowView seam in the same breath
+            // so the dusk/night telegraph is suppressed outside band-live states from the
+            // first frame (spec §3.5 row 1).
+            if (net.Options.RunCycles > 0)
+            {
+                AddChild(new Ui.SessionSummaryPanel { Name = "SessionSummaryPanel" });
+            }
+            else
+            {
+                var flowView = new Presentation.LivePlaythroughView(_playthroughDriver, _quotaLedger);
+                var quotaView = new Presentation.LiveQuotaView(_quotaLedger);
+                Ui.PhaseToastLayer.FlowView = flowView;
+                Ui.Flow.FlowScreens.RecaptureMouseOnHide = true; // live play has a captured-mouse world under the screens.
+                // LOSS-1 (Talon note 4, 2026-08-29): the four round surfaces only exist where a
+                // scored playthrough does. Passed rather than read inside Attach because the
+                // labs and self-tests that also call it have no world — see Attach's doc.
+                Ui.Flow.FlowScreens.Attach(this, flowView, quotaView, LeaveToMenu,
+                    roundScreens: Sail.Game.Run.WorldRunFlow.Current);
+            }
+        }
+
+        switch (net.Role)
+        {
+            case NetworkManager.SessionRole.Server:
+                StartAsServer(net);
+                break;
+            case NetworkManager.SessionRole.Client:
+                StartAsClient(net);
+                break;
+            default:
+                net.LastError = "No session role set; returning to menu.";
+                _finished = true;
+                GetTree().CallDeferred(SceneTree.MethodName.ChangeSceneToFile, ScenePaths.MainMenu);
+                break;
+        }
+    }
+
+    public override void _ExitTree()
+    {
+        // Normalize global input/UI state owned by nodes that may die without cleanup: an
+        // involuntary exit (a disconnect bounce, a teardown mid-frame) otherwise strands the next
+        // menu scene with a captured-invisible mouse.
+        Input.MouseMode = Input.MouseModeEnum.Visible;
+        // Same involuntary-exit defense as the two lines above: world UI is suppressed while an
+        // inspect panel is open, and an involuntary teardown mid-inspect must not strand the next
+        // scene with world UI permanently suppressed.
+        Ui.WorldUi.Suppressed = false;
+        // CORE-INT-1: the toast layer's flow-view seam is a static holding a reference into
+        // THIS scene's driver — a stale value would make the next session's (or the menu's)
+        // telegraph gate dereference a freed node. Same stale-static defense as the lines
+        // above; the next Gameplay _Ready re-sets it.
+        Ui.PhaseToastLayer.FlowView = null;
+        Voice.VoiceManager.Instance.UnbindPlayersRoot();
+        if (_serverSignals)
+        {
+            Multiplayer.PeerConnected -= OnPeerConnected;
+            Multiplayer.PeerDisconnected -= OnPeerDisconnected;
+        }
+        if (_clientSignals)
+        {
+            Multiplayer.ConnectedToServer -= OnConnectedToServer;
+            Multiplayer.ConnectionFailed -= OnConnectionFailed;
+            Multiplayer.ServerDisconnected -= OnServerDisconnected;
+        }
+    }
+
+    // --- Server ------------------------------------------------------------------
+    private void StartAsServer(NetworkManager net)
+    {
+        _isServer = true;
+        ServerLog.Init(net.Options.LogDir, "matchserver.log");
+
+        // --- Voice proximity gate (perf followups, 2026-08-07) ---------------------------------
+        // The relay-side cull is compiled OFF (MpFoundation.Net.VoiceProximityGate.EnabledByDefault)
+        // because turning it on reverses SubmitVoice's documented "the server never inspects
+        // positions for voice" stance — Talon's call, not an agent's. --voice-gate on|off exists
+        // so a measurement or test run can drive both arms from one build. Applied here, on the
+        // SERVER only, because a client never relays anything.
+        if (net.Options.VoiceGateOverride)
+            MpFoundation.Net.VoiceProximityGate.Enabled = net.Options.VoiceGateOn;
+        // Test-only (--voice-pa-all): makes every sender read as "on the PA" so the gate's
+        // exemption branch is exercised by a live session instead of only compiling. The shipped
+        // game wires no PA resolver at all yet; see LaunchOptions.VoicePaAll.
+        if (net.Options.VoicePaAll)
+            Voice.VoiceManager.Instance.PaResolver = _ => true;
+
+        _serverSignals = true;
+        Multiplayer.PeerConnected += OnPeerConnected;
+        Multiplayer.PeerDisconnected += OnPeerDisconnected;
+
+        Error err = net.StartServer(net.PendingPort);
+        if (err != Error.Ok)
+        {
+            ServerLog.Error("failed to start server",
+                $"port={net.PendingPort} transport={net.Options.Transport} err={err} detail={net.LastError}");
+            GetTree().Quit(1);
+            return;
+        }
+
+        _startTicks = Time.GetTicksMsec();
+        // stdout line the harness gates on before launching clients. The ENet wording is
+        // load-bearing (test scripts match on it); the Steam line is informational.
+        if (net.Options.Transport == LaunchOptions.TransportSteam)
+            GD.Print($"[server] listening via Steam relay as {ServerAddress()}");
+        else
+            GD.Print($"[server] listening on udp/{net.PendingPort}");
+        ServerLog.Info("listening", $"transport={net.Options.Transport} port={net.PendingPort} " +
+            $"address={ServerAddress()} maxPlayers={Protocol.MaxPlayers} protocol={Protocol.Version}");
+        ServerLog.Info("voice relay mode",
+            $"gate={(MpFoundation.Net.VoiceProximityGate.Enabled ? "on" : "off")} " +
+            $"enter={MpFoundation.Net.VoiceProximityGate.EnterRadiusM:F0}m " +
+            $"exit={MpFoundation.Net.VoiceProximityGate.ExitRadiusM:F0}m");
+
+        // --net-stats: the transport's own byte counters, once a second (see NetStatsLogger).
+        // Attached only when asked for, and only after the peer exists — the first sample is
+        // meaningless otherwise.
+        if (net.Options.NetStatsLog.Length > 0)
+        {
+            var stats = new MpFoundation.Net.NetStatsLogger { Name = MpFoundation.Net.NetStatsLogger.NodeName };
+            AddChild(stats);
+            stats.Setup(net.Options.NetStatsLog);
+        }
+
+        // Populate the world's networked props (the deployment world's real prop set by
+        // default; test worlds get theirs — see PropManager.SpawnInitialProps).
+        _propManager.SpawnInitialProps(net.Options.World);
+    }
+
+    private void OnPeerConnected(long id)
+    {
+        int index = _spawnIndex++;
+        ulong steamId = NetworkManager.Instance.SteamId64Of((int)id);
+        // Cache now, while SteamPeer's connId -> SteamID mapping is still intact, so
+        // OnPeerDisconnected has a reliable value to read later (see _peerSteamIds).
+        _peerSteamIds[(int)id] = steamId;
+        Vector3 spawn;
+        int[] resumedHeldPropIds = System.Array.Empty<int>();
+        int colorIndex;
+        if (steamId != 0 && _reconnects.TryConsume(steamId, Time.GetTicksMsec() / 1000.0, out ReconnectRegistry.ResumeData resume))
+        {
+            // Found and not expired: resume at the saved position instead of a fresh spawn
+            // point, re-grant whatever was held below (see the restore loop after Spawn), and
+            // restore the palette color it had before the drop (P11, Task A3) instead of
+            // dealing a fresh one - see ResolveColorIndex. Otherwise this player is
+            // indistinguishable from a fresh joiner below - normal late-join prop dump, a
+            // freshly dealt palette color.
+            spawn = resume.Position;
+            resumedHeldPropIds = resume.HeldPropIds;
+            colorIndex = ResolveColorIndex(resumed: true, resume.ColorIndex, index);
+            ServerLog.Info("peer reconnected", $"peer={id} resumedAt=({spawn.X:F2},{spawn.Y:F2},{spawn.Z:F2})");
+        }
+        else
+        {
+            spawn = SpawnPositionFor(index);
+            // BT-7: the bubble test deals a RANDOM colour, every other world keeps the round
+            // robin. Talon: "randomly assigned a color on join/start (no picking, no dedup logic
+            // needed)." A resumed peer is untouched by this — it restores the index it already
+            // had, above, exactly as before, so a reconnect never re-rolls a player's colour.
+            // Canon §2.6 (whether the caveman's own colour varies) is OPEN and is not decided
+            // here: this is one world's deal, not the game's.
+            colorIndex = ResolveColorIndex(
+                resumed: false, resumeColorIndex: -1,
+                NetworkManager.Instance.Options.World == AvatarVisual.BoxKidWorldId
+                    ? SandboxAvatar.RandomPaletteIndexFor(_colorSeed, index)
+                    : index);
+        }
+        // Cache the color actually settled on above (a resumed peer's restored index, not
+        // necessarily its raw spawn-order `index` — see _peerColorIndex's declaration comment),
+        // so a later disconnect captures this peer's true live color.
+        _peerColorIndex[(int)id] = colorIndex;
+        // Spawn data carries the dealt pastel color: every peer (and every late joiner,
+        // via the spawner's replay) builds this avatar identically from the same data —
+        // cosmetics ride the spawn, not a synchronizer (§11 of the Art Bible: the wire
+        // carries state, visuals are reconstructed locally).
+        Color color = SandboxAvatar.PaletteColorFor(colorIndex);
+        _spawner.Spawn(new Godot.Collections.Array { id, spawn, color });
+        // P2: re-grant whatever this resumed peer held before the drop, one prop at a time,
+        // through PropManager.TryRestoreHeldProp - the exact same SetHolder + ApplyPropState
+        // (Held) path a live grab uses (release-then-restore design, not a new held state; see
+        // that method's doc comment for the first-grab-wins fairness guard). BEFORE the dump
+        // below, so a restored prop's dump entry (if any) is already Held, not a stale Resting
+        // that would immediately get overwritten. Empty for a fresh joiner or an expired/absent
+        // grace record - a no-op loop.
+        foreach (int propId in resumedHeldPropIds)
+            _propManager.TryRestoreHeldProp(propId, (int)id);
+        // Late-join dump: bring the new peer's client-side prop view up to date with every
+        // prop's current authoritative state (held props attach to holders, resting props place).
+        // The spawner call above is synchronous locally, so the avatar node already exists.
+        _propManager.SendDumpTo((int)id);
+        // Cycle-clock late-join delivery (BUILD-SPEC §5's #1 likely bug): a joining OR
+        // resumed peer must never fall back to CycleDriver's zero-initialized default before
+        // this lands — send it now, same call site and reasoning as the prop dump above. A
+        // reconnect over this codebase's ENet-bot harness (--force-reconnect-at) is assigned
+        // a brand-new peer id and re-enters OnPeerConnected exactly like a fresh joiner (see
+        // Gameplay's own comments on _peerSteamIds), so this one call site covers both.
+        _cycleDriver.SendPhaseTo((int)id);
+        // Run-state late-join delivery (L1, Issue #104): same call site, same reasoning — a
+        // joining or resumed peer must know the run's length and whether it has already ended
+        // before it renders anything, never the zero-initialized default (see
+        // RunDriver.Synced's doc).
+        _runDriver.SendRunStateTo((int)id);
+        // Playthrough-state late-join delivery (CORE-PROG-A1, spec §3.4): same call site, same
+        // reasoning, immediately after the run state it layers on. Carries state, round, the
+        // live countdown and both latched payloads — a joiner into RoundEnd sees the tally, a
+        // joiner into Loss lands on the loss screen, all from the poll (the never-strand rule);
+        // until this lands a joiner holds PlaythroughDriver.Synced false and B1's Connecting
+        // gate correctly refuses to present the world as "playing".
+        _playthroughDriver.SendFlowStateTo((int)id);
+        // Quota-ledger late-join delivery (spec §3.4, after SendFlowStateTo): a joiner's
+        // banked/demand numbers must match the server's before any surface reads them — the
+        // zero default here looks like "nothing banked yet", a true-sounding wrong answer.
+        _quotaLedger.SendQuotaTo((int)id);
+        // Test-only (--quota-bank-at): connect-order-index -> peer id, so a scheduled test bank
+        // can name "the first bot" without predicting a peer id (Godot's ENetMultiplayerPeer
+        // assigns peer ids randomly). No-op cost when the schedule is empty (every real launch path).
+        _quotaLedger.TestRegisterConnectIndex(index, (int)id);
+        // Failure-state late-join delivery (phase 1c): same call site, same reasoning. The
+        // replicated MoveState already carries WHAT each body
+        // is, so a late joiner sees the states themselves — but not the CAUSE, and the cause is
+        // what selects the skin. Without this a peer joining a session where somebody is frozen at
+        // the shore would render them as an ordinary player standing very still in the dark,
+        // which is the most misleading thing this game could show a new arrival.
+        _incapacitation.SendStateTo((int)id);
+        // Flashlight late-join delivery (NIGHT-2): same call site, same reasoning — a joiner would
+        // render the player standing in front of them dark while every other peer sees them
+        // glowing, which is a desync that reads as the feature being broken rather than as a
+        // missing dump.
+        _flashlightManager.SendFlashlightStateTo((int)id);
+        // Water late-join delivery (W2, lake-water contract §12): same call site, same reasoning.
+        // Without it a peer joining a session where somebody is already halfway across the lake
+        // renders them standing bolt upright in deep water with no chill and no swim, and W4's
+        // splash listener never learns a swim is under way at all.
+        _waterService.SendWaterStateTo((int)id);
+        // Sight-range late-join delivery (canon fact 4): same call site, same reasoning, and it must
+        // come AFTER the spawner call above because the table is keyed by live avatars — SendSightTo
+        // recomputes before it sends so the brand-new peer is in the table it receives. Without this
+        // a joiner holds PlayerSightService.Synced false and therefore reads the darkness floor for
+        // itself and everyone else until the next 0.2 s broadcast. That is the correct direction to
+        // be wrong in (see RangeFor's doc) but it is still a documented failure shape, and this
+        // closes it.
+        _playerSight.SendSightTo((int)id);
+        ServerLog.Info("peer joined", $"peer={id} players={Multiplayer.GetPeers().Length}");
+    }
+
+    /// <summary>Peer id and authoritative position for <see cref="Game.Sight.PlayerSightService"/>.
+    /// Deliberately no velocity term: this is how well the player sees the WORLD, and standing
+    /// still does not help you see in the dark.</summary>
+    private System.Collections.Generic.IEnumerable<(int PeerId, Vector3 Position)>
+        EnumerateAvatarPositions()
+    {
+        foreach (SandboxAvatar a in EnumerateAvatars())
+            yield return (a.OwnerPeerId, a.GlobalPosition);
+    }
+
+    /// <summary>Every live avatar, for WaterService's server tick. A method rather than an
+    /// inline lambda over <c>GetChildren()</c> so the null/type filtering has one home — the
+    /// Players root also carries the spectate camera and, transiently, a node mid-free.</summary>
+    private System.Collections.Generic.IEnumerable<SandboxAvatar> EnumerateAvatars()
+    {
+        foreach (Node child in _players.GetChildren())
+            if (child is SandboxAvatar avatar)
+                yield return avatar;
+    }
+
+    private void OnPeerDisconnected(long id)
+    {
+        Node3D? avatar = _players.GetNodeOrNull<Node3D>(id.ToString());
+        // Read the connect-time-cached SteamID64 rather than re-resolving it here:
+        // SteamPeer.DropServerSideConnection has already cleared the connId -> SteamID
+        // mapping SteamId64Of would need, by the time this signal handler runs (see
+        // _peerSteamIds's declaration comment). Remove the entry regardless of whether
+        // Capture ends up firing below, so this dictionary never grows unbounded over a
+        // long-running server's lifetime.
+        ulong steamId = _peerSteamIds.Remove((int)id, out ulong cachedSteamId) ? cachedSteamId : 0;
+        int colorIndex = _peerColorIndex.Remove((int)id, out int cachedColorIndex) ? cachedColorIndex : -1;
+
+        // P2 (audit-documented ordering fix): capture which props this peer currently holds
+        // BEFORE OnPeerLeft (below) releases them to Resting - a release clears the held state
+        // this query reads, so this MUST run first (see PropManager.HeldPropIdsFor's doc
+        // comment and ReconnectRegistry.Capture's).
+        int[] heldPropIds = _propManager.HeldPropIdsFor((int)id);
+
+        // Water state is dropped on disconnect, deliberately and NOT carried by ReconnectRegistry.
+        // A disconnect is not a death and must not reuse the death path (MECHANICS-BIBLE §8.2's
+        // separate-fields rule), but the inverse is also true: resuming a swim would put a
+        // reconnecting player back in deep water with the chill they left on, and the resume
+        // position is already the last authoritative one — so if they were in the lake they are
+        // still in the lake and the clock legitimately restarts from zero. That is the forgiving
+        // reading, and it is stated here rather than left to fall out of the dictionary.
+        _waterService.ForgetPeer((int)id);
+        // WATER-3: the drowning clock takes the SAME forgiving reading, for the same reason and in
+        // the same breath — a reconnecting player whose last authoritative position was under the
+        // water must start their three seconds again, not resume 2.9 s into a breath they stopped
+        // holding when their connection dropped. `RespawnService` is created by the world (the
+        // bubble test's), so the static is null-safe by design rather than by luck.
+        Sail.Game.Run.RespawnService.Instance?.ForgetPeer((int)id);
+        // Same treatment, and here it is load-bearing rather than tidy: a departed peer left in
+        // the machine dictionary still counts toward AllConnectedIncapacitated, so a player who
+        // disconnects while knocked out would hold the whole group one body short of a recovery
+        // forever — and the run's only hard loss condition would then be permanently armed by
+        // somebody who is no longer in the session.
+        _incapacitation.ForgetPeer((int)id);
+        // Release everything this peer held BEFORE freeing its avatar node, so the drop
+        // position derives from its still-valid last authoritative transform (and so no prop
+        // stays bound to a node that's about to be freed). Props still drop immediately -
+        // today's behavior, every existing invariant preserved; heldPropIds (captured above)
+        // is what lets a successful resume re-grant them (see OnPeerConnected).
+        _propManager.OnPeerLeft((int)id);
+
+        // The flashlight goes out and the entry is dropped, deliberately: it is attached to a body
+        // that has just left. Left in the table it would be a lit peer with no avatar, which the
+        // renderer would chase every frame forever. Costing a returning player one keypress is the
+        // right side of that trade.
+        _flashlightManager.OnPeerLeft((int)id);
+
+        // The honk cooldown latch goes with the peer, for a reason the flashlight above does not
+        // have: ENet peer ids are RECYCLED, so a latch left behind would make the next player to
+        // be handed this id silently unable to honk for up to 0.6 s after they join. Same
+        // recycled-id discipline VoiceManager applies to its avatar cache and its mute entries.
+        _honkManager.OnPeerLeft((int)id);
+
+        // Steam-hosted matches only: a resolvable identity gets a 60s reconnect grace
+        // window at its last position, plus whatever it held (restored on resume if still
+        // available - see OnPeerConnected) and its dealt palette index. Unresolvable (e.g.
+        // somehow on the ENet transport) skips straight to today's behavior below - no
+        // pending record, so OnPeerConnected always spawns fresh for this peer.
+        if (steamId != 0 && avatar != null)
+            _reconnects.Capture(steamId, avatar.Position, heldPropIds, colorIndex, Time.GetTicksMsec() / 1000.0);
+
+        avatar?.QueueFree();
+        ServerLog.Info("peer left", $"peer={id} players={Multiplayer.GetPeers().Length}");
+    }
+
+    /// <summary>Runs on EVERY peer via the MultiplayerSpawner, so it is also where the entity's
+    /// authority role is chosen: the server simulates and broadcasts (<c>ConfigureServer</c>),
+    /// everyone else renders the interpolated snapshot stream (<c>ConfigureRemote</c>, keyed on
+    /// <see cref="_isServer"/>). No entity kind is registered today — the first real NPC adds its
+    /// kind dispatch here; an unknown kind throws rather than silently building the wrong
+    /// thing.</summary>
+    private Node SpawnEntity(Variant data)
+    {
+        var args = data.AsGodotArray();
+        string kind = args[0].AsString();
+        string name = args[1].AsString();
+        throw new System.InvalidOperationException(
+            $"unknown entity kind '{kind}' for '{name}' — no NetworkedEntity kind is registered");
+    }
+
+    private Node SpawnPlayer(Variant data)
+    {
+        var args = data.AsGodotArray();
+        var player = _playerScene.Instantiate<SandboxAvatar>();
+        player.Name = args[0].AsInt64().ToString();
+        player.Position = args[1].AsVector3();
+        if (args.Count > 2)
+            player.BodyColor = args[2].AsColor();
+        player.Props = _propManager; // networked carry funnel (Interact routes grab/drop through it)
+        return player;
+    }
+
+    // internal, not private, for one reason: BubbleTestSelfTest asserts that
+    // BuildWorld("bubbletest") really returns a BubbleTestWorld. That check is not a
+    // formality — it is the one live proof that the registered id and the scene it loads have
+    // not drifted apart. Same assembly, so no visibility is leaked outside it.
+    internal static IGameWorld BuildWorld(string id)
+    {
+        // WATER-3: which lake this world has, before anything in it exists. Server and client both
+        // build the world, so both land on the same footprint and the motor's depth test stays a
+        // world constant — a reconciliation replay resolves the identical answer the live step did.
+        // EGG-2: the SET, not the single lake. The bubble test has two water bodies since the
+        // blue tower got its moat; every other world still gets exactly one and is unchanged.
+        Sail.Game.Water.WaterGeometry.ActiveWaters = Sail.Game.Water.WaterGeometry.WatersForWorld(id);
+        return BuildWorldScene(id);
+    }
+
+    // The one registered world. An unknown id THROWS rather than falling back: the old default
+    // arm silently loaded a code-built testbed, and the first symptom was a playtester saying the
+    // level did not load. Failing loudly at build time is the cheaper way to learn a launch line
+    // is wrong.
+    private static IGameWorld BuildWorldScene(string id) => id switch
+    {
+        // BT-0 (2026-08-27): the Bubble Test playtest level.
+        "bubbletest" => GD.Load<PackedScene>(ScenePaths.BubbleTest).Instantiate<IGameWorld>(),
+        // The code-built CI scaffolding the scene suites run on: "open" is prop-free, "propsync"
+        // is seeded by PropManager.SpawnInitialProps. Neither is reachable from an interactive
+        // launch (HostMenu never passes --world).
+        "open" or "propsync" => new GameWorld(),
+        _ => throw new System.InvalidOperationException(
+            $"unknown world id '{id}' — registered worlds are \"bubbletest\" (played), \"open\" and \"propsync\" (CI)"),
+    };
+
+    // P11 (Task A3): the resumed-vs-fresh palette-color decision, pulled out as a pure static
+    // function (no Node/state involved) so ReconnectSelfTest can exercise it directly without a
+    // running scene tree. A resumed peer keeps the exact color it was dealt before the drop
+    // (resumeColorIndex, from the grace record); a fresh joiner - no record, or an expired one -
+    // gets the next round-robin index like any brand-new player, same as today. Internal (not
+    // private) so the selftest, in the same assembly, can call it.
+    //
+    // KNOWN WALL (see task-A3-brief.md): OnPeerConnected's call to this can never actually take
+    // the resumed=true branch in ENet-bot CI - NetworkManager.SteamId64Of always returns 0 for a
+    // bot connection, so the TryConsume that would produce a real ResumeData never fires. This
+    // pure function is the only seam that decision has for a logic-level proof; the live
+    // Steam-transport path is Talon's next interactive session.
+    internal static int ResolveColorIndex(bool resumed, int resumeColorIndex, int freshIndex) =>
+        resumed ? resumeColorIndex : freshIndex;
+
+    // P4 (Task A4): the outcome of re-resolving the room code against the Steam lobby directory
+    // after a FAILED reconnect attempt. The host's own client is the sole owner of the lobby, so
+    // a lobby that no longer resolves means the host is gone for good (ResetToOffline and the
+    // server child's job-object both destroy it) — no amount of retrying will bring it back.
+    internal enum LobbyProbe
+    {
+        NotChecked,   // nothing to re-resolve (a direct steam:<id64> joiner has no room code)
+        Found,        // the lobby is up — the host is still there; retry as today
+        Gone,         // authoritative "no such lobby": the host left for good — fail fast
+        Inconclusive, // the query itself failed (Steam hiccup/timeout); not proof of anything
+    }
+
+    // The terminal decision the reconnect retry loop makes after a failed attempt.
+    internal enum ReconnectDecision { Retry, HostGone, WindowExpired }
+
+    // P4 (Task A4): the pure host-gone fast-fail decision, pulled out of ScheduleReconnectRetry so
+    // the full (window-remaining x lobby-probe) matrix is CI-testable without a live Steam relay
+    // (see SteamSelfTest.ReconnectFastFailDecision). A provably-gone lobby outranks everything —
+    // the instant we KNOW the host is gone we stop, rather than burning the rest of the 60s grace
+    // window on redials that can never land (the live-playtest bug this fixes). Otherwise the
+    // pre-P4 behavior is untouched: retry while the window has time, give up when it runs out.
+    // A Found/NotChecked/Inconclusive probe all fall through to that unchanged window logic — only
+    // an authoritative Gone triggers the fast-fail, so a transient Steam error never gives up early.
+    internal static ReconnectDecision DecideReconnect(bool withinWindow, LobbyProbe probe)
+    {
+        if (probe == LobbyProbe.Gone)
+            return ReconnectDecision.HostGone;
+        if (!withinWindow)
+            return ReconnectDecision.WindowExpired;
+        return ReconnectDecision.Retry;
+    }
+
+    // P4 (Task A4): maps a raw SteamLobby.FindHostByCodeAsync result to a LobbyProbe. Pure so the
+    // load-bearing distinction — an honest "no such room" (fail fast) vs a query that errored
+    // (keep trying) — is CI-tested, even though the query producing it is interactive-only.
+    // FindHostByCodeAsync reports found=false with an EMPTY error only for the genuine
+    // no-such-lobby outcome; any non-empty error means the lookup didn't get an authoritative
+    // answer (timeout, no Steam session, a lookup already in flight).
+    internal static LobbyProbe ClassifyLobbyResult(bool found, string error) =>
+        found ? LobbyProbe.Found
+        : error.Length > 0 ? LobbyProbe.Inconclusive
+        : LobbyProbe.Gone;
+
+    // Spawn from the world's declared points, or fall back to the phyllotaxis ring below
+    // if it declares none; index wraps for late joiners.
+    private Vector3 SpawnPositionFor(int index)
+    {
+        if (_world != null && _world.SpawnPoints.Count > 0)
+            return _world.SpawnPoints[index % _world.SpawnPoints.Count];
+        float angle = Mathf.DegToRad(137.5f * index);
+        return new Vector3(Mathf.Cos(angle) * SpawnRadius, 1.1f, Mathf.Sin(angle) * SpawnRadius);
+    }
+
+    /// <summary>This peer's own avatar, or null before it spawns / after a reconnect frees it.
+    /// Avatar node names are the owning peer id (see <see cref="SpawnPlayer"/>). Resolved per
+    /// poll rather than cached because the node is replaced outright on a resume.</summary>
+    private SandboxAvatar? LocalAvatar() =>
+        _players != null && GodotObject.IsInstanceValid(_players)
+            ? _players.GetNodeOrNull<SandboxAvatar>(Multiplayer.GetUniqueId().ToString())
+            : null;
+
+    public override void _Process(double delta)
+    {
+        // Affordance poll runs on every rendering peer, server-hosting or pure client — it is
+        // local presentation, not authority, so it sits above the _isServer early-out.
+        _highlighter?.Tick(delta);
+
+        if (!_isServer)
+            return;
+        _sinceStatus += delta;
+        if (_sinceStatus >= StatusIntervalSec)
+        {
+            _sinceStatus = 0;
+            LogStatus();
+            _reconnects.SweepExpired(Time.GetTicksMsec() / 1000.0);
+        }
+    }
+
+    // The heartbeat line. It used to append names=[…] — every player's typed display name,
+    // written to the HOST'S disk on every status interval, in a file that rotates by size and
+    // survives uninstall. The count is the whole diagnostic point of a heartbeat ("are people
+    // still in here?"); the names only ever answered a question nobody was asking of a log.
+    // Per-peer detail still exists where it is actually useful — the connect/reject lines —
+    // and is pseudonymous there (LogIdentity).
+    private void LogStatus()
+    {
+        int players = 0;
+        foreach (Node child in _players.GetChildren())
+        {
+            if (child is SandboxAvatar)
+                players++;
+        }
+        double uptime = (Time.GetTicksMsec() - _startTicks) / 1000.0;
+        ServerLog.Info("status", $"uptime={uptime:F0}s players={players}/{Protocol.MaxPlayers}");
+    }
+
+    // This server's connectable identity: its Steam identity when players reach it
+    // through the relay (what the host client publishes in the lobby), a loopback
+    // endpoint over ENet (Practice/CI children are always same-machine spawns).
+    private string ServerAddress() =>
+        NetworkManager.Instance.Options.Transport == LaunchOptions.TransportSteam
+            ? Net.Steam.SteamAddress.Format(Net.Steam.SteamService.ServerSteamId)
+            : $"127.0.0.1:{NetworkManager.Instance.PendingPort}";
+
+    // --- Client ------------------------------------------------------------------
+    private void StartAsClient(NetworkManager net)
+    {
+        // Netcode CI hook: simulate latency/loss/jitter on this client's movement
+        // messages, in-process. Absent flag = zero overhead (NetSim.Instance stays null).
+        if (net.Options.NetSimEnabled)
+            AddChild(new NetSim(net.Options));
+
+        // Headless join-by-code (--join-room-code): stands in for what JoinMenu/HostMenu set
+        // before changing scene, so CI can exercise the room-code gate over ENet. Guarded on
+        // non-empty so an absent option never clobbers a menu-set code — no interactive path
+        // changes behaviour.
+        if (net.Options.JoinRoomCode.Length > 0)
+            net.JoiningRoomCode = net.Options.JoinRoomCode;
+
+        _clientSignals = true;
+        Multiplayer.ConnectedToServer += OnConnectedToServer;
+        Multiplayer.ConnectionFailed += OnConnectionFailed;
+        Multiplayer.ServerDisconnected += OnServerDisconnected;
+        _connectingLabel.Visible = true;
+
+        if (net.PendingRoom.Length > 0)
+        {
+            net.CurrentRoomCode = net.PendingRoom;
+            ResolveThenConnect(net);
+        }
+        else if (net.PendingSteamId != 0)
+        {
+            // Direct steam:<id64> connect — the Join screen's advanced field, or the
+            // Host flow connecting to its own server child. Consumed so a bounce back
+            // to the menu can't replay it.
+            ulong steamId = net.PendingSteamId;
+            net.PendingSteamId = 0;
+            ConnectSteam(steamId);
+        }
+        else
+        {
+            ConnectDirect(net.PendingHost, net.PendingPort);
+        }
+    }
+
+    // Room-code resolve rides the Steam lobby directory (SteamLobby): the host's client
+    // published {code -> server identity} as lobby metadata; we filter the public lobby
+    // list for it. Completion lands on the main thread (SteamService.Pump), but the
+    // scene may have moved on — guard before touching the tree.
+    private async void ResolveThenConnect(NetworkManager net)
+    {
+        // async void: an exception escaping here would take the whole client down unrouted
+        // (no awaiter to observe it) — route every unexpected throw into the normal Fail path.
+        try
+        {
+            string room = net.PendingRoom;
+            uint appId = SteamService.ResolveAppId(net.Options);
+            if (!SteamService.EnsureClient(appId))
+            {
+                Fail(SteamService.LastError);
+                return;
+            }
+            (bool found, ulong hostSteamId, string error) = await SteamLobby.FindHostByCodeAsync(room);
+            if (_finished || !IsInsideTree())
+                return;
+            if (error.Length > 0)
+            {
+                Fail($"Room lookup failed: {error}");
+                return;
+            }
+            if (!found)
+            {
+                Fail($"Room \"{room}\" not found.");
+                return;
+            }
+            ConnectSteam(hostSteamId);
+        }
+        catch (System.Exception e)
+        {
+            GD.PushWarning($"[client] room resolve threw {e.GetType().Name}: {e.Message}");
+            if (!_finished && IsInsideTree())
+                Fail("Room lookup failed unexpectedly.");
+        }
+    }
+
+    private void ConnectDirect(string host, int port)
+    {
+        _enetHost = host;
+        _enetPort = port;
+        Error err = NetworkManager.Instance.StartClient(host, port);
+        if (err != Error.Ok)
+        {
+            Fail(NetworkManager.Instance.LastError);
+            return;
+        }
+        // Same stale-attempt guard as the Steam watchdog (OnSteamConnectTimeout): in the
+        // forced-reconnect flow a timer from the original connect could otherwise fire during
+        // the retry window and schedule a duplicate reconnect cycle.
+        int attempt = ++_connectAttempt;
+        GetTree().CreateTimer(ConnectTimeoutSec).Timeout += () => OnSteamConnectTimeout(attempt);
+    }
+
+    private void ConnectSteam(ulong serverSteamId)
+    {
+        // A reconnect retry (see OnServerDisconnected) calls this again on the same
+        // Gameplay instance; close whatever peer is still assigned first so a dead SteamPeer
+        // from a failed attempt never leaks its relay connection/callback subscription. A
+        // no-op on the very first connect of a session (default peer is an offline no-op).
+        Multiplayer.MultiplayerPeer?.Close();
+        // Audit P1: before EVERY redial attempt of a reconnect sequence (not just the first —
+        // idempotent, so a retry after a failed attempt costs nothing extra), free every stale
+        // replicated node this client is still holding from the dropped session. Otherwise the
+        // resumed handshake's MultiplayerSpawner replay stacks a second copy of every peer/prop
+        // on top of the frozen originals (name-colliding duplicates, a permanently-ghosted own
+        // body) — see TeardownReplicatedNodes.
+        if (_reconnecting)
+            TeardownReplicatedNodes();
+        _steamServerId = serverSteamId;
+        Error err = NetworkManager.Instance.StartClientSteam(serverSteamId);
+        if (err != Error.Ok)
+        {
+            if (_reconnecting)
+            {
+                ScheduleReconnectRetry();
+                return;
+            }
+            Fail(NetworkManager.Instance.LastError);
+            return;
+        }
+        // Relay connects ride cert provisioning + route probing on a cold Steam session;
+        // give them meaningfully longer than a LAN ENet connect before declaring death.
+        int attempt = ++_connectAttempt;
+        GetTree().CreateTimer(SteamConnectTimeoutSec).Timeout += () => OnSteamConnectTimeout(attempt);
+    }
+
+    /// <summary>Stale-attempt guard shared by both connect watchdogs (ConnectSteam's 25s and
+    /// ConnectDirect's ENet timer): a connect is re-attempted on every retry, but a previous
+    /// attempt's CreateTimer watchdog isn't cancelled when that attempt resolves through a
+    /// faster path (e.g. OnConnectionFailed) — without this check, the orphaned timer fires
+    /// later, doesn't know it's stale, and forces a spurious extra reconnect cycle on top of
+    /// whatever attempt is currently in flight.</summary>
+    private void OnSteamConnectTimeout(int attempt)
+    {
+        if (attempt != _connectAttempt)
+            return;
+        OnConnectTimeout();
+    }
+
+    private void OnConnectedToServer()
+    {
+        // Belt-and-suspenders defensive check (audit P1) — see ConnectSteam's call site for the
+        // full rationale (this is the same idempotent teardown, called defensively again here in
+        // case a future call path reaches a resumed connect without going through ConnectSteam).
+        if (_reconnecting)
+            TeardownReplicatedNodes();
+        _connected = true;
+        _reconnecting = false;
+        _connectingLabel.Visible = false;
+        var net = NetworkManager.Instance;
+        if (net.CurrentRoomCode.Length > 0)
+        {
+            // The creator (and code-joiners) can always read the code off the HUD to share it.
+            _roomCodeLabel.Text = $"Room: {net.CurrentRoomCode}";
+            _roomCodeLabel.Visible = true;
+        }
+        GD.Print($"[client] connected as peer {Multiplayer.GetUniqueId()}");
+        if ((net.IsBot || net.PracticeSelfTest) && _harness == null)
+        {
+            _harness = new BotHarness();
+            _harness.Setup(_players, _propManager, net.Options, _entities);
+            AddChild(_harness);
+        }
+        // Test-only (--force-reconnect-at): arm once, on the very first connect, a one-shot
+        // timer that simulates a drop+resume over ENet - see SimulateForcedReconnect's doc
+        // comment for why this stands in for the real (Steam-only, non-bot) retry loop in CI.
+        if (!_forceReconnectArmed && net.Options.ForceReconnectAtSec >= 0)
+        {
+            _forceReconnectArmed = true;
+            GetTree().CreateTimer(net.Options.ForceReconnectAtSec).Timeout += SimulateForcedReconnect;
+        }
+    }
+
+    private void OnConnectTimeout()
+    {
+        if (!GodotObject.IsInstanceValid(this) || !IsInsideTree() || _connected || _finished)
+            return;
+        if (_reconnecting)
+        {
+            ScheduleReconnectRetry();
+            return;
+        }
+        Fail("Connection timed out");
+    }
+
+    private void OnConnectionFailed()
+    {
+        if (_reconnecting)
+        {
+            ScheduleReconnectRetry();
+            return;
+        }
+        Fail("Could not connect to server");
+    }
+
+    private void OnServerDisconnected()
+    {
+        var net = NetworkManager.Instance;
+        if (_reconnecting)
+        {
+            // The in-flight retry attempt itself dropped before completing the handshake;
+            // treat exactly like a failed connection attempt (see OnConnectionFailed) -
+            // the shared deadline set when we first entered reconnect mode still applies.
+            ScheduleReconnectRetry();
+            return;
+        }
+        // Steam-transport only (ConnectSteam sets _steamServerId), and never for bot/practice
+        // clients (they must die immediately - a silent retry loop reads as a hang to the
+        // test scripts, and this feature is for real players only).
+        if (_steamServerId != 0 && !(net.IsBot || net.PracticeSelfTest))
+        {
+            _reconnecting = true;
+            _connected = false;
+            _reconnectDeadlineMsec = Time.GetTicksMsec() + (ulong)(ReconnectRegistry.WindowSec * 1000);
+            _connectingLabel.Text = "Reconnecting...";
+            _connectingLabel.Visible = true;
+            ConnectSteam(_steamServerId);
+            return;
+        }
+        Fail("Disconnected from server");
+    }
+
+    /// <summary>Called after a reconnect attempt fails (synchronously, by timeout, or by an
+    /// immediate re-disconnect) while still within the 60s grace window. P4 (Task A4): before
+    /// waiting to retry, re-resolve the room code against the Steam lobby directory — if the
+    /// lobby is gone the host left for good, so give up immediately ("Host ended the session")
+    /// instead of burning the rest of the window on redials that can never land (the live-playtest
+    /// bug: 60s of futile "Reconnecting..." after the host closed). Lobby still up, or nothing to
+    /// re-resolve (direct steam:<id64> joiner), or the query itself hiccuped ⇒ wait a short beat
+    /// (so a downed relay/server isn't hammered) then retry via ConnectSteam, exactly as before.
+    /// Past the deadline, give up and fall through to the normal Fail() bounce-to-menu.
+    ///
+    /// The re-resolve is deliberately NOT done before the FIRST attempt (that path is
+    /// OnServerDisconnected → ConnectSteam directly): a momentary blip shouldn't pay a lobby query.
+    /// async void mirrors ResolveThenConnect; the lobby query lands on the main thread
+    /// (SteamService.Pump), so the post-await tree guard is required.</summary>
+    private async void ScheduleReconnectRetry()
+    {
+        if (!GodotObject.IsInstanceValid(this) || !IsInsideTree() || _connected || _finished)
+            return;
+        // Reaching here means the current attempt has resolved (in failure); retire its
+        // generation NOW rather than waiting for the next ConnectSteam to bump the counter.
+        // Otherwise there's a residual window: an attempt that fails via a non-watchdog path
+        // 23-25s after arming leaves its watchdog to fire during this 2s retry delay (now also
+        // the lobby-query window), while the counter still matches - which would arm a duplicate
+        // retry timer that closes the next attempt mid-negotiation.
+        _connectAttempt++;
+
+        // P4: re-resolve the room code (interactive-only Steam query; NotChecked when there's no
+        // code to resolve, e.g. a direct steam:<id64> joiner) to learn whether the host is still
+        // there. See DecideReconnect for how the probe combines with the remaining window.
+        var net = NetworkManager.Instance;
+        LobbyProbe probe = LobbyProbe.NotChecked;
+        if (net.CurrentRoomCode.Length > 0)
+        {
+            probe = await ProbeHostLobby(net.CurrentRoomCode);
+            // The query can take up to its timeout; the scene may have moved on / resumed / failed.
+            if (!GodotObject.IsInstanceValid(this) || !IsInsideTree() || _connected || _finished)
+                return;
+        }
+
+        switch (DecideReconnect(Time.GetTicksMsec() < _reconnectDeadlineMsec, probe))
+        {
+            case ReconnectDecision.HostGone:
+                _reconnecting = false;
+                Fail("Host ended the session");
+                return;
+            case ReconnectDecision.WindowExpired:
+                _reconnecting = false;
+                Fail("Could not reconnect to server");
+                return;
+            default: // Retry
+                GetTree().CreateTimer(ReconnectRetryDelaySec).Timeout += RetryReconnect;
+                return;
+        }
+    }
+
+    /// <summary>P4 (Task A4): re-resolves a room code to a live/dead verdict via the Steam lobby
+    /// directory (SteamLobby.FindHostByCodeAsync). Thin wrapper: it exists only to run the Steam
+    /// query and hand its raw outcome to the pure ClassifyLobbyResult.
+    ///
+    /// INTERACTIVE-ONLY — this is the one line of A4 that CI cannot exercise. FindHostByCodeAsync
+    /// needs a live Steam client session and the real relay; headless CI has neither (no Steam
+    /// account, and the ENet reconnect bots have no lobby at all — they take the NotChecked path
+    /// above and never reach here). The decision this feeds (DecideReconnect) and the raw-result
+    /// classification (ClassifyLobbyResult) are both pure and fully covered in SteamSelfTest; the
+    /// live re-resolve itself is verified only in Talon's next interactive Steam session. Per the
+    /// Global Constraints, NO lobby/identity shim is added to force this path to fire in CI.</summary>
+    private static async Task<LobbyProbe> ProbeHostLobby(string roomCode)
+    {
+        (bool found, ulong _, string error) = await SteamLobby.FindHostByCodeAsync(roomCode);
+        return ClassifyLobbyResult(found, error);
+    }
+
+    private void RetryReconnect()
+    {
+        if (!GodotObject.IsInstanceValid(this) || !IsInsideTree() || _connected || _finished || !_reconnecting)
+            return;
+        ConnectSteam(_steamServerId);
+    }
+
+    /// <summary>Audit P1: frees every client-side replicated node this peer is still holding a
+    /// stale copy of — every child of <see cref="_players"/> (each avatar, AND each avatar's own
+    /// locally-created <see cref="Sandbox.SandboxCamera"/>, which SandboxAvatar's local-spawn
+    /// branch parents as a _players SIBLING, not the avatar's own child — see
+    /// SandboxAvatar.ConfigureNetworkedInstance's "GetParent().AddChild(camera)" call) and every
+    /// runtime-spawned child of <see cref="_props"/>.
+    ///
+    /// Authored props (e.g. Playground.tscn's placed Crate/Sphere instances) are ADOPTED, never
+    /// spawned (see PropManager.AdoptAuthoredProps) — they live under the World node, not
+    /// _props, so this never touches them. That is deliberate, not an oversight: they exist
+    /// identically in every peer's copy of the world scene both before and after a resume (the
+    /// .tscn instance itself never goes anywhere), and the server's post-resume dump
+    /// (PropManager.SendDumpTo) re-syncs each one's live state onto the SAME long-lived instance
+    /// via the ordinary ApplyPropState funnel — there is no stale authored-prop copy to free.
+    ///
+    /// Idempotent (freeing an already-empty container is a no-op), so this is safe to call
+    /// before every redial attempt in a reconnect sequence, not just the first, and again
+    /// defensively once the resume actually completes (see call sites in ConnectSteam and
+    /// OnConnectedToServer). Also clears PropManager's client-side held-by-peer bookkeeping,
+    /// which would otherwise dangle on a node this just freed.</summary>
+    private void TeardownReplicatedNodes()
+    {
+        foreach (Node child in _players.GetChildren())
+            child.Free();
+        foreach (Node child in _props.GetChildren())
+            child.Free();
+        // Entities replicate through a MultiplayerSpawner exactly like players and props, so the
+        // resumed handshake replays them too — without this they stack a second copy under the
+        // "@"-suffixed auto-rename (audit P1's symptom). Empty today, but
+        // the first real NPC would otherwise inherit the bug this teardown exists to prevent.
+        foreach (Node child in _entities.GetChildren())
+            child.Free();
+        _propManager.ClientResetHeldState();
+    }
+
+    /// <summary>Test-only (--force-reconnect-at, see LaunchOptions): fires once, a fixed delay
+    /// after this client's first successful connect. Headless CI has no live Steam relay/account,
+    /// so the REAL reconnect trigger (OnServerDisconnected's Steam-transport branch, gated off
+    /// for bots by design — "a silent retry loop reads as a hang to the test scripts") can never
+    /// fire in a bot run. This simulates the same drop+resume shape over the transport CI
+    /// actually has (ENet, direct address) so Run-ReconnectTest.ps1 can drive the SAME production
+    /// teardown code (TeardownReplicatedNodes, the defensive re-check in OnConnectedToServer)
+    /// under TDD, instead of only ever exercising it interactively. Deliberately minimal: unlike
+    /// the real retry loop, this does not retry on failure (ScheduleReconnectRetry still only
+    /// knows how to redial via ConnectSteam) — the test's server is never actually gone, so a
+    /// single redial attempt is expected to succeed every time.</summary>
+    private void SimulateForcedReconnect()
+    {
+        if (!GodotObject.IsInstanceValid(this) || !IsInsideTree() || _finished)
+            return;
+        _reconnecting = true;
+        _connected = false;
+        _reconnectDeadlineMsec = Time.GetTicksMsec() + (ulong)(ReconnectRegistry.WindowSec * 1000);
+        TeardownReplicatedNodes();
+        Multiplayer.MultiplayerPeer?.Close();
+        ConnectDirect(_enetHost, _enetPort);
+    }
+
+    /// <summary>Client-side terminal failure: a specific handshake error wins over the generic
+    /// one, and the player goes back to the screen they actually started from — Host for a
+    /// host, Join for a joiner (Net.SessionFailureRoute; F1 of the 2026-08-30 master review).</summary>
+    private void Fail(string message)
+    {
+        if (_finished)
+            return;
+        _finished = true;
+        var net = NetworkManager.Instance;
+        string reason = net.HandshakeError.Length > 0 ? net.HandshakeError : message;
+        net.HandshakeError = "";
+        // Read the flag BEFORE the teardown: ResetToOffline stops the server child, leaves
+        // (and so destroys) the lobby, and clears IsHostFlow with the rest of the session.
+        // Sampling it afterwards would route every host to the Join screen — the bug itself.
+        (string scene, string shown) = Net.SessionFailureRoute.For(net.IsHostFlow, reason);
+        net.LastError = shown;
+        net.ResetToOffline();
+        if (net.IsBot || net.PracticeSelfTest)
+        {
+            // Headless harness clients (bots, --practice, --host-selftest) must DIE with
+            // the reason, not bounce to a menu no one is looking at — a silent bounce
+            // reads as a hang to the test scripts. The RAW reason, not the routed message:
+            // the harness greps for the failure, not for the player-facing dressing.
+            GD.PrintErr($"[bot] {reason}");
+            GetTree().Quit(1);
+            return;
+        }
+        GetTree().CallDeferred(SceneTree.MethodName.ChangeSceneToFile, scene);
+    }
+
+    /// <summary>Voluntary exit from the pause overlay.</summary>
+    public void LeaveToMenu()
+    {
+        if (_finished)
+            return;
+        _finished = true;
+        var net = NetworkManager.Instance;
+        net.ResetToOffline();
+        net.StopPracticeServer();
+        GetTree().ChangeSceneToFile(ScenePaths.MainMenu);
+    }
+
+    /// <summary>Teleports the local player back to its spawn point (client-local; propagates via sync).</summary>
+    public void ResetLocalPlayerPosition()
+    {
+        int myId = Multiplayer.GetUniqueId();
+        foreach (Node child in _players.GetChildren())
+        {
+            if (child is SandboxAvatar player && player.GetNode<MultiplayerSynchronizer>("Sync").GetMultiplayerAuthority() == myId)
+            {
+                player.ResetToSpawn();
+                return;
+            }
+        }
+    }
+}
