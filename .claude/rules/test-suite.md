@@ -701,3 +701,66 @@ stderr above a suite that then passes, and is not this suite's.
 
 **Baseline after VOICE-1: `dotnet test` Failed: 0, Passed: 1342, Skipped: 0, Total: 1342.**
 INT-0's was 1317; the 25 new ones are `VoiceRoutingTests.cs`.
+
+## A frame-sampled beat runs EARLY, and a capture harness distorts its own marks (DOOR-1, measured 2026-09-19)
+
+`Run-BurstDoorTest.ps1` (port **7900**) joins the registry. Server plus two bots on
+`--world supermarket`, driven by `--round-script`, with a `--startle-file` overlay handed to all
+three; **its failures are millisecond readings and metre readings rather than verdicts.** Baseline
+on `feat/2026-09-19-door-1`, machine otherwise idle:
+
+| Quantity | Value |
+|---|---|
+| peers that burst | 3 of 3 |
+| worst \|own burst − (own arm + TellSec)\| | **3–12 ms**, always LATE (bar 50 ms) |
+| burst spread across three processes | **4–11 ms** (bar 150 ms) |
+| seeker's deepest z while the blocker held | **5.55 m** against the wall's 5.4 m vestibule face |
+| seeker's deepest z after the burst | **1.12–1.14 m** against the 5.0 m task-room face |
+| best prop movement inside the burst radius, on a CLIENT's log | **0.99–1.38 m** (bar 0.3 m) |
+
+### The port ladder now reads 7893/7894/7895 (CarryNet) · 7896 (RoundLoop) · 7897 (FirstPerson) · 7898 (Place) · 7899 (VoiceRoom) · **7900 (BurstDoor)** · 7901 · 7902+ (SFX-1)
+
+**INT-0's "three lanes off one base chose the same port" happened again one wave later, with the
+ladder comment already in place, and the missing sentence is this: a port is not claimed until it
+is on `origin`.** DOOR-1 read the ladder, took the next gap (7899), and wrote it into three files;
+VOICE-1's `Run-VoiceRoomTest` had landed on 7899 from its own worktree in the meantime. Neither
+lane could see the other and both were reading correctly. Two concurrent lanes computing "the next
+free port" from the same `tests/` will pick the same one **every** time, so the only reliable
+protocols are to fetch and re-grep immediately before committing, or to have the orchestrator hand
+each lane a number.
+
+### A beat that accumulates `_Process` deltas fires EARLY by up to one frame
+
+**Measured, and it is bigger than it sounds.** The burst door's staging originally summed frame
+deltas from the tick the Found message landed. That message arrives inside network polling,
+part-way through a frame; the next `_Process` then hands over the **whole** of that frame's delta,
+most of which elapsed before the message existed. So the beat runs early by up to one frame time.
+
+| Run | Configured tell | Measured arm → burst |
+|---|---|---|
+| headless smoke, 3 peers | 1.200 s | 1.191 / 1.196 / 1.199 s (early by 1–9 ms) |
+| **windowed capture client**, whose first post-arm frame also took a viewport screenshot | 1.200 s | **1.070 s — early by 130 ms, 11 % of the beat** |
+| after the fix (`Time.GetTicksUsec` read at the arm), headless smoke | 1.200 s | 1.203 / 1.205 / 1.212 s |
+
+**Read the direction, not just the magnitude.** A frame-sampled event can honestly only ever be
+LATE, by less than a frame; an early one means time is being counted that the event had not
+happened for yet. Any beat keyed to a network message and stepped by `delta` has this, and the fix
+is one clock read rather than a running sum.
+
+### A viewport capture costs ~0.18 s, so a dense `--capture-at` grid reports the wrong times
+
+A 0.1 s grid of marks queues behind itself (`BotHarness` fires at most one mark per frame and
+gates on `_capturing`), and the lag accumulates: over seven marks it reached **1.0 s**, which put
+the burst a full second from where the log ordering said it was and produced four "frames of the
+burst" that were all after it. **A 0.25 s grid does not queue** — measured mark-to-file offsets
+were 0.250 ± 0.003 s across 22 marks.
+
+Two things that go with it, both cheap:
+
+- **A PNG's mtime is the capture's wall clock**, and it is the only cross-process anchor a capture
+  has. Diff it against the subject's own `wall=` log stamps rather than inferring order from
+  interleaved stdout.
+- **The offset between a bot's `--capture-at` clock and the round's clock is the CONNECT time, and
+  it moved by a full second between two runs of one script.** Four marks computed from one
+  calibration run therefore land somewhere else on the next one. Shoot the grid, measure, keep the
+  four frames you wanted and delete the rest — the alternative is three runs of guessing.

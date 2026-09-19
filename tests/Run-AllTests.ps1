@@ -120,6 +120,20 @@ try {
         # that turned that per-world default off.
         @{ Name = "Voice: intercom by room (VOICE-1)";   Script = "Run-VoiceRoomTest.ps1" }
 
+        # --- DOOR-1 (2026-09-19): the burst door ---
+        # Last, per the standing rule -- and appended AFTER FP-1's entry rather than before it,
+        # which is a deliberate re-reading of that rule rather than a guess: three lanes off one
+        # base each appended "last" and the merge had to pick an order anyway (INT-0 §1), so the
+        # honest convention is join order, newest at the bottom.
+        #
+        # A server and two bots on its own port, udp/7900 -- headless. Every port in tests/ was
+        # re-audited when this one was claimed, because a "next free port" computed from a
+        # snapshot of tests/ is exactly what produced INT-0's triple 7896 collision. It happened
+        # a second time anyway, inside this wave: this suite was written on 7899 and VOICE-1's
+        # Run-VoiceRoomTest landed there first from its own worktree. 7893-7899 and 7901 are
+        # taken and SFX-1 claims upward from 7902, so 7900 is the one gap left.
+        @{ Name = "Door: burst + startle (DOOR-1)";      Script = "Run-BurstDoorTest.ps1" }
+
         # WHAT WAS REMOVED HERE AT THE FORK (BASE-1, 2026-09-19), so a reader of an old handoff
         # can tell "deleted" from "lost": the bubble-test world, the shared bubble counter and the
         # last-bubble celebration, the TV portal, the Puffin Lab, the watcher's night gate, the

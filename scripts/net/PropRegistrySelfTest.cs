@@ -75,6 +75,26 @@ public partial class PropRegistrySelfTest : Node
             reg.SetResting(id1, rest) && reg.TryGet(id1, out PropState rs) && rs.Mode == PropMode.Resting
             && rs.Transform.Origin == new Vector3(5, 0, 0));
 
+        // Wake: Resting -> Loose, the edge an EXTERNAL force makes (DOOR-1's burst). Release
+        // deliberately refuses this transition, and the door's first implementation called it
+        // anyway: the store stayed Resting, the server's per-tick loop streams only Loose props,
+        // and the shove moved the server's own rigid body and nothing on any client. See
+        // PropRegistry.Wake's own doc.
+        Check("wake_moves_resting_to_loose",
+            reg.Wake(id1, rest) && reg.TryGet(id1, out PropState wk) && wk.Mode == PropMode.Loose
+            && wk.HolderPeerId == 0 && wk.Transform.Origin == new Vector3(5, 0, 0));
+        Check("wake_is_idempotent_from_loose",
+            reg.Wake(id1, rest) && reg.TryGet(id1, out PropState wk2) && wk2.Mode == PropMode.Loose);
+        // ...and refused from Held: a blast may tumble a crate, never empty a hand behind the
+        // release funnel's back.
+        reg.SetResting(id1, rest);
+        Check("wake_rejected_while_held",
+            reg.SetHolder(id1, 11) && !reg.Wake(id1, rest)
+            && reg.TryGet(id1, out PropState wk3) && wk3.Mode == PropMode.Held && wk3.HolderPeerId == 11);
+        reg.Release(id1, rest);
+        reg.SetResting(id1, rest);
+        Check("bad_id_wake_false", !reg.Wake(999, rest));
+
         // ReleaseAllHeldBy: a departed peer's holds all latch to Resting; others untouched.
         var reg2 = new PropRegistry();
         int p1 = reg2.Register(PropKind.Crate, a);

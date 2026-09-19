@@ -15,6 +15,18 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
 {
     public const string NodeName = "PropManager";
 
+    /// <summary><b>The one prop manager in this process</b>, or null before <c>Gameplay</c> has
+    /// built it. Written in <see cref="Setup"/> and cleared in <see cref="_ExitTree"/> — the
+    /// <c>HideSeekDriver.Instance</c> / <c>RunDriver.Instance</c> / <c>CycleDriver.Instance</c>
+    /// idiom this repo already uses three times, added here for the same reason they exist.
+    ///
+    /// <para>Added by DOOR-1 (2026-09-19), whose burst is raised by a node in the LEVEL: the door
+    /// lives under <c>Gameplay/World/Supermarket/TaskRoom</c> and the manager under
+    /// <c>Gameplay/PropManager</c>, so without this the door's two server-side calls
+    /// (<see cref="ServerBurstImpulse"/> and <see cref="ScatterHeldBy"/>) would have to walk the
+    /// tree by a hard-coded relative path that changes the day anyone re-parents a room.</para></summary>
+    public static PropManager? Instance { get; private set; }
+
     /// <summary>How much further than the client's own reach the server will accept a grab.
     ///
     /// Client and server reach are ONE number with a stated tolerance, not two independently
@@ -230,8 +242,15 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
     // returns them here rather than despawning them (they were never spawner-spawned).
     private readonly System.Collections.Generic.Dictionary<int, Transform3D> _adoptedInitial = new();
 
+    public override void _ExitTree()
+    {
+        if (Instance == this)
+            Instance = null;
+    }
+
     public void Setup(MultiplayerSpawner spawner, Node3D propsRoot, bool isServer)
     {
+        Instance = this;
         _spawner = spawner;
         _propsRoot = propsRoot;
         _isServer = isServer;
@@ -1225,6 +1244,120 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
             index++;
         }
     }
+
+    /// <summary>
+    /// Server: <b>the burst door's shove</b> (DOOR-1, program §5). Every Loose or Resting prop
+    /// whose body is within <paramref name="radiusM"/> of <paramref name="originGlobal"/> takes
+    /// an OUTWARD impulse whose magnitude falls off linearly to zero at the radius
+    /// (<see cref="MpFoundation.Game.Round.StartleTimeline.ImpulseNsAt"/> is the arithmetic, and
+    /// it is unit-tested there rather than here). Returns how many props were moved, for the
+    /// server log and for the smoke.
+    ///
+    /// <para><b>Newton-seconds, converted through each prop's own mass.</b> The caller's number
+    /// is an IMPULSE, so a heavy prop is shoved less than a light one by construction — which is
+    /// the difference between a physical shove and a "set everything to 6 m/s" that makes a
+    /// crate and a marble leave together.</para>
+    ///
+    /// <para><b>A Resting prop is WOKEN into Loose, not nudged in place.</b> Resting is a latched
+    /// static fact with no stream behind it (<see cref="PropMode.Resting"/>): pushing such a body
+    /// on the server would move the server's copy and nobody else's, and the prop would snap back
+    /// the moment anything re-read the registry. So this takes the ordinary release path — the
+    /// reliable Loose transition every peer already applies, then the server's own settle loop —
+    /// which is what makes the tumble something the stream carries rather than something only the
+    /// host can see. An already-Loose prop is streaming, so its impulse is simply added to what it
+    /// is already doing.</para>
+    ///
+    /// <para><b>A HELD prop is not touched here.</b> The flinch is a separate rule with a separate
+    /// knob (<c>StartleTuning.ForceDropOnBurst</c>) and goes through
+    /// <see cref="ScatterHeldBy"/>; shoving a prop out of a hand as a side effect of proximity
+    /// would take the object off a hider who was standing two metres from the door and leave the
+    /// one standing four metres away holding theirs, which is a rule nobody could read off the
+    /// screen.</para>
+    ///
+    /// <para><b>Outward is horizontal plus a fixed lift.</b> Purely horizontal reads as a prop
+    /// sliding; purely radial from a doorway at chest height drives a floor crate INTO the floor.
+    /// The lift is a fraction of the impulse rather than a second knob — see
+    /// <see cref="BurstLiftFraction"/>.</para>
+    /// </summary>
+    public int ServerBurstImpulse(Vector3 originGlobal, float radiusM, float impulseNs)
+    {
+        if (!_isServer || !(radiusM > 0f) || !(impulseNs > 0f))
+            return 0;
+
+        var tuning = new MpFoundation.Game.Round.StartleTuning
+        {
+            BurstRadiusM = radiusM,
+            BurstImpulseNs = impulseNs,
+        };
+
+        // Snapshot: waking a Resting prop mutates the registry, and _registry.All is the live
+        // collection (the same reason _loosePropsScratch exists in _PhysicsProcess). A LOCAL
+        // list rather than that scratch, deliberately — the scratch is owned by the 60 Hz loop
+        // and this runs from a level node's own frame, so sharing it would mean one burst could
+        // land inside the loop's iteration of it. Once per round is not a place to save an
+        // allocation.
+        var candidates = new System.Collections.Generic.List<PropState>();
+        foreach (PropState p in _registry.All)
+        {
+            if (p.Mode is PropMode.Loose or PropMode.Resting)
+                candidates.Add(p);
+        }
+
+        int moved = 0;
+        foreach (PropState p in candidates)
+        {
+            NetworkedProp? node = NodeFor(p.Id);
+            if (node == null)
+                continue;
+            Vector3 at = node.Body.GlobalPosition;
+            float distance = at.DistanceTo(originGlobal);
+            float ns = MpFoundation.Game.Round.StartleTimeline.ImpulseNsAt(distance, tuning);
+            if (ns <= 0f)
+                continue;
+
+            Vector3 outward = at - originGlobal;
+            outward.Y = 0f;
+            // A prop sitting exactly under the doorway has no outward direction to take; push it
+            // into the room rather than picking a bearing at random, because "into the room" is
+            // the one direction the door itself defines and every peer replays the same number.
+            outward = outward.LengthSquared() > 0.0001f
+                ? outward.Normalized()
+                : Vector3.Forward;
+            Vector3 impulse = outward + Vector3.Up * BurstLiftFraction;
+            float mass = node.Body.Mass > 0.001f ? node.Body.Mass : 1f;
+            Vector3 deltaV = impulse * (ns / mass);
+
+            if (p.Mode == PropMode.Resting)
+            {
+                // _registry.WAKE, not Release. Release is guarded to Held -> Loose and returns
+                // false here, which is exactly the defect Run-BurstDoorTest caught on its first
+                // run: the store stayed Resting, the per-tick loop above streams only Loose
+                // props, and the shove moved the SERVER's rigid body while every client's copy
+                // stood still. See PropRegistry.Wake's own doc comment.
+                Transform3D wokeAt = node.Body.GlobalTransform;
+                _registry.Wake(p.Id, wokeAt);
+                Rpc(MethodName.ApplyPropState, p.Id, (int)PropMode.Loose, 0, wokeAt);
+                node.BeginLooseServer(deltaV);
+            }
+            else
+            {
+                node.Body.LinearVelocity += deltaV;
+            }
+            moved++;
+        }
+
+        if (moved > 0)
+            ServerLog.Info("burst", $"shoved {moved} prop(s) within {radiusM:F1} m of "
+                                    + $"{originGlobal} at {impulseNs:F1} Ns");
+        return moved;
+    }
+
+    /// <summary>How much UP goes into the burst's outward direction, as a fraction of the
+    /// horizontal component. 0.35 is a shove that lifts the near edge of a crate rather than one
+    /// that launches it: enough for a stacked tower to come apart, little enough that nothing
+    /// clears the 3.5 m ceiling. Not a knob, because it is the SHAPE of the push rather than its
+    /// strength, and <c>StartleTuning.BurstImpulseNs</c> is the dial for the strength.</summary>
+    private const float BurstLiftFraction = 0.35f;
 
     /// <summary>Horizontal impulse on a scattered prop. Gentler than a throw
     /// (<see cref="DropForwardSpeed"/> is the comparison) — items should end up around the body,

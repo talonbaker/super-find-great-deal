@@ -85,6 +85,37 @@ public sealed class PropRegistry
         return true;
     }
 
+    /// <summary>
+    /// <b>Wakes a resting prop into <see cref="PropMode.Loose"/> at <paramref name="at"/></b> —
+    /// the transition an EXTERNAL force makes, as opposed to a holder letting go
+    /// (<see cref="Release"/>) or a loose prop going to sleep (<see cref="SetResting"/>). The
+    /// impulse is the caller's business, exactly as it is for <see cref="Release"/>.
+    ///
+    /// <para><b>Why this had to exist</b> (DOOR-1, 2026-09-19, and it was found by a suite rather
+    /// than by review). Until the burst door there was no way for anything but a player to move a
+    /// prop, so the store had no Resting -> Loose edge at all and <see cref="Release"/> is
+    /// explicitly guarded to refuse one. The door's first implementation called
+    /// <see cref="Release"/> on a Resting crate: it returned false, the store stayed Resting, the
+    /// server's per-tick loop streams only Loose props — and so the server's own rigid body was
+    /// unfrozen and shoved across the room while every client's copy sat exactly where it was,
+    /// forever. The server's log said "shoved 3 prop(s)" and it was telling the truth.
+    /// <c>tests/Run-BurstDoorTest.ps1</c> measures the prop's movement on a CLIENT's log for
+    /// precisely this reason.</para>
+    ///
+    /// <para><b>Idempotent from Loose, refused from Held.</b> Waking something already awake is a
+    /// second blast reaching the same tumbling crate, which is fine and should not need the
+    /// caller to branch. Waking something in a hand is not: it would take the prop off a player
+    /// without any of the release funnel's broadcasts, so the hand would keep claiming it on
+    /// every peer. A caller that means to empty a hand has <see cref="Release"/>.</para>
+    /// </summary>
+    public bool Wake(int id, Transform3D at)
+    {
+        if (!_props.TryGetValue(id, out PropState s) || s.Mode == PropMode.Held)
+            return false;
+        _props[id] = s.AsLoose(at);
+        return true;
+    }
+
     /// <summary>Updates a Loose prop's streamed transform. Returns false unless the prop is Loose,
     /// so a resting or held prop can never be moved by a stray transform update.</summary>
     public bool SetLooseTransform(int id, Transform3D at)
