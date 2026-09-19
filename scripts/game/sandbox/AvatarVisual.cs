@@ -766,6 +766,65 @@ public partial class AvatarVisual : Node3D
     /// keeps rendering the body normally — a local fix, not a network-visible one.</summary>
     public const int OwnBodyRenderLayer = 20;
 
+    /// <summary>Render layer the LOCAL player's own visual rig lives on exclusively once
+    /// <see cref="HideFromFirstPerson"/> has been called, and the one layer
+    /// <see cref="FirstPersonCamera"/> drops from its cull mask (FP-1, 2026-09-19).
+    ///
+    /// <para><b>Why a second layer and not <see cref="OwnBodyRenderLayer"/>.</b> Layer 20 is
+    /// carried by EVERY avatar's body, on every peer, because the third-person rig's use of it is
+    /// momentary — the arm drops the layer for the handful of frames it would otherwise render
+    /// from inside a head, and it does not matter that every other body blinks with it. A
+    /// first-person cull is PERMANENT, so a camera that dropped layer 20 would erase the other
+    /// player too, which in this game is the whole thing you are looking for. This layer is set
+    /// on one avatar per process — the one this machine drives — so the mask is exact.</para>
+    ///
+    /// <para><b>A cull mask, not a hidden node, and not a zero scale.</b> Visibility and scale are
+    /// properties of the node, so both would travel to every peer's copy of the animation and to
+    /// the spectate camera; a cull mask is a property of the LENS, so the body keeps existing,
+    /// keeps animating, keeps casting its blob shadow and is still drawn — with its nameplate — by
+    /// every camera in every other process. Same local-fix-not-a-network-fix argument
+    /// <see cref="OwnBodyRenderLayer"/> makes one layer up.</para>
+    ///
+    /// <para>19, immediately below layer 20, so the two self-hide layers read as a pair and
+    /// neither collides with the 1-3 range the world, props and effects use.</para></summary>
+    public const int FirstPersonHiddenLayer = 19;
+
+    /// <summary>Is this rig hidden from its own first-person camera? Sticky, and re-applied after
+    /// every appearance rebuild — an avatar rebuilds its model when the authority's avatar-key pick
+    /// lands, which is AFTER the camera attached, and a rebuilt mesh comes back on the default
+    /// layer with the player abruptly looking at the inside of their own head.</summary>
+    public bool HiddenFromFirstPerson { get; private set; }
+
+    /// <summary>Take this whole rig off every layer but <see cref="FirstPersonHiddenLayer"/>, so
+    /// the one camera that drops that layer draws none of it. Idempotent; survives rebuilds.</summary>
+    public void HideFromFirstPerson()
+    {
+        HiddenFromFirstPerson = true;
+        ApplyFirstPersonHide();
+    }
+
+    /// <summary>The whole rig, not just <c>_body</c>: the feet hang off this node rather than off
+    /// the body (see <see cref="MarkOwnBodyLayer"/>'s note), and so do the sprout, the frozen block
+    /// and the knocked-out birds. Anything renderable that belongs to this character has to leave
+    /// the mask, or "your own body is not drawn" is true of the torso and false of the shoes.</summary>
+    private void ApplyFirstPersonHide()
+    {
+        if (!HiddenFromFirstPerson)
+            return;
+        HideSubtree(this);
+    }
+
+    private static void HideSubtree(Node node)
+    {
+        if (node is VisualInstance3D visual)
+        {
+            visual.Layers = 0;
+            visual.SetLayerMaskValue(FirstPersonHiddenLayer, true);
+        }
+        foreach (Node child in node.GetChildren())
+            HideSubtree(child);
+    }
+
     /// <summary>Current TOTAL body tilt (X), radians — exposed for the floor-clamp test invariant.
     ///
     /// <para><b>The total, not one node's share</b> (RIG-1). The pitch is now distributed between the
@@ -2087,6 +2146,7 @@ public partial class AvatarVisual : Node3D
             BuildAuthoredRig(model, row, bodyColor, modelPath);
             MarkOwnBodyLayer(_body);
             MeasureRestPose();
+            ApplyFirstPersonHide();   // a rebuild comes back on the default layer — see the flag
             return;
         }
 
@@ -2234,6 +2294,7 @@ public partial class AvatarVisual : Node3D
 
         MarkOwnBodyLayer(_body);
         MeasureRestPose();
+        ApplyFirstPersonHide();   // a rebuild comes back on the default layer — see the flag
     }
 
     /// <summary>Builds the pose rig once per instance and never again. Idempotent and safe to call
@@ -3618,6 +3679,7 @@ public partial class AvatarVisual : Node3D
         }
         AddChild(pivot);
         _birds = pivot;
+        ApplyFirstPersonHide();   // built lazily, long after Attach — see HiddenFromFirstPerson
         return pivot;
     }
 
@@ -3653,6 +3715,7 @@ public partial class AvatarVisual : Node3D
         };
         AddChild(block);
         _iceBlock = block;
+        ApplyFirstPersonHide();   // built lazily, long after Attach — see HiddenFromFirstPerson
         return block;
     }
 

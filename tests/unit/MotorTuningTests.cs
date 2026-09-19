@@ -530,7 +530,7 @@ public class MotorTuningTests
             .Where(l => l.StartsWith("        ", StringComparison.Ordinal) && l.Contains(" = "))
             .ToList();
 
-        Assert.Equal(58, declarations.Count);
+        Assert.Equal(59, declarations.Count);   // FP-1: BodyYawFollowsAim is the fifty-ninth row
         foreach (string line in declarations)
         {
             Assert.Matches(DeclarationLine, line);
@@ -576,11 +576,11 @@ public class MotorTuningTests
     {
         string block = MotorTuningPrint.Render(MotorTuning.Default with { Acceleration = 12.5f }, Stamp);
 
-        Assert.Contains("1 of 58 knobs differ", block);
+        Assert.Contains("1 of 59 knobs differ", block);   // FP-1: 58 -> 59 rows
         Assert.Contains("        Acceleration = 12.5f,", block);
         Assert.Contains("// was 9", block);
         Assert.DoesNotContain("        Gravity = ", block);
-        Assert.Contains("unchanged (57)", block);
+        Assert.Contains("unchanged (58)", block);
     }
 
     /// <summary>

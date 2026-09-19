@@ -52,6 +52,30 @@ public readonly record struct MotorTuning
     /// <summary>Knob 7. Aimed-facing lerp rate, s⁻¹.</summary>
     public float AimTurnLerp { get; init; }
 
+    /// <summary>Knob 58 (FP-1, 2026-09-19). <b>Does the body face where the player LOOKS, or where
+    /// it is GOING?</b> 1 = the look (this game's default), 0 = travel direction (the foundation's
+    /// third-person rule, and what every prior packet shipped).
+    ///
+    /// <para><b>A mode, not a fork.</b> <c>AvatarMotor.Step</c> already took an optional
+    /// <c>faceYaw</c>; at 1 this row is what supplies it, from the same sanitized
+    /// <c>MoveIntent.AimYaw</c> that already rides the wire and is already replayed in
+    /// reconciliation. So the authority, the owner's prediction and the replay all derive the same
+    /// facing from the same byte — nothing new crosses the wire and no side computes it a second
+    /// way. <c>ResolveYaw</c> is untouched and its tests still pass an explicit angle.</para>
+    ///
+    /// <para><b>Why it defaults ON here.</b> The game is first person: a player's body is the only
+    /// thing the OTHER player can read, and a body that faces its travel direction tells them where
+    /// you are walking while you stare at the shelf you are about to hide something in. Facing the
+    /// look is also the only way the carry anchor, the aim ray and the rendered view can agree
+    /// about which way "in front of me" is.</para>
+    ///
+    /// <para><b>Its cost, stated.</b> An intent that carries no look — every scripted bot — reports
+    /// <c>AimYaw = 0</c>, so at 1 a bot faces world-zero instead of its heading. The bot brains
+    /// therefore fill <c>AimYaw</c> from their own travel direction (see
+    /// <c>DeterministicWalkIntentSource</c>), which keeps a fixture facing the way it did before
+    /// this row existed and makes its replicated aim ray honest at the same time.</para></summary>
+    public float BodyYawFollowsAim { get; init; }
+
     // --- Gravity -----------------------------------------------------------------------------
     /// <summary>Knob 8. Base gravity, m/s².</summary>
     public float Gravity { get; init; }
@@ -366,6 +390,9 @@ public readonly record struct MotorTuning
         TurnAcceleration = 34f,
         TurnLerp = 12f,
         AimTurnLerp = 22f,
+        // FP-1: this game is first person, so the body faces the look. See the field's doc for
+        // why this is a mode on the existing faceYaw seam rather than a second facing rule.
+        BodyYawFollowsAim = 1f,
 
         // MOVE-8 / FORGIVING: heavier gravity with a real hang at the top and a sharp release cut.
         // The apex barely moves (1.534 → 1.407 m in the playground's convention) because the extra

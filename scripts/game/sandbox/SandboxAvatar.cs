@@ -328,8 +328,26 @@ public partial class SandboxAvatar : CharacterBody3D, IServerConfirmedBody
     /// CharacterBody3D can't compute IsOnFloor itself).</summary>
     [Export] public bool Grounded { get; set; }
 
-    /// <summary>Where the local player's input comes from; dummies get a wander brain.</summary>
-    public IIntentSource? IntentSource { get; set; }
+    /// <summary>Where the local player's input comes from; dummies get a wander brain.
+    ///
+    /// <para><b>A non-human source is wrapped on the way in</b> (FP-1, 2026-09-19). With
+    /// <c>MotorTuning.BodyYawFollowsAim</c> on, a body faces the look yaw its intent carries — and
+    /// a scripted brain carries none, so every bot and every dummy in the repo would face world
+    /// zero while walking sideways past the camera. <see cref="TravelFacingIntentSource"/> fills
+    /// the look from the brain's own movement direction, which is the facing those fixtures had
+    /// before this knob existed. Done HERE, at the one place any source is adopted, rather than in
+    /// each of the five construction sites — the next scripted brain someone writes inherits it
+    /// without having to know the rule exists. Human sources are passed through untouched: they
+    /// already report a real look.</para></summary>
+    public IIntentSource? IntentSource
+    {
+        get => _intentSource;
+        set => _intentSource = value is { IsHumanInput: false } scripted
+            ? new TravelFacingIntentSource(scripted)
+            : value;
+    }
+
+    private IIntentSource? _intentSource;
 
     public CarryController Carry { get; private set; } = null!;
     public VoiceRangePublisher VoicePublisher { get; } = new();
@@ -859,6 +877,29 @@ public partial class SandboxAvatar : CharacterBody3D, IServerConfirmedBody
     /// lets the presence of the wiring be checked directly rather than through its effect.</summary>
     public bool HasFollowCamera => _followCamera is not null;
 
+    /// <summary><b>This avatar is the one behind the local player's eyes</b> (FP-1, 2026-09-19).
+    /// Set by <see cref="FirstPersonCamera.Attach"/>, and only there, so it cannot be true of a
+    /// body no first-person camera is mounted on. Two things read it: the nameplate, which must
+    /// not be drawn to its own wearer, and the self-test probe.</summary>
+    public bool IsLocalFirstPersonBody { get; private set; }
+
+    /// <summary>
+    /// <b>Take this body out of its own eyes.</b> Called by <see cref="FirstPersonCamera.Attach"/>
+    /// once it has dropped <see cref="AvatarVisual.FirstPersonHiddenLayer"/> from its cull mask;
+    /// the two halves belong together, which is why this is a method on the avatar rather than a
+    /// caller pushing a flag into the visual from outside.
+    ///
+    /// <para>The BLOB SHADOW is deliberately NOT hidden. It is not part of the visual rig — it is a
+    /// top-level quad on the floor under the body, and it is the one ground-contact cue a
+    /// first-person player has left once their legs are gone. Every first-person game draws the
+    /// player's own shadow; none draws the inside of their own skull.</para>
+    /// </summary>
+    internal void HideOwnBodyFromFirstPerson()
+    {
+        IsLocalFirstPersonBody = true;
+        _visual.HideFromFirstPerson();
+    }
+
     /// <summary>
     /// <b>The camera cascade row</b> (STATE-CASCADE-TABLE row 5, BEHAVIOR-BIBLE §10.2's third
     /// missing API). Idempotent, and safe to call on any role and with no camera.
@@ -1190,16 +1231,64 @@ public partial class SandboxAvatar : CharacterBody3D, IServerConfirmedBody
                 specCam.Attach(this);
                 AimCamera = specCam.CameraNode;
             }
+            // --first-person-cam / --first-person-selftest: a WINDOWED bot renders through the
+            // real first-person rig, so the smoke suite photographs and measures the same camera
+            // a player looks through rather than a second one built to resemble it. View-only —
+            // the bot's intent source above is untouched, and the cursor is left alone.
+            if (net.Options.FirstPersonCam || net.Options.FirstPersonSelfTest)
+            {
+                FirstPersonCamera probeCam = AttachFirstPersonCamera(captureMouse: false);
+                // --fp-look: aim the lens. A bot brain decides where it WALKS; in first person
+                // that no longer decides where it LOOKS, so a capture harness has to be able to
+                // point the camera itself. The intent source is untouched.
+                if (net.Options.HasFirstPersonLook)
+                {
+                    probeCam.SetLook(net.Options.FirstPersonLookYaw, net.Options.FirstPersonLookPitch);
+                    GD.Print($"[fp] look set by --fp-look to yaw " +
+                             $"{Mathf.RadToDeg(probeCam.Yaw):F1} deg, pitch " +
+                             $"{Mathf.RadToDeg(probeCam.Pitch):F1} deg");
+                }
+                if (net.Options.FirstPersonSelfTest)
+                {
+                    var probe = new FirstPersonSelfTest { Name = "FirstPersonSelfTest" };
+                    probe.Setup(probeCam, this);
+                    AddChild(probe);
+                }
+            }
         }
         else
         {
-            var camera = new SandboxCamera { Name = "Camera", HandlesPauseToggle = false };
-            GetParent().AddChild(camera);
-            camera.Attach(this);      // registers itself as _followCamera (MOVE-4f)
-            AimCamera = camera.CameraNode;
-            source = new LocalInputIntentSource(camera);
+            // FIRST PERSON IS THE ONLY HUMAN CAMERA IN THIS GAME (FP-1, 2026-09-19). The
+            // third-person attach that stood here is gone, and there is no toggle back — see
+            // FirstPersonCamera's class doc. SandboxCamera is still built for --spectate-cam
+            // captures above and for the offline dev harnesses (SandboxWorld, FeelSandboxWorld).
+            source = new FirstPersonIntentSource(AttachFirstPersonCamera(captureMouse: true));
         }
         ConfigureAsNetworked(true, source);
+    }
+
+    /// <summary>
+    /// <b>Mount the first-person rig on this body and hand back the camera.</b> One method, taken
+    /// by both the human path and the capture/probe path, so the smoke suite cannot be measuring a
+    /// camera built differently from the one a player looks through.
+    ///
+    /// <para>A CHILD of the avatar, unlike <see cref="SandboxCamera"/>, which is a sibling rig
+    /// parented next to the body: the eyeline is a point on the body, so parentage is what makes
+    /// the lens unable to lag it. <see cref="AimCamera"/> is set here too — it is what
+    /// <c>InteractTargeting.Pick</c> resolves "the thing I am looking at" against, so a camera
+    /// swap that forgot it would leave E acting on whatever the third-person lens used to see.</para>
+    /// </summary>
+    private FirstPersonCamera AttachFirstPersonCamera(bool captureMouse)
+    {
+        var camera = new FirstPersonCamera { Name = "FirstPersonCamera", HandlesPauseToggle = false };
+        AddChild(camera);
+        camera.Attach(this, captureMouse);
+        AimCamera = camera.CameraNode;
+        GD.Print($"[fp] first-person camera active on '{DisplayName}' — eye height " +
+                 $"{Proportions.EyeHeightM:F3} m (measured={Proportions.EyesMeasured}), fov " +
+                 $"{FirstPersonCamera.DefaultFovDeg:F0} deg, near {FirstPersonCamera.NearPlaneM:F2} m, " +
+                 $"own body hidden on render layer {AvatarVisual.FirstPersonHiddenLayer}");
+        return camera;
     }
 
     /// <summary>The scripted carry bot brain, with the optional continuous-patrol walk
@@ -1276,7 +1365,15 @@ public partial class SandboxAvatar : CharacterBody3D, IServerConfirmedBody
         // World-anchored UI hides behind menus (MECHANICS-BIBLE 2). The pause overlay used
         // to suppress only the interact chip, so names kept drawing over the pause menu —
         // one dependent system updated, a sibling missed. Both now read the same flag.
-        if (WorldUi.Suppressed || _displayName.Length == 0)
+        // NOBODY IS SHOWN THEIR OWN NAME (FP-1, 2026-09-19). In third person the plate floated
+        // over a head the player could see, so projecting it cost nothing and was never
+        // suppressed. In first person the anchor point sits 0.4-0.5 m directly above the lens:
+        // level and looking down it falls behind the near plane and hides itself, which reads as
+        // "it already isn't drawn" — but the moment the player looks UP past about 5 degrees the
+        // anchor crosses in front of the lens and their own name appears across the top of their
+        // own screen. Checked in engine, not reasoned about; the plate is suppressed at the
+        // source rather than left to a projection accident.
+        if (IsLocalFirstPersonBody || WorldUi.Suppressed || _displayName.Length == 0)
         {
             _nameLabel.Visible = false;
             return;

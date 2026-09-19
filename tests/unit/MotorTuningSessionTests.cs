@@ -197,13 +197,22 @@ public class MotorTuningSessionTests
     /// nothing else — exactly what this test exists to forbid — so the two rows are counted as
     /// clean and named in the list below. Measured on this tree, not carried over: 29 pinned,
     /// 29 clean, 58 rows.</para>
+    ///
+    /// <para><b>THIRTY on this repo since FP-1 (2026-09-19).</b> <c>BodyYawFollowsAim</c> — the
+    /// first-person facing mode — was added pinned, on a test that exercises both of its settings.
+    /// 30 pinned, 29 clean, 59 rows.</para>
     /// </summary>
     [Fact]
-    public void TwentyNineRowsArePinned_AndEachOneNamesTheTestAndTheSourceThatPinsIt()
+    public void ThirtyRowsArePinned_AndEachOneNamesTheTestAndTheSourceThatPinsIt()
     {
         List<MotorKnob> pinned = MotorTuningSession.Rows.Where(k => k.IsPinned).ToList();
-        Assert.Equal(29, pinned.Count);
+        // FP-1 (2026-09-19): 29 -> 30 pinned, 58 -> 59 rows. BodyYawFollowsAim is pinned on
+        // LocomotionTests.BodyYawFollowsAim_TurnsTheBodyTowardTheLook_AndOffRestoresTravelFacing,
+        // which exercises BOTH of its settings — a 0/1 row whose pin only ever ran one of them
+        // would be a badge, which is exactly what this test forbids.
+        Assert.Equal(30, pinned.Count);
         Assert.Equal(29, MotorTuningSession.Rows.Count - pinned.Count);
+        Assert.Contains(pinned, k => k.Name == "BodyYawFollowsAim");
         Assert.Contains(pinned, k => k.Name == "CameraDipRampPower");
         // MOVE-5f: approach 2 is a GRAVITY term, so its two rows are pinned on the same window the
         // apex hang is — read from the other end, because a baked coil takes height rather than
@@ -767,7 +776,7 @@ public class MotorTuningSessionTests
 
         string block = session.Render(all: false, new DateTimeOffset(2026, 8, 27, 9, 0, 0, TimeSpan.Zero));
 
-        Assert.Contains("1 of 58 knobs differ", block, StringComparison.Ordinal);
+        Assert.Contains("1 of 59 knobs differ", block, StringComparison.Ordinal);   // FP-1
         Assert.Contains("        Acceleration = 12.5f,", block, StringComparison.Ordinal);
         Assert.Contains("// was 9", block, StringComparison.Ordinal);
         Assert.DoesNotContain("        Deceleration = ", block, StringComparison.Ordinal);
@@ -795,11 +804,11 @@ public class MotorTuningSessionTests
         var fake = new FakeWriter();
         MotorTuningSession session = fake.Session("");
 
-        Assert.Contains("0 of 58 moved", session.StatusLine(), StringComparison.Ordinal);
+        Assert.Contains("0 of 59 moved", session.StatusLine(), StringComparison.Ordinal);   // FP-1
         Assert.Contains("all pins hold", session.StatusLine(), StringComparison.Ordinal);
 
         Assert.True(session.SetKnob(MotorTuningKnobs.Deceleration, 17.5f));
-        Assert.Contains("1 of 58 moved", session.StatusLine(), StringComparison.Ordinal);
+        Assert.Contains("1 of 59 moved", session.StatusLine(), StringComparison.Ordinal);   // FP-1
         Assert.Contains("BREACHED", session.StatusLine(), StringComparison.Ordinal);
     }
 
@@ -955,7 +964,7 @@ public class MotorTuningSessionTests
     /// with no edit to the widget, which is exactly what the rule exists for.</para>
     /// </summary>
     [Fact]
-    public void TheSixDiscreteRows_PaintTheirStops_AndNoContinuousRowDoes()
+    public void TheSevenDiscreteRows_PaintTheirStops_AndNoContinuousRowDoes()
     {
         var discrete = MotorTuningSession.Rows
             .Where(k => MotorKnobRow.DiscreteStops(k) > 0)
@@ -964,8 +973,8 @@ public class MotorTuningSessionTests
         Assert.Equal(
             new[]
             {
-                "AirJumpCountMax", "AirJumpMode", "AnticipationMode", "ChainMaxDepth",
-                "DuckWalkGuaranteed", "TouchdownSlideImmediate",
+                "AirJumpCountMax", "AirJumpMode", "AnticipationMode", "BodyYawFollowsAim",
+                "ChainMaxDepth", "DuckWalkGuaranteed", "TouchdownSlideImmediate",
             },
             discrete.Keys.OrderBy(n => n, StringComparer.Ordinal).ToArray());
 
@@ -975,6 +984,7 @@ public class MotorTuningSessionTests
         Assert.Equal(8, discrete["ChainMaxDepth"]);        // 0-7, a three-bit wire width
         Assert.Equal(2, discrete["TouchdownSlideImmediate"]);
         Assert.Equal(2, discrete["DuckWalkGuaranteed"]);
+        Assert.Equal(2, discrete["BodyYawFollowsAim"]);   // FP-1: travel facing, or the look
 
         // The negative case, named: a whole step over a wide range is a continuous knob.
         Assert.True(MotorTuningKnobs.TryByName("TurnAcceleration", out MotorKnob turn));

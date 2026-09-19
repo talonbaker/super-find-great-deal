@@ -213,6 +213,25 @@ public static class MotorTuningKnobs
         PinMin = _ => 6.514f, PinMax = _ => 45f,
     };
 
+    public static readonly MotorKnob BodyYawFollowsAim = new()
+    {
+        Index = 58, Name = "BodyYawFollowsAim", Group = "Ground", Unit = "0/1",
+        Default = 1f, Min = 0f, Max = 1f, Step = 1f,
+        BoundReason = "A toggle: 1 turns the body toward the replicated look yaw (first person, "
+                    + "this game's default), 0 restores the foundation's travel-facing rule. Both "
+                    + "behaviours run through the same AvatarMotor.ResolveYaw seam (FP-1).",
+        DeclFile = "scripts/net/AvatarMotor.cs",
+        PlacementHint = "FP-1 row: there is no `const` to point at. The paste target is "
+                      + "MotorTuning.Default's initializer, and the accessor AvatarMotor exposes "
+                      + "for this row sits beside AimTurnLerp.",
+        Get = t => t.BodyYawFollowsAim,
+        Set = (t, v) => t with { BodyYawFollowsAim = v },
+        PinTest = "LocomotionTests.BodyYawFollowsAim_TurnsTheBodyTowardTheLook_AndOffRestoresTravelFacing",
+        PinSource = "tests/unit/LocomotionTests.cs",
+        PinLiteral = "no literal — the pin is the BEHAVIOUR of each of the two settings, not a value",
+        PinMin = _ => 0f, PinMax = _ => 1f,
+    };
+
     public static readonly MotorKnob Gravity = new()
     {
         Index = 8, Name = "Gravity", Group = "Gravity", Unit = "m/s^2",
@@ -996,7 +1015,7 @@ public static class MotorTuningKnobs
     public static readonly IReadOnlyList<MotorKnob> All = new[]
     {
         MoveSpeed, SprintMultiplier, Acceleration, Deceleration, TurnAcceleration, TurnLerp,
-        AimTurnLerp,
+        AimTurnLerp, BodyYawFollowsAim,
         Gravity, FallGravityMultiplier, ApexHangStrength, ApexHangWindowMps,
         JumpVelocity, JumpReleaseGravityMultiplier, CoyoteTimeSec, JumpBufferSec,
         AirControlBuild, AirControlTurn, AirControlBrake,

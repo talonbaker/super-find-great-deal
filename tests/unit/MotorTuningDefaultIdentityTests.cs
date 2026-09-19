@@ -40,17 +40,22 @@ public class MotorTuningDefaultIdentityTests
     /// <summary><b>AC-D1.</b> Thirty-one settable fields, one per knob-table row — no more, no
     /// fewer. A field with no row is a knob no panel will ever show and no print will ever emit;
     /// MOVE-4f's <c>CameraDipRampPower</c> is the thirty-first, and this assertion is what
-    /// stopped it being added in one place and not the other.</summary>
+    /// stopped it being added in one place and not the other.
+    ///
+    /// <para><b>58 → 59 (FP-1, 2026-09-19), with a reason.</b> <c>BodyYawFollowsAim</c> is the
+    /// fifty-ninth: the first-person facing mode, added as a row on the existing seam rather than
+    /// as a branch inside <c>AvatarMotor.Step</c>. The count moved because a row was deliberately
+    /// added, which is the only circumstance in which this number is allowed to move.</para></summary>
     [Fact]
-    public void ThereAreExactlyFiftyEightFields_OnePerKnobTableRow()
+    public void ThereAreExactlyFiftyNineFields_OnePerKnobTableRow()
     {
         PropertyInfo[] fields = typeof(MotorTuning)
             .GetProperties(BindingFlags.Public | BindingFlags.Instance)
             .Where(p => p.CanWrite)
             .ToArray();
 
-        Assert.Equal(58, fields.Length);
-        Assert.Equal(58, MotorTuningKnobs.All.Count);
+        Assert.Equal(59, fields.Length);
+        Assert.Equal(59, MotorTuningKnobs.All.Count);
         Assert.Equal(
             MotorTuningKnobs.All.Select(k => k.Name).OrderBy(n => n, System.StringComparer.Ordinal),
             fields.Select(p => p.Name).OrderBy(n => n, System.StringComparer.Ordinal));
@@ -72,6 +77,9 @@ public class MotorTuningDefaultIdentityTests
         Assert.Equal(34f, D.TurnAcceleration);
         Assert.Equal(12f, D.TurnLerp);
         Assert.Equal(22f, D.AimTurnLerp);
+        // FP-1: no constant to transcribe — the row was born as a mode, and 1 is "the body faces
+        // the look", which is what a first-person game means by facing.
+        Assert.Equal(1f, D.BodyYawFollowsAim);
 
         // Gravity
         Assert.Equal(24f, D.Gravity);         // MOVE-8: FORGIVING

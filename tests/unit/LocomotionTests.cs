@@ -472,6 +472,96 @@ public class LocomotionTests
         Assert.True(float.IsFinite(AvatarMotor.ResolveYaw(0f, wishNorth, float.NaN, dt)));
     }
 
+    /// <summary>
+    /// <b>Knob 58, both settings, on the pure seam</b> (FP-1, 2026-09-19). The knob's whole job is
+    /// to decide WHICH angle reaches <see cref="AvatarMotor.ResolveYaw"/>, so what is pinned here
+    /// is that each setting picks the documented one and that the "off" setting reproduces the
+    /// foundation's travel-facing rule exactly. <c>Step</c> itself needs a
+    /// <c>CharacterBody3D</c> and a physics world, which is the slowest tier and not where a
+    /// facing POLICY should be provable.
+    ///
+    /// <para>The arithmetic below is <c>Step</c>'s own selection expression, transcribed: an
+    /// explicit <c>faceYaw</c> from a caller wins, then the knob's aim, then null. A reader who
+    /// suspects the transcription has drifted should read <c>AvatarMotor.Step</c>'s yaw block —
+    /// it is six lines and it says the same thing.</para>
+    /// </summary>
+    [Fact]
+    public void BodyYawFollowsAim_TurnsTheBodyTowardTheLook_AndOffRestoresTravelFacing()
+    {
+        const float dt = 1f / 60f;
+        var wishEast = new Vector3(5.4f, 0f, 0f);     // travel facing for +X is -pi/2
+        float travelFacing = Mathf.Atan2(-wishEast.X, -wishEast.Z);
+        const float look = 2.0f;                       // the player is looking somewhere else
+
+        // ON (this game's shipped default): the look is what the body turns toward.
+        float on = AvatarMotor.ResolveYaw(0f, wishEast, AvatarMotor.SanitizeAimYaw(look), dt);
+        Assert.True(on > 0.05f, $"the body did not turn toward the look ({on:F4} rad)");
+        Assert.True(on < look * 0.75f, $"the body snapped {on:F4} rad in one tick instead of turning");
+
+        // OFF: byte-for-byte the travel rule the foundation shipped.
+        float off = AvatarMotor.ResolveYaw(0f, wishEast, null, dt);
+        Assert.Equal(AvatarMotor.ResolveYaw(0f, wishEast, null, dt), off);
+        Assert.True(Mathf.Abs(off - Mathf.LerpAngle(0f, travelFacing, Mathf.Min(1f, AvatarMotor.TurnLerp * dt)))
+            < 1e-5f);
+        // …and the two settings genuinely disagree, or this test would pass on a knob wired to
+        // nothing (the CELEBRATE-1 lesson: a guard whose call site is guarded proves nothing).
+        Assert.True(Mathf.Abs(Mathf.Wrap(on - off, -Mathf.Pi, Mathf.Pi)) > 0.1f,
+            $"both settings produced the same facing ({on:F4} vs {off:F4} rad)");
+
+        // The shipped default IS on, and it is on because this game is first person.
+        Assert.True(AvatarMotor.BodyYawFollowsAim);
+        Assert.Equal(1f, MotorTuning.Default.BodyYawFollowsAim);
+
+    }
+
+    /// <summary>
+    /// <b>The other half of knob 58: a scripted brain reports the look it would have had.</b>
+    /// Without this decorator every bot and dummy in the repo reports <c>AimYaw = 0</c>, and with
+    /// the knob on they would all pivot to world zero and walk sideways through every capture a
+    /// later packet takes. Pure — <c>TravelFacingIntentSource</c> touches no node and no physics,
+    /// so the rule is provable in the fastest tier.
+    /// </summary>
+    [Fact]
+    public void TravelFacingDecorator_FillsABotsLookFromItsOwnHeading_AndHoldsItWhenItStops()
+    {
+        var brain = new FakeIntentSource();
+        var wrapped = new TravelFacingIntentSource(brain);
+
+        brain.Next = new MoveIntent { MoveDir = new Vector3(1f, 0f, 0f) };   // due +X
+        float east = wrapped.NextIntent(0.016).AimYaw;
+        Assert.Equal(Mathf.Atan2(-1f, 0f), east, 1e-5f);
+        // The SAME angle AvatarMotor's travel-facing branch would have produced, so a bot's
+        // facing under the knob is identical to its facing before the knob existed.
+        Assert.Equal(AvatarMotor.ResolveYaw(east, new Vector3(1f, 0f, 0f), null, 1f), east, 1e-4f);
+
+        brain.Next = new MoveIntent { MoveDir = new Vector3(0f, 0f, -1f) };  // due -Z, yaw 0
+        Assert.Equal(0f, wrapped.NextIntent(0.016).AimYaw, 1e-5f);
+
+        // Standing still HOLDS the last heading rather than snapping the body to zero.
+        brain.Next = MoveIntent.None;
+        Assert.Equal(0f, wrapped.NextIntent(0.016).AimYaw, 1e-5f);
+        brain.Next = new MoveIntent { MoveDir = new Vector3(1f, 0f, 0f) };
+        Assert.Equal(east, wrapped.NextIntent(0.016).AimYaw, 1e-5f);
+        brain.Next = MoveIntent.None;
+        Assert.Equal(east, wrapped.NextIntent(0.016).AimYaw, 1e-5f);
+
+        // Every other field is passed through untouched — the decorator fills one hole, it does
+        // not re-author the brain's tick.
+        brain.Next = new MoveIntent { MoveDir = new Vector3(1f, 0f, 0f), Interact = true, Sprint = true };
+        MoveIntent got = wrapped.NextIntent(0.016);
+        Assert.True(got.Interact);
+        Assert.True(got.Sprint);
+
+        // It is NOT a human source, whatever it wraps — the achievement gate reads this.
+        Assert.False(wrapped.IsHumanInput);
+    }
+
+    private sealed class FakeIntentSource : IIntentSource
+    {
+        public MoveIntent Next { get; set; }
+        public MoveIntent NextIntent(double delta) => Next;
+    }
+
     // =============================================================================================
     // The keyboard's virtual stick
     // =============================================================================================
