@@ -601,3 +601,58 @@ held-again for prop 2 (reached phase 2)`), then **3/3 PASS** immediately after o
 Worst hold distance 1.06 m on the holder's view and 1.06-1.11 m on the witness across the three
 passes — inside the 0.89-1.09 m band already recorded. It also passed in both full marathons of
 that packet.
+
+## Three lanes off one base chose the same port, and a headless probe cannot capture a cursor (INT-0, measured 2026-09-19)
+
+The wave-1 integration branch (`integration/2026-09-19-mvp` = BASE-1 + ROUND-1 + FP-1 + CARRY-1).
+Two facts worth keeping, both measured, and the first is about how a wave is shaped rather than
+about any lane's code.
+
+### A "next free port" computed from a snapshot is not free
+
+**ROUND-1, FP-1 and CARRY-1 all shipped a new suite on udp/7896.** Each branched off BASE-1,
+each read the same `Run-CarryNetTest` 7893/7894/7895 ladder, and none could see the other two.
+The merge appends all three near the end of `Run-AllTests.ps1`'s registry, so in a marathon they
+run back to back on one socket. Measured: the first post-merge run of `Run-FirstPersonTest.ps1`
+died at `the server never reported listening within 30s`, with `Couldn't create an ENet host` and
+`err=CantCreate` in `tests/logs/fp-server.err.log`, immediately after `Run-RoundLoopSmoke.ps1`
+released 7896.
+
+**That red looks exactly like the port contention this file already excuses** (FP-1's own handoff
+records a 7777 collision with a sibling worktree's Godot, correctly called contention and not a
+red). The discriminator is WHOSE process holds the socket: contention is another worktree's Godot
+and clears on a re-run; this is two entries of one registry and fails identically every time.
+Settled by grepping every port in `tests/` — one line, and it is worth doing whenever a wave lands
+more than one suite: ROUND-1 keeps 7896, FP-1 moved to 7897, `Run-PlaceTest` to 7898, and all 27
+suite ports are now distinct.
+
+### A headless probe cannot take the cursor, and both rigs correctly do nothing
+
+`Input.MouseMode = Captured` is silently refused by the dummy DisplayServer in a `--headless` run;
+the mode stays `Visible`. Both `HeldPropRotator` and `FirstPersonCamera` gate their mouse reads on
+a captured cursor, so a headless input probe measures **two rigs that have each correctly decided
+to do nothing** — and prints it as zero motion on every axis, which reads exactly like a routing
+failure. Measured: INT-0's first `--rotate-look-selftest` run reported `0.0000 rad` on all four
+quantities and failed two checks, **including both of its own positive controls**, which is the
+tell. Windowed, the same probe prints `prop turned 2.0000 rad, camera yaw moved 0.0000 rad` with
+the modifier held and `prop turned 0.0000 rad, camera yaw moved 0.5000 rad` with it released —
+exactly `5 x 40 px x 0.010` and `5 x 40 px x 0.0025`.
+
+**Generalises past the mouse: when every quantity in a probe reads zero, suspect the staging
+before the subject, and check the positive controls first.** The probe now names the uncaptured
+cursor as a staging failure in its own words rather than reporting it as a routing one. It is also
+why `--rotate-look-selftest` is a one-off integration check and not a registered suite: it takes
+the real cursor for the length of its run, which is what `Run-FirstPersonTest.ps1` deliberately
+refuses to do.
+
+### A first-person camera follows a ROUND-1 teleport, and the log could not see it before
+
+`BotHarness` now logs this peer's own lens (`lens.off` = |avatar origin -> lens|) and the owner's
+consumed epoch bumps (`peers[self].tp`). Neither existed, and without them a lens that had gone
+stale, unparented or NaN across a room teleport reads in `peers[]` as a healthy body standing in
+the right room. **Measured on the merged tree: eyeline offset min 1.040 m, max 1.040 m, spread
+0.000 m over 225 samples per bot, and on all six room-scale jumps across two peers the lens moved
+the same distance as the body to three decimals.** Proved able to fail with `TopLevel = true`
+planted on `FirstPersonCamera.Attach`: spread 73.999 m, `lens moved 0.00 m` against body jumps of
+40.63 / 42.09 / 80.16 m — while the epoch-bump half stayed green, which is what shows the two
+halves are independent.
