@@ -52,20 +52,50 @@ public partial class FirstPersonSelfTest : Node
     private readonly List<string> _failures = new();
     private readonly List<string> _facts = new();
     private double _clock;
-    private bool _done;
+    private int _phase;
+    private float _restoreYaw;
+    private float _restorePitch;
 
+    /// <summary>
+    /// Three phases, because one of the checks cannot be made on the frame that sets it up.
+    ///
+    /// <para><b>The nameplate check is worthless at a level look, and that is the whole reason
+    /// this class is a phase machine instead of a method.</b> The plate's anchor sits ~0.46 m
+    /// DIRECTLY above the lens, so with the look level it falls on the near plane and
+    /// <c>Camera3D.IsPositionBehind</c> hides it by accident — a probe that measured there would
+    /// report "not drawn" just as happily with the suppression deleted. It is only past roughly
+    /// five degrees of up-look that the anchor crosses in front of the lens and the plate would
+    /// really be projected onto the player's own screen. So phase 1 pitches the look fully UP,
+    /// phase 2 waits a frame for <c>SandboxAvatar.UpdateNameplate</c> to run at that angle (it is
+    /// a <c>_Process</c> sibling of this one, so its order within a frame is not ours to assume),
+    /// and only then reads the label — carrying its own positive control that the anchor is in
+    /// frustum from there.</para>
+    /// </summary>
     public override void _Process(double delta)
     {
-        if (_done)
-            return;
-        _clock += delta;
-        if (_clock < SettleSec)
-            return;
-        _done = true;
-        Run();
+        switch (_phase)
+        {
+            case 0:
+                _clock += delta;
+                if (_clock < SettleSec)
+                    return;
+                _phase = 1;
+                RunGeometryChecks();
+                return;
+            case 1:
+                _phase = 2;
+                return;
+            case 2:
+                _phase = 3;
+                RunNameplateCheckAndReport();
+                return;
+            default:
+                SetProcess(false);
+                return;
+        }
     }
 
-    private void Run()
+    private void RunGeometryChecks()
     {
         Camera3D lens = Camera.CameraNode;
 
@@ -99,11 +129,10 @@ public partial class FirstPersonSelfTest : Node
         //    about a body that was never in shot. Restored immediately; nothing renders in between.
         var ownMeshes = new List<VisualInstance3D>();
         Collect(Avatar.Visual, ownMeshes);
-        float restoreYaw = Camera.Yaw;
-        float restorePitch = Camera.Pitch;
-        Camera.SetLook(restoreYaw, SandboxCamera.PitchMin);
+        _restoreYaw = Camera.Yaw;
+        _restorePitch = Camera.Pitch;
+        Camera.SetLook(_restoreYaw, SandboxCamera.PitchMin);
         int inFrame = CountInFrustum(lens, ownMeshes);
-        Camera.SetLook(restoreYaw, restorePitch);
         Check("own_body_would_be_in_frame", inFrame > 0,
             "none of this avatar's own meshes fall inside the frustum even with the look pitched " +
             "fully down — the cull below would be defending nothing");
@@ -126,13 +155,7 @@ public partial class FirstPersonSelfTest : Node
             $"{stragglers.Count} of this avatar's mesh(es) are still on a layer this lens renders: " +
             string.Join(", ", stragglers));
 
-        // 6. The player is not shown their own name. Checked as the projected label's own
-        //    visibility, not as the suppression flag, so a future change that reaches the label by
-        //    another route is still caught.
-        Check("own_nameplate_is_not_drawn", !Avatar.NameplateVisible,
-            "this avatar's own nameplate is being drawn to the camera mounted inside its head");
-
-        // 7. Every OTHER avatar in this process is untouched: same layer 1 every camera renders,
+        // 6. Every OTHER avatar in this process is untouched: same layer 1 every camera renders,
         //    so the fix is local to this lens rather than a body that stopped existing. Reported
         //    rather than asserted when this run is alone in the world — a solo run is a legitimate
         //    way to take the capture, and a check that cannot run must say so, not pass quietly.
@@ -152,6 +175,37 @@ public partial class FirstPersonSelfTest : Node
             Check("other_avatars_are_not_hidden", hiddenRemotes.Count == 0,
                 $"{hiddenRemotes.Count} other avatar(s) were hidden from this lens: " +
                 string.Join(", ", hiddenRemotes));
+
+        // Set up the nameplate check: look fully UP, and let a frame pass so the avatar's own
+        // _Process re-projects the plate at that angle. See this class's _Process doc for why the
+        // check is worthless at any other pitch.
+        Camera.SetLook(_restoreYaw, SandboxCamera.PitchMax);
+    }
+
+    private void RunNameplateCheckAndReport()
+    {
+        Camera3D lens = Camera.CameraNode;
+
+        // THE POSITIVE CONTROL FIRST, again. Two ways this check can pass while proving nothing:
+        // the plate's anchor is not actually in front of the lens (so a projection accident, not
+        // the suppression, is hiding it), or world UI is globally suppressed for some unrelated
+        // reason. Both are asserted, so "not drawn" can only mean the suppression did it.
+        Vector3 anchor = Avatar.RenderGlobalPosition
+                         + new Vector3(0f, Avatar.Proportions.NameplateHeightM, 0f);
+        bool anchorInShot = !lens.IsPositionBehind(anchor) && lens.IsPositionInFrustum(anchor);
+        Check("own_nameplate_anchor_would_project", anchorInShot,
+            $"with the look pitched fully up ({SandboxCamera.PitchMax:F2} rad) this avatar's own " +
+            "nameplate anchor is still not in shot — the check below would be defending nothing");
+        Check("world_ui_is_not_globally_suppressed", !Ui.WorldUi.Suppressed,
+            "WorldUi.Suppressed is set, so every nameplate is hidden for an unrelated reason and " +
+            "the check below would be defending nothing");
+
+        Check("own_nameplate_is_not_drawn", !Avatar.NameplateVisible,
+            "this avatar's own nameplate is being drawn to the camera mounted inside its head");
+        _facts.Add($"nameplate anchor {Avatar.Proportions.NameplateHeightM:F3} m above the body, " +
+                   $"in shot at full up-look={anchorInShot}, label visible={Avatar.NameplateVisible}");
+
+        Camera.SetLook(_restoreYaw, _restorePitch);
 
         foreach (string fact in _facts)
             GD.Print($"[fp-selftest]   {fact}");

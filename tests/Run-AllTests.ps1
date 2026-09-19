@@ -88,6 +88,18 @@ try {
         # bots, no network at all -- so its position is free and the rule is what decides it.
         @{ Name = "World: supermarket (BASE-1)";         Script = "Run-SupermarketWorldTest.ps1" }
 
+        # --- FP-1 (2026-09-19): the first-person rig ---
+        # THE ONE SUITE HERE THAT NEEDS A RENDERER. Every other entry launches --headless; this one
+        # cannot, because what it tests is what a camera renders and what a camera culls, and a
+        # headless process has neither. It opens a small window, runs for twelve seconds and closes
+        # itself -- still zero human interaction, but it does need a desktop session, so a marathon
+        # driven from a detached/headless shell will report this one red with "a missing display or
+        # GPU is the first suspect" in its own words. CI does not run this file at all (the
+        # workflow runs only the xUnit half), so nothing in .github is affected.
+        # Last, per the standing rule. It takes a server and one bot client, so it DOES take part
+        # in the join-index spawn dealing -- which is the other reason it goes at the end.
+        @{ Name = "First person: rig + cull (FP-1)";     Script = "Run-FirstPersonTest.ps1" }
+
         # WHAT WAS REMOVED HERE AT THE FORK (BASE-1, 2026-09-19), so a reader of an old handoff
         # can tell "deleted" from "lost": the bubble-test world, the shared bubble counter and the
         # last-bubble celebration, the TV portal, the Puffin Lab, the watcher's night gate, the
