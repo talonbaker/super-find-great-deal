@@ -656,3 +656,76 @@ the same distance as the body to three decimals.** Proved able to fail with `Top
 planted on `FirstPersonCamera.Attach`: spread 73.999 m, `lens moved 0.00 m` against body jumps of
 40.63 / 42.09 / 80.16 m — while the epoch-bump half stayed green, which is what shows the two
 halves are independent.
+
+## REACH-1: udp/7903, and four measured things about the placement audit (2026-09-19)
+
+### The port ladder, written down rather than recomputed
+
+`tests/Run-ReachTest.ps1` claims **udp/7903** for all four of its phases. The ladder as it
+stands, which is the list to read before picking the next one:
+
+| Port | Suite |
+|---|---|
+| 7893 / 7894 / 7895 | `Run-CarryNetTest.ps1` (contention / authority / teleport) |
+| 7896 | `Run-RoundLoopSmoke.ps1` (ROUND-1) |
+| 7897 | `Run-FirstPersonTest.ps1` (FP-1) |
+| 7898 | `Run-PlaceTest.ps1` (CARRY-1) |
+| 7899 | VOICE-1 |
+| 7900 | DOOR-1 |
+| 7901 | claimed in the same wave |
+| 7902 | SFX-1 |
+| **7903** | **`Run-ReachTest.ps1` (REACH-1)** |
+
+7903 was **given by the orchestrator, not computed from a snapshot of `tests/`** — which is
+INT-0's lesson above applied rather than re-learned. 7899-7902 do not appear in this branch's
+`tests/` at all (their suites are on unmerged lane branches), so a grep here cannot see them and
+would happily have produced 7899.
+
+### `$Args` is an automatic variable, and a function parameter of that name is silently empty
+
+Measured: the first run of `Run-ReachTest.ps1` launched three servers with `function
+Start-ReachServer([string]$Tag, [string[]]$Args)`. Every one of them started, printed
+`[graphics] tier Medium (headless default)`, and then sat there forever — **with none of the game
+flags after `--`**, because the parameter never received what the caller passed. The suite failed
+at `the server never reported listening on udp/7903`, which is the same sentence a real bind
+failure produces and the same sentence INT-0's port-collision defect produced. The discriminator
+is the server log: a bind failure prints `Couldn't create an ENet host`; this printed nothing at
+all after the graphics line, because the process was not a server. **Never name a PowerShell
+function parameter `Args`.**
+
+### A `.ps1` in this repo must be ASCII
+
+`Run-ReachTest.ps1` was first written with em dashes and a section sign in its comment block.
+Windows PowerShell 5.1 reads a BOM-less file as ANSI, so the multi-byte characters came back as
+mojibake and the parser died with a cascade that pointed at line 190 — `The Try statement is
+missing its Catch or Finally block`, 200 lines away from anything that was actually wrong. Every
+other `.ps1` in `tests/` is pure ASCII; that is not an accident and it is now written down. (The
+C# side is UTF-8 and unaffected: `GD.Print` lines with em dashes in them are fine, and several
+already ship.)
+
+### The rest audit's measured cost, 150 props
+
+`Run-ReachTest.ps1` phase 4, on this machine with the two-bot session live:
+
+```
+[reach-cost] props in world: 154, shove waves: 6 (every 3.0 s at 2.5 m/s)
+[reach-cost] rest audits: 924 in 20.00 s = 46.2/s (0 correction(s))
+[reach-cost] integrity queries: 924 in 20.00 s = 46.2/s
+[reach-cost] server physics frame time over 1200 tick(s): p50 2.765 ms, p95 20.321 ms, peak 50.580 ms
+```
+
+**Exactly one shape query per settle event**, which is what program §5b costed layer 2 at, and the
+audit's own share of the tick is negligible: 46 queries a second against a 60 Hz tick is under one
+query per tick. The p95 of 20 ms is **150 rigid bodies being simulated**, not the audit — the
+shove wave is what costs it, and a real session never shoves 150 props at once. Read it as an
+upper bound on the load, not as a budget for the audit.
+
+154 props, not 150: the 150 the suite seeds plus the four CARRY-1 authored into the search
+room. The suite's own population check asserts AT LEAST the seeded count for that reason, and it
+was measured the hard way -- an equality check went red at "expected exactly 150" and the four
+extra crates were the level. SHELF-1's hundred will move the number again.
+
+**Zero corrections in 924 audits is itself the finding.** Props shoved across an open floor settle
+legally; the audit's correction path does not fire under ordinary load, which is what it should
+look like. The correction branches are exercised by the planted room instead, where the fixtures
+are authored into the defects deliberately.
