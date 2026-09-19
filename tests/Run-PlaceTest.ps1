@@ -1,0 +1,288 @@
+<#
+.SYNOPSIS
+    The PLACE verb, server-authoritative: a prop set down at a scripted transform is observed at
+    that transform by a DIFFERENT peer, and every illegal placement is refused with the right
+    reason while the prop stays in the hand.
+
+.DESCRIPTION
+    CARRY-1's own gate (packet step 3, program doc §5b — placement integrity layer 1).
+
+    Runs one headless server in the real "supermarket" world with --spawn-room search, so every
+    bot spawns in the SEARCH room, which is the only room with authored props in it (SearchRoom.tscn:
+    Prop_0..Prop_3, adopted as ids 1000..1003), an authored RoomBounds volume, and a freestanding
+    interior pillar. The pillar is there for exactly one reason: "inside a wall" needs a transform
+    that is inside the room's BOUNDS and inside STATIC GEOMETRY at once, and every real wall is the
+    boundary, so a crate pushed into one would fail the bounds test first and the overlap test
+    would never be proved to fire at all.
+
+    Four bots, each grabbing its own prop so nothing contends:
+
+      - PlaceBotA  grabs 1000, carries it to (40, ·, 0), and PLACES it at a scripted transform
+                   0.2 m further on, at 35 degrees of yaw. The legal case.
+      - PlaceBotB  grabs 1003 and stands still, then asks to place it 5 m away. The beyond-reach
+                   case. B is ALSO the independent witness to A's placement — the assertion that
+                   matters is made on B's log, not on A's, because a holder agreeing with itself
+                   about where it put something proves nothing about replication.
+      - PlaceBotC  grabs 1001, walks to the pillar, and asks to place INSIDE it. Refused
+                   DoesNotFitThere (4), prop still held.
+      - PlaceBotD  grabs 1002, walks to the +X wall, and asks to place THROUGH it, at a transform
+                   outside the room's bounds volume. Refused OutsideRoom (5), prop still held.
+
+    Every bot logs one JSONL sample per tick (BotHarness), now including each prop's ORIENTATION
+    (a quaternion — a crate that landed square but face-down is 180 degrees wrong and position
+    alone cannot see it) and this peer's newest place-refusal ordinal.
+
+    Asserted:
+
+      1. Placed where asked, as seen by someone else - in bot B's LAST sample, prop 1000 is
+         unheld and sits within 0.05 m and 5 degrees of A's intended transform.
+      2. Beyond reach is refused    - B's newest refusal is TooFarToPlace (3) and B still holds 1003.
+      3. Inside geometry is refused - C's newest refusal is DoesNotFitThere (4) and C still holds 1001.
+      4. Outside the room is refused- D's newest refusal is OutsideRoom (5) and D still holds 1002.
+
+    Assertions 2-4 check the REASON, not merely "nothing happened": a refusal for the wrong reason
+    and a packet that never arrived both look like "the prop is still held", and the whole point of
+    the PlaceDenial ordinal existing is that a player is told which of them it was.
+
+    Exit 0 = PASS. No human interaction.
+#>
+[CmdletBinding()]
+param(
+    [int]$Port = 7896,
+    [double]$DurationSec = 26,
+    [switch]$SkipBuild
+)
+
+$ErrorActionPreference = "Stop"
+. "$PSScriptRoot\_Common.ps1"
+
+# --- the world, in world space -----------------------------------------------------------------
+# SearchRoom.tscn is instanced at x = +40 by Supermarket.tscn, so every coordinate below is the
+# room's own local value plus 40. Interior: x in [33, 47], z in [-5, 5], floor top y = 0.
+$PropA = 1000   # Prop_0, world (36, 0.22, 0)
+$PropB = 1003   # Prop_3, world (38, 0.22, 0)
+$PropC = 1001   # Prop_1, world (36, 0.22, 2)
+$PropD = 1002   # Prop_2, world (36, 0.22, -2)
+
+# A's intended pose. y = 0.225 is the crate's half-height plus 5 mm, i.e. resting on the floor
+# rather than hovering: the assertion is "within 0.05 m of where it was asked to go", so a
+# placement authored 8 cm in the air would fail on the settle, correctly, and prove nothing.
+$PlaceX = 40.2; $PlaceY = 0.225; $PlaceZ = 0.0; $PlaceYawDeg = 35
+
+# PropManager.PlaceDenial ordinals — the wire contract.
+$DenyTooFar        = 3
+$DenyDoesNotFit    = 4
+$DenyOutsideRoom   = 5
+
+Write-Host "=== place: set it down exactly there, and refuse with a reason when you can't ===" -ForegroundColor White
+if (-not $SkipBuild) {
+    Reset-LogDir
+    Invoke-BuildAndImport
+}
+if (-not (Test-Path $script:LogDir)) { New-Item -ItemType Directory -Path $script:LogDir | Out-Null }
+
+$procs = @()
+try {
+    Write-Host "[1/3] launching dedicated server (supermarket world, spawning in the search room)..." -ForegroundColor Cyan
+    $serverOut = Join-Path $script:LogDir "place.server.out.log"
+    $server = Start-Godot @("--server", "--port", $Port, "--world", "supermarket",
+        "--spawn-room", "search") "place.server"
+    $procs += $server
+    if (-not (Wait-ForLogLine $serverOut "\[server\] listening" 30)) {
+        Write-Fail "server never reported listening; see $serverOut"
+    }
+    Write-Host "        server up (pid $($server.Id))"
+
+    Write-Host "[2/3] launching four scripted place bots..." -ForegroundColor Cyan
+
+    # Bots connect in order, and the server hands out search-room markers 0..3 by join order, so
+    # each of the four starts at its own marker. Two bots on one marker spawn inside each other,
+    # which is why SearchRoom.tscn has four.
+    #
+    # --carry-place's delay is measured from the tick the bot is first seen HOLDING, never from
+    # process start: under a loaded marathon a walk slips by seconds and a wall-clock constant
+    # does not. 7 s is roughly twice the longest walk here (about 11 m at ~3.6 m/s).
+    $aLog = Join-Path $script:LogDir "placeA.jsonl"
+    $botA = Start-Godot @("--bot", "--address", "127.0.0.1:$Port", "--name", "PlaceBotA",
+        "--log", $aLog, "--duration", $DurationSec, "--world", "supermarket",
+        "--carry-script", "36,0.22,0,1.0,-1", "--carry-grab-retry", "0.6",
+        "--carry-walk-to", "40,0",
+        "--carry-place", "$PlaceX,$PlaceY,$PlaceZ,$PlaceYawDeg,7") "placeA"
+    $procs += $botA
+    Start-Sleep -Milliseconds 400
+
+    # B: the witness, and the beyond-reach case. It places at (45, 1, 0) while standing at x ~= 38
+    # — about 7 m from its own hand against a 1.65 m allowance (PlaceReachM + the grab tolerance),
+    # so it is refused for distance and for nothing else.
+    $bLog = Join-Path $script:LogDir "placeB.jsonl"
+    $botB = Start-Godot @("--bot", "--address", "127.0.0.1:$Port", "--name", "PlaceBotB",
+        "--log", $bLog, "--duration", $DurationSec, "--world", "supermarket",
+        "--carry-script", "38,0.22,0,1.0,-1", "--carry-grab-retry", "0.6",
+        "--carry-place", "45,1,0,0,7") "placeB"
+    $procs += $botB
+    Start-Sleep -Milliseconds 400
+
+    # C: into the pillar. SearchPillar is a 1 x 2 x 1 m static block centred at world (46, 1, 2.5);
+    # a crate at its centre is buried in it, and is still comfortably inside the room's bounds, so
+    # the refusal can only come from the overlap test.
+    $cLog = Join-Path $script:LogDir "placeC.jsonl"
+    $botC = Start-Godot @("--bot", "--address", "127.0.0.1:$Port", "--name", "PlaceBotC",
+        "--log", $cLog, "--duration", $DurationSec, "--world", "supermarket",
+        "--carry-script", "36,0.22,2,1.0,-1", "--carry-grab-retry", "0.6",
+        "--carry-walk-to", "46,2.5",
+        "--carry-place", "46,1,2.5,0,7") "placeC"
+    $procs += $botC
+    Start-Sleep -Milliseconds 400
+
+    # D: through the +X wall. The room's RoomBounds volume ends at world x = 47; a 0.44 m crate
+    # centred at 47.35 has every corner past it, so the bounds test refuses before the overlap
+    # test is ever reached — which is the ordering this suite is also pinning.
+    $dLog = Join-Path $script:LogDir "placeD.jsonl"
+    $botD = Start-Godot @("--bot", "--address", "127.0.0.1:$Port", "--name", "PlaceBotD",
+        "--log", $dLog, "--duration", $DurationSec, "--world", "supermarket",
+        "--carry-script", "36,0.22,-2,1.0,-1", "--carry-grab-retry", "0.6",
+        "--carry-walk-to", "47,-3",
+        "--carry-place", "47.35,1,-3,0,7") "placeD"
+    $procs += $botD
+
+    $bots = @(
+        @{ Name = "PlaceBotA"; Proc = $botA; JsonLog = $aLog }
+        @{ Name = "PlaceBotB"; Proc = $botB; JsonLog = $bLog }
+        @{ Name = "PlaceBotC"; Proc = $botC; JsonLog = $cLog }
+        @{ Name = "PlaceBotD"; Proc = $botD; JsonLog = $dLog }
+    )
+    $deadline = (Get-Date).AddSeconds($DurationSec + 90)
+    foreach ($b in $bots) {
+        $remainingMs = [int]((($deadline - (Get-Date)).TotalSeconds) * 1000)
+        if ($remainingMs -lt 1000) { $remainingMs = 1000 }
+        if (-not $b.Proc.WaitForExit($remainingMs)) { Write-Fail "$($b.Name) did not exit within timeout" }
+    }
+    foreach ($b in $bots) {
+        if ($b.Proc.ExitCode -ne 0) { Write-Fail "$($b.Name) exited with code $($b.Proc.ExitCode); see $($b.JsonLog)" }
+    }
+} finally {
+    Stop-Procs $procs
+}
+
+Write-Host "[3/3] verifying placement and refusals..." -ForegroundColor Cyan
+
+function Get-Samples([string]$Path) {
+    if (-not (Test-Path $Path)) { Write-Fail "log not found: $Path" }
+    $lines = @(Get-Content $Path | Where-Object { $_.Trim().Length -gt 0 })
+    if ($lines.Count -eq 0) { Write-Fail "log has no samples: $Path" }
+    return @($lines | ForEach-Object { $_ | ConvertFrom-Json })
+}
+
+function Get-Prop($Sample, [int]$PropId) {
+    $p = @($Sample.props) | Where-Object { [int]$_.id -eq $PropId }
+    if ($null -eq $p -or @($p).Count -eq 0) { return $null }
+    return ($p | Select-Object -First 1)
+}
+
+# Angle between two unit quaternions, in degrees. |dot| rather than dot: q and -q are the same
+# rotation, so the sign carries no information and using it would report a perfect match as 360
+# degrees off half the time.
+function Get-QuatAngleDeg($Prop, [double]$YawDeg) {
+    $half = ([math]::PI * $YawDeg / 180.0) / 2.0
+    $wx = 0.0; $wy = [math]::Sin($half); $wz = 0.0; $ww = [math]::Cos($half)
+    $dot = [math]::Abs([double]$Prop.qx * $wx + [double]$Prop.qy * $wy + [double]$Prop.qz * $wz + [double]$Prop.qw * $ww)
+    if ($dot -gt 1.0) { $dot = 1.0 }
+    return 2.0 * [math]::Acos($dot) * 180.0 / [math]::PI
+}
+
+$samplesA = Get-Samples $aLog
+$samplesB = Get-Samples $bLog
+$samplesC = Get-Samples $cLog
+$samplesD = Get-Samples $dLog
+
+$peerA = [int]$samplesA[0].self
+$peerB = [int]$samplesB[0].self
+$peerC = [int]$samplesC[0].self
+$peerD = [int]$samplesD[0].self
+Write-Host "        peers: A=$peerA B=$peerB C=$peerC D=$peerD" -ForegroundColor DarkGray
+
+$failures = New-Object System.Collections.Generic.List[string]
+
+# --- 1: the legal placement, as a DIFFERENT peer sees it ---------------------------------------
+# B's final sample: the run's last settled word about the world, on a machine that neither made
+# the placement nor holds the prop.
+$bLast = $samplesB[-1]
+$placed = Get-Prop $bLast $PropA
+if ($null -eq $placed) {
+    $failures.Add("bot B's final sample has no prop $PropA at all - it never replicated")
+} elseif ([int]$placed.holder -ne 0) {
+    $failures.Add("bot B's final sample: prop $PropA still held by $($placed.holder) - A's place never landed")
+} else {
+    $dx = [double]$placed.x - $PlaceX
+    $dy = [double]$placed.y - $PlaceY
+    $dz = [double]$placed.z - $PlaceZ
+    $dist = [math]::Sqrt($dx * $dx + $dy * $dy + $dz * $dz)
+    $ang = Get-QuatAngleDeg $placed $PlaceYawDeg
+    Write-Host ("        B sees prop {0} at ({1:F3}, {2:F3}, {3:F3}) - {4:F3} m and {5:F2} deg from the intended pose" -f `
+        $PropA, [double]$placed.x, [double]$placed.y, [double]$placed.z, $dist, $ang) -ForegroundColor DarkGray
+    if ($dist -gt 0.05) {
+        $failures.Add(("bot B sees prop {0} {1:F3} m from the intended transform ({2}, {3}, {4}); tolerance 0.05 m" -f `
+            $PropA, $dist, $PlaceX, $PlaceY, $PlaceZ))
+    }
+    if ($ang -gt 5.0) {
+        $failures.Add(("bot B sees prop {0} rotated {1:F2} deg from the intended {2} deg yaw; tolerance 5 deg" -f `
+            $PropA, $ang, $PlaceYawDeg))
+    }
+}
+
+# --- 2, 3 & 4: every illegal placement refused, WITH ITS REASON, prop still in hand -------------
+$cases = @(
+    @{ Bot = "B"; Samples = $samplesB; Peer = $peerB; Prop = $PropB; Deny = $DenyTooFar;
+       Why = "beyond arm's reach (TooFarToPlace)" }
+    @{ Bot = "C"; Samples = $samplesC; Peer = $peerC; Prop = $PropC; Deny = $DenyDoesNotFit;
+       Why = "inside the pillar (DoesNotFitThere)" }
+    @{ Bot = "D"; Samples = $samplesD; Peer = $peerD; Prop = $PropD; Deny = $DenyOutsideRoom;
+       Why = "outside the room bounds (OutsideRoom)" }
+)
+foreach ($c in $cases) {
+    $last = $c.Samples[-1]
+    $deny = [int]$last.placeDeny
+    if ($deny -ne $c.Deny) {
+        $failures.Add("bot $($c.Bot): newest place refusal was ordinal $deny, expected $($c.Deny) - $($c.Why)")
+    }
+    $held = Get-Prop $last $c.Prop
+    if ($null -eq $held) {
+        $failures.Add("bot $($c.Bot)'s final sample has no prop $($c.Prop)")
+    } elseif ([int]$held.holder -ne $c.Peer) {
+        $failures.Add("bot $($c.Bot): prop $($c.Prop) holder=$($held.holder) in the final sample, expected $($c.Peer) - a REFUSED place must never cost the player what they were carrying")
+    } else {
+        Write-Host "        bot $($c.Bot) refused $($c.Why), still holding prop $($c.Prop)" -ForegroundColor DarkGray
+    }
+}
+
+# --- instrumentation (not an assertion): the spring-vs-anchor mismatch the handoff reports ------
+# Off = the held prop's distance from the holder's own carry anchor, sampled on the HOLDER's peer,
+# which for a spring-carried prop is exactly the lag between what the holder sees and what every
+# other peer derives.
+$springSamples = @()
+foreach ($set in @(@{ S = $samplesA; P = $peerA; Id = $PropA }, @{ S = $samplesC; P = $peerC; Id = $PropC },
+                   @{ S = $samplesD; P = $peerD; Id = $PropD })) {
+    foreach ($s in $set.S) {
+        $p = Get-Prop $s $set.Id
+        if ($null -ne $p -and [int]$p.holder -eq $set.P) { $springSamples += [double]$p.springLag }
+    }
+}
+if ($springSamples.Count -gt 0) {
+    $m = ($springSamples | Measure-Object -Average -Maximum)
+    Write-Host ("        spring-vs-anchor mismatch while held: mean {0:F3} m, peak {1:F3} m over {2} samples" -f `
+        $m.Average, $m.Maximum, $springSamples.Count) -ForegroundColor DarkGray
+}
+
+Write-Host ""
+if ($failures.Count -gt 0) {
+    Write-Host "PLACE-TEST FAILED ($($failures.Count) failure(s)):" -ForegroundColor Red
+    foreach ($f in $failures) { Write-Host "  - $f" -ForegroundColor Red }
+    Write-Host ""
+    Write-Host "PLACE-TEST OVERALL: FAIL" -ForegroundColor Red
+    exit 1
+}
+
+Write-Host "PASS: placed within 0.05 m / 5 deg on an observing peer; beyond-reach, inside-geometry and outside-bounds each refused with their own reason, prop still held." -ForegroundColor Green
+Write-Host ""
+Write-Host "PLACE-TEST OVERALL: PASS" -ForegroundColor Green
+exit 0

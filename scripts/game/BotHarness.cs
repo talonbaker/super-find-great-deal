@@ -96,6 +96,7 @@ public partial class BotHarness : Node
         }
         MaybeCapture();
         MaybeCaptureAtTick();
+        MaybePlace();
         if (MaybeFinishAfterHolding())
             return;
         if (_elapsed >= _options.DurationSec)
@@ -115,6 +116,57 @@ public partial class BotHarness : Node
     // whether the hold it needed was ever witnessed. Both events are printed, so a log tail says
     // which of the two happened without re-reading the JSONL.
     private double _holdingSinceSec = -1;
+
+    // --carry-place: fired once, and only once, however the server answers.
+    private bool _placeSent;
+
+    /// <summary>
+    /// <b>The scripted PLACE</b> (CARRY-1, <c>tests/Run-PlaceTest.ps1</c>): once this bot is
+    /// holding something and <c>--carry-place</c>'s delay has elapsed since, ask the server to set
+    /// it down at the flag's exact transform.
+    ///
+    /// <para><b>It calls the same public client entry point a human's E press calls</b> —
+    /// <see cref="PropManager.ClientRequestPlace"/> — so what this suite exercises is the real
+    /// server-side place path, arbitration and all. What it does NOT exercise is
+    /// <c>SandboxAvatar.HandleCarryIntent</c>'s place-vs-drop choice, which is a decision about
+    /// where a person is looking and belongs to the two-client gate, not to a bot. That split is
+    /// deliberate: the alternative is a test branch inside the verb, and a verb with a test branch
+    /// in it is a verb nobody has tested.</para>
+    ///
+    /// <para><b>Anchored on the observed hold</b> (<see cref="_holdingSinceSec"/>'s sibling logic)
+    /// rather than on the wall clock, for the reason <c>--exit-when-holding</c> exists: under a
+    /// loaded marathon a bot's walk slips by seconds and a constant does not.</para>
+    ///
+    /// <para><b>Fires exactly once, refusal included.</b> A refused place is the OUTCOME three of
+    /// this suite's four cases are asserting, so retrying would turn a correct refusal into a
+    /// flood of identical ones and would make "still held at the end" unfalsifiable.</para>
+    /// </summary>
+    private void MaybePlace()
+    {
+        if (!_options.CarryPlace || _placeSent || _propManager == null)
+            return;
+        int self = (int)Multiplayer.GetUniqueId();
+        NetworkedProp? held = _propManager.FindHeldBy(self);
+        if (held == null)
+        {
+            _placeStartedSec = -1;
+            return;
+        }
+        if (_placeStartedSec < 0)
+        {
+            _placeStartedSec = _elapsed;
+            return;
+        }
+        if (_elapsed - _placeStartedSec < _options.CarryPlaceAfterSec)
+            return;
+        _placeSent = true;
+        Transform3D at = _options.CarryPlaceAt;
+        GD.Print($"[bot] {_options.DisplayName} PLACING prop {held.PropId} at "
+                 + $"({at.Origin.X:F2}, {at.Origin.Y:F2}, {at.Origin.Z:F2}) at {_elapsed:F2}s");
+        _propManager.ClientRequestPlace(held.PropId, at);
+    }
+
+    private double _placeStartedSec = -1;
 
     private bool MaybeFinishAfterHolding()
     {
@@ -353,7 +405,17 @@ public partial class BotHarness : Node
                 off = (pp - holder.CarryAnchorGlobalTransform.Origin).Length();
                 bd = (pp - holder.RenderGlobalPosition).Length();
             }
-            props.Add(new PropSample(prop.PropId, (int)prop.Kind, prop.HolderPeerId, pp.X, pp.Y, pp.Z, off, bd));
+            // The prop's ORIENTATION, as a normalized quaternion. CARRY-1's place suite has to
+            // prove the observing peer sees a placed prop within 5 DEGREES of the intended pose,
+            // and position alone cannot see a crate that landed square but face-down. Logged for
+            // every prop rather than only held ones, because the assertion is made on a peer that
+            // is not the holder and about a prop that is at rest by then.
+            Quaternion q = prop.Body.GlobalBasis.Orthonormalized().GetRotationQuaternion();
+            // The holder-side spring's live gap from the hand it is chasing (0 on every peer that
+            // is not the holder). This is the spring-vs-anchor mismatch the CARRY-1 handoff
+            // reports, sampled rather than estimated — see NetworkedProp.SpringLagM.
+            props.Add(new PropSample(prop.PropId, (int)prop.Kind, prop.HolderPeerId, pp.X, pp.Y, pp.Z, off, bd,
+                q.X, q.Y, q.Z, q.W, prop.SpringLagM));
         }
         // NetworkedEntity instrumentation (empty unless the session spawned any). Mirrors the
         // remote-avatar metrics above deliberately: `mrs` is the peak per-frame rendered movement
@@ -468,6 +530,12 @@ public partial class BotHarness : Node
             foreach (KeyValuePair<int, int> row in roundView.Scores)
                 roundScores[row.Key.ToString()] = row.Value;
         var roundTally = roundView.LastTally;
+        // The newest PLACE refusal this peer was told about, as the wire ordinal
+        // (PropManager.PlaceDenial), or 0 for "none so far". A place suite asserting that a
+        // placement into a wall was refused needs the REASON, not just the absence of a
+        // placement — "refused for the right reason" and "the packet never arrived" look
+        // identical from the outside, which is the whole argument for the enum existing.
+        int placeDeny = (int)_propManager.LastPlaceDenial;
         var sample = new Sample(Time.GetTicksMsec(),
             System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), // cross-process comparable
             Multiplayer.GetUniqueId(), peers, props,
@@ -483,7 +551,7 @@ public partial class BotHarness : Node
                 ? new RoundTallySample(card.RoundIndex, card.HiderPeerId, card.HiderGained,
                     card.SeekerPeerId, card.SeekerGained, card.EndedByDisconnect)
                 : null,
-            entities);
+            entities, placeDeny);
         string line = JsonSerializer.Serialize(sample, JsonOptions);
         if (_writer != null)
         {
@@ -533,7 +601,9 @@ public partial class BotHarness : Node
         // beside its numbers, because "0 banked" and "has not heard from the server yet" are the
         // same bytes and the second is a true-sounding wrong answer. Anything ROUND-1 samples
         // here needs its own synced flag for that reason.)
-        List<EntitySample> Entities);
+        List<EntitySample> Entities,
+        // CARRY-1: the newest place refusal's ordinal, 0 = none. See its computation site.
+        int PlaceDeny);
 
     // THE FIRST-PERSON LENS, in world space (INT-0, 2026-09-19). X/Y/Z is the lens itself, not the
     // rig node it hangs off; Dx/Dy/Dz is the direction it faces (-Z of its own basis, which is
@@ -570,6 +640,9 @@ public partial class BotHarness : Node
     // — while held — two carry-drift scalars: Off = distance from the holder's carry anchor (the
     // by-design chase lag), Bd = distance from the holder's rendered body (the full-chain drift
     // signal a player sees). Both 0 when unheld.
+    // Qx/Qy/Qz/Qw: the prop's world orientation (CARRY-1) — what a place assertion compares
+    // against its intended pose. SpringLag: the holder-side feel spring's distance from the hand
+    // it is chasing, 0 on every peer that is not the holder.
     private sealed record PropSample(int Id, int Kind, int Holder, float X, float Y, float Z,
-        float Off, float Bd);
+        float Off, float Bd, float Qx, float Qy, float Qz, float Qw, float SpringLag);
 }

@@ -110,7 +110,40 @@ public sealed class ScriptedCarryIntentSource : IIntentSource
         _isHolding = isHolding;
     }
 
+    /// <summary>The heading this bot is facing, as a world yaw in <c>AvatarMotor.ResolveYaw</c>'s
+    /// convention. Updated from whatever direction the brain last actually walked in.</summary>
+    private float _aimYaw;
+
+    /// <summary>
+    /// <b>The bot aims where it walks.</b>
+    ///
+    /// <para>CARRY-1 moved the server's THROW impulse off the body's facing and onto the
+    /// replicated aim ray (<c>PropManager.ReleaseIntoLooseDirected</c>'s <c>alongAim</c>) — which
+    /// is the only defensible rule once the game is first person, and which would silently break
+    /// every scripted throw if scripted brains kept leaving <see cref="MoveIntent.AimYaw"/> at its
+    /// default. A bot that has walked to the far edge of a slab and throws a crate off it would
+    /// instead throw it at a fixed world bearing, and <c>Run-ThrowTest</c>'s out-of-bounds
+    /// recovery case would stop being staged at all — the silent kind of green.</para>
+    ///
+    /// <para>So the brain reports the heading it is steering on. That is what a body's facing
+    /// already tracked (<c>MoveState.Yaw</c> follows travel), so this makes the bot's aim agree
+    /// with the bot's body instead of inventing a second answer, and every existing suite's
+    /// geometry is preserved by construction rather than by a tolerance. <see cref="MoveIntent.AimPitch"/>
+    /// stays 0: a flat throw plus the server's own upward component is exactly the arc these
+    /// suites were tuned against, and a bot that randomly pitched would be a bot whose throws
+    /// nobody could predict.</para>
+    /// </summary>
     public MoveIntent NextIntent(double delta)
+    {
+        MoveIntent intent = NextIntentCore(delta);
+        Vector3 heading = intent.MoveDir;
+        heading.Y = 0;
+        if (heading.LengthSquared() > 1e-6f)
+            _aimYaw = Mathf.Atan2(-heading.X, -heading.Z);
+        return intent with { AimYaw = _aimYaw };
+    }
+
+    private MoveIntent NextIntentCore(double delta)
     {
         _clock += delta;
 

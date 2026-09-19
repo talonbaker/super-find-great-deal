@@ -65,12 +65,97 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
         AlreadyHeld = 5,
     }
 
+    /// <summary>Why a PLACE request was refused. Ordinals cross the wire — append only.
+    ///
+    /// <para><b>Its own enum rather than five more <see cref="GrabDenial"/> ordinals</b> (CARRY-1).
+    /// The two verbs refuse for disjoint reasons — nothing about a grab can be "it doesn't fit
+    /// there", nothing about a place can be "someone else won the race" — and merging them would
+    /// mean every consumer of a grab refusal switching over reasons a grab can never produce.
+    /// Everything else about the channel is deliberately identical to <see cref="GrabDenial"/>'s:
+    /// reliable, addressed to the one peer that asked, and never silent, because a refusal the
+    /// player cannot perceive is the defect class (INTERACTION-BIBLE §2), not an
+    /// implementation choice.</para></summary>
+    public enum PlaceDenial
+    {
+        None = 0,
+
+        /// <summary>The sender is not holding that prop (or anything). Reachable on a lagged
+        /// double-press, the same way <see cref="GrabDenial.AlreadyHeld"/> is.</summary>
+        NotHolding = 1,
+
+        /// <summary>The holder's own body is outside the server's authoritative reach of the prop.
+        /// The same slack rule grab uses — see <see cref="GrabRangeTolerance"/>.</summary>
+        OutOfRange = 2,
+
+        /// <summary>The intended transform is further from the holder's hand than
+        /// <see cref="PlaceReachM"/>. This is the "you cannot set it down over there" case, and it
+        /// is the one a doctored client would try.</summary>
+        TooFarToPlace = 3,
+
+        /// <summary>Placement integrity, test 2: the prop's shape at the intended transform
+        /// penetrates static geometry or another prop deeper than
+        /// <see cref="PlaceOverlapToleranceM"/>. "Doesn't fit there."</summary>
+        DoesNotFitThere = 4,
+
+        /// <summary>Placement integrity, test 1: the intended transform is not inside any room's
+        /// authored bounds volume.</summary>
+        OutsideRoom = 5,
+
+        /// <summary>The prop is unknown, despawned, or has no node — or has no collision shape to
+        /// test with, which is a level defect rather than a player action but must still refuse
+        /// rather than wave the placement through.</summary>
+        Gone = 6,
+
+        /// <summary>A registered <see cref="IPlacementValidator"/> (a task pad, a bin) said no.
+        /// The validator picks the ordinal it refuses with; this is the generic one for a surface
+        /// that simply does not accept this prop.</summary>
+        NotAllowedHere = 7,
+    }
+
     /// <summary>Raised on the requesting peer when the server refuses a grab. The avatar
     /// subscribes to turn it into a cue the player can actually perceive.</summary>
     public event System.Action<GrabDenial>? GrabDenied;
 
+    /// <summary>Raised on the requesting peer when the server refuses a PLACE. Same contract as
+    /// <see cref="GrabDenied"/> — the avatar turns it into shake + click + the reason text.</summary>
+    public event System.Action<PlaceDenial>? PlaceDenied;
+
     /// <summary>Test hook: the most recent denial delivered to this peer.</summary>
     internal GrabDenial LastDenial { get; private set; } = GrabDenial.None;
+
+    /// <summary>The most recent place refusal delivered to this peer. Public (unlike
+    /// <see cref="LastDenial"/>) because BotHarness logs it: a scene suite proving "the wall
+    /// placement was refused, and refused for the RIGHT reason" needs the ordinal in the JSONL,
+    /// and a suite that could only see "the prop is still held" could not tell a correct refusal
+    /// from a dropped packet.</summary>
+    public PlaceDenial LastPlaceDenial { get; private set; } = PlaceDenial.None;
+
+    /// <summary>How far from the holder's HAND the intended transform of a place may sit, metres.
+    ///
+    /// <para>This is not the reach to the prop (that is <see cref="GrabRange"/>, unchanged and
+    /// still checked) — it is how far the object itself may end up from the hand that is setting
+    /// it down, and it is small on purpose. The verb is "put it where I am holding it": the player
+    /// aims, the object is already out in front of them on the spring, and E sets it down there.
+    /// A generous number here would quietly turn the verb into telekinesis and, worse, would hand
+    /// a hider a way to post the target through a shelf they cannot reach.</para>
+    ///
+    /// <para>0.9 m is a little over the spring's own rest offset from the body, so the honest
+    /// placement — exactly where the spring is holding the thing — always clears it with room for
+    /// a round trip of lag, and nothing much further does.</para></summary>
+    public const float PlaceReachM = 0.9f;
+
+    /// <summary>Placement integrity's overlap tolerance for this game — see
+    /// <see cref="PlacementIntegrity.DefaultOverlapToleranceM"/>. Named here as well so the knob
+    /// a playtest would turn is in the same file as the verb it governs.</summary>
+    public const float PlaceOverlapToleranceM = PlacementIntegrity.DefaultOverlapToleranceM;
+
+    /// <summary>
+    /// <b>A surface's own opinion about where a placed prop goes</b>, or null for free placement,
+    /// which is the default and the game's normal verb. Server-side only; see
+    /// <see cref="IPlacementValidator"/> for the contract and for why TASK-1's pads plug in here
+    /// rather than teaching this class about pads.
+    /// </summary>
+    public IPlacementValidator? PlacementValidator { get; set; }
 
     // --- Loose-physics tuning (server-only; see the _PhysicsProcess loop below) -----------
     /// <summary>Below this linear speed squared (~0.2 m/s), a Loose prop is considered
@@ -330,6 +415,19 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
                 _looseSettle[p.Id] = c;
                 if (c >= SettleTicks)
                 {
+                    // The rest transform becomes this prop's last-known-good ONLY if it passes the
+                    // same two tests a placement has to (program doc §5b). CARRY-1 only RECORDS:
+                    // a rest that fails is left exactly where physics put it and the previous good
+                    // transform is kept, because the correction — depenetrate, then fall back — is
+                    // REACH-1's layer 2 and shipping half of it would be a prop teleporting with
+                    // no audit behind it. One shape query per settle event, which is what §5b
+                    // costed it at.
+                    PlacementIntegrity.Verdict rest =
+                        PlacementIntegrity.Check(node.Body, t, null, PlaceOverlapToleranceM);
+                    if (rest.Allowed)
+                        node.NoteLastGood(t);
+                    else
+                        ServerLog.Info("rest not good", $"prop={p.Id} {rest}");
                     _registry.SetResting(p.Id, t);
                     node.SettleToRest(t);
                     Rpc(MethodName.ApplyPropState, p.Id, (int)PropMode.Resting, 0, t);
@@ -582,6 +680,29 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
         RpcId(1, MethodName.RequestThrow);
     }
 
+    /// <summary>
+    /// Networked client: ask the server to SET DOWN the prop this peer is holding, at
+    /// <paramref name="intended"/> — the transform the holder's own spring currently has it at,
+    /// rotation and all.
+    ///
+    /// <para><b>The transform is the message.</b> Rotate-held is deliberately a local, unreplicated
+    /// thing (CARRY-1 packet item 2: no new <c>MoveIntent</c> field), so the orientation a player
+    /// spent a few seconds lining up exists only on their own machine until this call carries it.
+    /// Drop and throw have no such payload and therefore lose the rotation, which is the honest
+    /// distinction between "put this down like this" and "get rid of this".</para>
+    ///
+    /// <para>No local effect until the server confirms, exactly like grab/drop/throw — the client
+    /// proposes a transform and the server is the one that decides whether a prop may be
+    /// there.</para>
+    /// </summary>
+    public void ClientRequestPlace(int propId, Transform3D intended)
+    {
+        // Counted as a drop: at ApplyPropState a place and a drop are the same Held->Loose
+        // transition, and the telemetry column has always meant "the player put something down".
+        Telemetry.Telemetry.Instance?.NotePropDropped();
+        RpcId(1, MethodName.RequestPlace, propId, intended);
+    }
+
     // --- Server: reliable grab/drop arbitration -----------------------------------------
 
     /// <summary>Client -> server: request to grab a prop. Validates sender, prop existence,
@@ -704,6 +825,150 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
         ReleaseHeldInto(peer, DropForwardSpeed, DropUpSpeed);
     }
 
+    /// <summary>
+    /// Client -> server: <b>the place verb</b>. Validates, in this order: that the sender holds
+    /// this prop; that the sender's body is within the same authoritative reach a grab needs;
+    /// that the intended transform is within <see cref="PlaceReachM"/> of the sender's hand; that
+    /// placement integrity layer 1 passes at that transform (program doc §5b); and finally that
+    /// any registered <see cref="IPlacementValidator"/> allows it.
+    ///
+    /// <para><b>Order is the message.</b> Each test refuses with a reason the player can act on,
+    /// and the cheapest, most specific one runs first — being told "you are not holding that" when
+    /// you are two rooms away is more useful than being told it does not fit. The physics query is
+    /// last of the server's own tests because it is the only one that costs anything.</para>
+    ///
+    /// <para><b>A validator that MOVES the placement gets re-checked.</b> A snap pad that put a
+    /// crate inside a wall would be the §5b defect arriving through the one door that skipped the
+    /// check, so integrity runs again on a moved transform and a pad that snaps somewhere illegal
+    /// is refused exactly like a player who aimed there.</para>
+    ///
+    /// <para>Sender validation returns silently for the same reason grab's does: there is no
+    /// trustworthy peer to answer, and replying to an unidentified sender is a reflection
+    /// surface.</para>
+    /// </summary>
+    [Rpc(MultiplayerApi.RpcMode.AnyPeer, TransferMode = MultiplayerPeer.TransferModeEnum.Reliable)]
+    private void RequestPlace(int propId, Transform3D intended)
+    {
+        if (!_isServer)
+            return;
+        int peer = Multiplayer.GetRemoteSenderId();
+        if (peer <= 0 || ControlDenied(peer))
+            return;
+
+        // A doctored client can put anything in a Transform3D. Everything below dereferences it,
+        // and a NaN would poison the registry, the broadcast and every peer's body at once.
+        if (!intended.Origin.IsFinite() || !intended.Basis.X.IsFinite()
+            || !intended.Basis.Y.IsFinite() || !intended.Basis.Z.IsFinite())
+        {
+            DenyPlace(peer, PlaceDenial.TooFarToPlace);
+            return;
+        }
+
+        if (!_heldByPeer.TryGetValue(peer, out int heldId) || heldId != propId)
+        {
+            DenyPlace(peer, PlaceDenial.NotHolding);
+            return;
+        }
+        NetworkedProp? node = NodeFor(propId);
+        Node3D? avatar = AvatarResolver?.Invoke(peer);
+        if (node == null || avatar == null || !_registry.TryGet(propId, out PropState s)
+            || s.Mode != PropMode.Held)
+        {
+            DenyPlace(peer, PlaceDenial.Gone);
+            return;
+        }
+        if (avatar.GlobalPosition.DistanceSquaredTo(node.WorldPosition) > GrabRangeSq)
+        {
+            DenyPlace(peer, PlaceDenial.OutOfRange);
+            return;
+        }
+
+        // The hand, not the body: "within reach of where I am holding it" is the rule the verb
+        // describes, and the hand is up to ~0.9 m in front of the body. GrabRangeTolerance is
+        // added for the identical reason it is added to the grab reach — the client measured
+        // against its PREDICTED body and the server is measuring against the authoritative one.
+        Vector3 hand = avatar is SandboxAvatar sa
+            ? sa.CarryAnchorGlobalTransform.Origin
+            : avatar.GlobalPosition;
+        float placeReach = PlaceReachM + GrabRangeTolerance;
+        if (hand.DistanceSquaredTo(intended.Origin) > placeReach * placeReach)
+        {
+            DenyPlace(peer, PlaceDenial.TooFarToPlace);
+            return;
+        }
+
+        Rid holderRid = avatar is CollisionObject3D co ? co.GetRid() : default;
+        Transform3D at = intended;
+        PlacementIntegrity.Verdict verdict = PlacementIntegrity.Check(
+            node.Body, at, holderRid, PlaceOverlapToleranceM);
+        if (!verdict.Allowed)
+        {
+            ServerLog.Info("place refused", $"peer={peer} prop={propId} {verdict}");
+            DenyPlace(peer, DenialFor(verdict));
+            return;
+        }
+
+        if (PlacementValidator is { } validator)
+        {
+            PlacementDecision decision = validator.Validate(node, at, peer);
+            if (!decision.Allowed)
+            {
+                DenyPlace(peer, decision.Reason == PlaceDenial.None
+                    ? PlaceDenial.NotAllowedHere
+                    : decision.Reason);
+                return;
+            }
+            if (!decision.Transform.Origin.IsEqualApprox(at.Origin)
+                || !decision.Transform.Basis.IsEqualApprox(at.Basis))
+            {
+                at = decision.Transform;
+                verdict = PlacementIntegrity.Check(node.Body, at, holderRid, PlaceOverlapToleranceM);
+                if (!verdict.Allowed)
+                {
+                    ServerLog.Info("place refused (snapped)", $"peer={peer} prop={propId} {verdict}");
+                    DenyPlace(peer, DenialFor(verdict));
+                    return;
+                }
+            }
+        }
+
+        // Legal. Record it as this prop's last known-good pose BEFORE the release, so a settle
+        // that immediately goes wrong (knocked by something already falling) still has somewhere
+        // honest for REACH-1 to put it back to.
+        node.NoteLastGood(at);
+        _registry.Release(propId, at);
+        Rpc(MethodName.ApplyPropState, propId, (int)PropMode.Loose, 0, at);
+        node.PlaceLooseServer(at);
+    }
+
+    /// <summary>The player-facing ordinal for an integrity verdict. One mapping, in one place, so
+    /// REACH-1's layer-2 audit reports the same reasons this verb does.</summary>
+    private static PlaceDenial DenialFor(PlacementIntegrity.Verdict verdict) => verdict.Fault switch
+    {
+        PlacementIntegrity.PlacementFault.OutsideRoomBounds => PlaceDenial.OutsideRoom,
+        PlacementIntegrity.PlacementFault.Overlapping => PlaceDenial.DoesNotFitThere,
+        _ => PlaceDenial.Gone,
+    };
+
+    /// <summary>Server -> the one requester whose place was refused. Reliable, and logged, for the
+    /// same reasons <see cref="DenyGrab"/> is both.</summary>
+    private void DenyPlace(int peer, PlaceDenial reason)
+    {
+        ServerLog.Info("place denied", $"peer={peer} reason={reason}");
+        if (peer == Multiplayer.GetUniqueId())
+            OnPlaceDenied((int)reason); // host-as-player: no round trip to itself
+        else
+            RpcId(peer, MethodName.OnPlaceDenied, (int)reason);
+    }
+
+    /// <summary>Server -> requester: the place was refused, and why.</summary>
+    [Rpc(MultiplayerApi.RpcMode.Authority, TransferMode = MultiplayerPeer.TransferModeEnum.Reliable)]
+    private void OnPlaceDenied(int reason)
+    {
+        LastPlaceDenial = (PlaceDenial)reason;
+        PlaceDenied?.Invoke((PlaceDenial)reason);
+    }
+
     /// <summary>Client -> server: throw what is in the sender's hand, along that peer's
     /// authoritative facing. Same release-into-Loose path as drop, just a harder impulse.</summary>
     [Rpc(MultiplayerApi.RpcMode.AnyPeer, TransferMode = MultiplayerPeer.TransferModeEnum.Reliable)]
@@ -715,7 +980,7 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
         if (peer <= 0 || ControlDenied(peer))
             return;
         float scale = ThrowScale;
-        ReleaseHeldInto(peer, ThrowForwardSpeed * scale, ThrowUpSpeed * scale);
+        ReleaseHeldInto(peer, ThrowForwardSpeed * scale, ThrowUpSpeed * scale, alongAim: true);
     }
 
     /// <summary>Headless-test staging knob (--carry-throw-scale on the SERVER, since the server —
@@ -736,34 +1001,64 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
 
     /// <summary>Server: drop/throw arbitration. Releases whatever is in the peer's hand into
     /// Loose. No-op if there is nothing to release.</summary>
-    private void ReleaseHeldInto(int peer, float forwardSpeed, float upSpeed)
+    private void ReleaseHeldInto(int peer, float forwardSpeed, float upSpeed, bool alongAim = false)
     {
         if (!_heldByPeer.TryGetValue(peer, out int propId))
             return;
-        ReleaseIntoLoose(propId, peer, forwardSpeed, upSpeed);
+        ReleaseIntoLooseDirected(propId, peer, forwardSpeed, upSpeed, yawOffsetRad: 0f, alongAim);
     }
 
     /// <summary>Server: releases ONE prop into Loose at its current held transform, with an
     /// impulse along <paramref name="peer"/>'s authoritative facing, broadcasts the Held -> Loose
     /// transition (which is what empties the hand on every peer), then kicks off the server's own
     /// simulation of it.</summary>
-    private void ReleaseIntoLoose(int propId, int peer, float forwardSpeed, float upSpeed)
-        => ReleaseIntoLooseDirected(propId, peer, forwardSpeed, upSpeed, yawOffsetRad: 0f);
-
-    /// <summary>As <see cref="ReleaseIntoLoose"/>, but with the impulse rotated
-    /// <paramref name="yawOffsetRad"/> off the holder's facing. Factored out for
-    /// <see cref="ScatterHeldBy"/>: releasing several props along the identical vector stacks them
-    /// in one spot, and a scatter that leaves a neat pile is not a scatter.</summary>
+    /// <summary>Releases one prop into Loose along the holder's facing, with the impulse rotated
+    /// <paramref name="yawOffsetRad"/> off it. Factored out for <see cref="ScatterHeldBy"/>:
+    /// releasing several props along the identical vector stacks them in one spot, and a scatter
+    /// that leaves a neat pile is not a scatter.</summary>
+    /// <param name="alongAim">
+    /// <b>Throw only.</b> The impulse leaves along the replicated AIM ray
+    /// (<c>MoveIntent.AimYaw</c>/<c>AimPitch</c>, rebuilt through
+    /// <see cref="MpFoundation.Game.Aim.AimQuery.DirectionFromYawPitch"/>) instead of the body's
+    /// facing, and keeps its pitch instead of being flattened.
+    ///
+    /// <para><b>Why the two verbs differ.</b> <c>MoveState.Yaw</c> tracks where the body is
+    /// TRAVELLING, not where the player is looking — a distinction nobody could see in third
+    /// person while walking forward, and one that becomes absurd the moment FP-1 lands: a player
+    /// standing still, looking up at a shelf, would throw the crate at their own feet. A drop and
+    /// a scatter keep the body facing on purpose, because both mean "this ends up around me", and
+    /// aiming at the ceiling should not lob a discarded object over your shoulder.</para>
+    ///
+    /// <para><b>The mismatch this creates, stated rather than hidden</b> (CARRY-1 packet item 4):
+    /// the holder's own screen shows the prop leave the hand carrying the SPRING's velocity —
+    /// throw while sprinting and it departs faster, because that is what the feel system does with
+    /// <c>Interactor.ThrowScale</c>. The server, which has no spring for a remote holder and must
+    /// be able to compute the same answer for every peer, uses this ray and a FIXED speed. So the
+    /// first ~100 ms of a throw is the holder's local flourish and everything after it is the
+    /// server's arc, and the two differ by the holder's own motion at the moment of release. The
+    /// alternative — replicating the spring's velocity — would make the length of a throw a number
+    /// the client reports about itself, which is the one shape
+    /// <c>RISK-AUDIT-2026-07-12.md 4.1</c> says never to trust.</para></param>
     private void ReleaseIntoLooseDirected(int propId, int peer, float forwardSpeed, float upSpeed,
-        float yawOffsetRad)
+        float yawOffsetRad, bool alongAim = false)
     {
         NetworkedProp? node = NodeFor(propId);
         if (node == null || !_registry.TryGet(propId, out PropState p) || p.Mode != PropMode.Held)
             return;
         Node3D? avatar = AvatarResolver?.Invoke(peer);
-        Vector3 fwd = avatar != null ? -avatar.GlobalBasis.Z : Vector3.Forward;
-        fwd.Y = 0;
-        fwd = fwd.LengthSquared() > 0.0001f ? fwd.Normalized() : Vector3.Forward;
+        Vector3 fwd;
+        if (alongAim && avatar is SandboxAvatar aimer)
+        {
+            fwd = MpFoundation.Game.Aim.AimQuery.DirectionFromYawPitch(aimer.AimYaw, aimer.AimPitch);
+            if (fwd.LengthSquared() < 0.0001f || !fwd.IsFinite())
+                fwd = Vector3.Forward;
+        }
+        else
+        {
+            fwd = avatar != null ? -avatar.GlobalBasis.Z : Vector3.Forward;
+            fwd.Y = 0;
+            fwd = fwd.LengthSquared() > 0.0001f ? fwd.Normalized() : Vector3.Forward;
+        }
         if (yawOffsetRad != 0f)
             fwd = fwd.Rotated(Vector3.Up, yawOffsetRad);
         Vector3 impulse = fwd * forwardSpeed + Vector3.Up * upSpeed;
@@ -821,7 +1116,12 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
                 }
                 if (holder != null)
                 {
-                    node.BindToHolder(holder);
+                    // The ONE peer whose local player is the holder carries the prop on the feel
+                    // system's spring; everybody else derives it from the holder's anchor exactly
+                    // as before (see NetworkedProp.BindToHolderSpring for why only the holder).
+                    // The host-as-player satisfies this too, which is deliberate: a host's hand is
+                    // not a lesser hand.
+                    node.BindToHolder(holder, springOnThisPeer: holderPeerId == Multiplayer.GetUniqueId());
                     // Telemetry (inert unless this is a real client session): count only THIS
                     // client's own confirmed grab, never a teammate's replicated one — this funnel
                     // runs on every peer via CallLocal, so gating on the local id is what keeps

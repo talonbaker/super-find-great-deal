@@ -1,6 +1,7 @@
 using Godot;
 using MpFoundation.Net;
 using MpFoundation.Game.Sandbox;
+using MpFoundation.Game.Sandbox.Feel;
 
 namespace MpFoundation.Game.Props;
 
@@ -31,6 +32,27 @@ public partial class NetworkedProp : Node3D
     /// <summary>Peer currently holding this prop, or 0 if none. Set by the net layer.</summary>
     public int HolderPeerId { get; set; }
 
+    /// <summary>
+    /// <b>The last transform this prop was known to be somewhere legal</b> — the newest place or
+    /// Resting latch that passed <see cref="PlacementIntegrity.Check"/> (program doc §5b). Seeded
+    /// to <see cref="HomeTransform"/> so it is never empty and never the world origin.
+    ///
+    /// <para>CARRY-1 only RECORDS it. REACH-1 is what teleports a prop back here when the
+    /// rest-time audit (layer 2) cannot depenetrate it — and the reason the fallback is this and
+    /// not spawn is that a hidden object returning to the rack in the middle of a round is a
+    /// worse outcome than one sitting a few centimetres off where its hider put it.</para>
+    ///
+    /// <para>Server-authoritative in practice: the value is only ever written on the peer that
+    /// runs the check, which is the server. A client's copy stays at the spawn transform and
+    /// nothing reads it there.</para>
+    /// </summary>
+    public Transform3D LastGoodTransform { get; private set; }
+
+    /// <summary>Server: record that this prop passed placement integrity at
+    /// <paramref name="at"/>. Called from the place RPC and from the settle latch — the two
+    /// moments a prop's position is decided rather than merely observed.</summary>
+    public void NoteLastGood(Transform3D at) => LastGoodTransform = at;
+
     /// <summary>The physical prop (mesh + collision + carry entry points). Subclass by Kind.</summary>
     public Carryable Body { get; private set; } = null!;
 
@@ -45,6 +67,21 @@ public partial class NetworkedProp : Node3D
     private Transform3D _netLooseTarget;
     private bool _looseFollowing;
 
+    // --- The holder's own view of a held prop (CARRY-1) ------------------------------------
+    //
+    // Non-null on exactly ONE peer: the one whose local player is holding this prop. Every other
+    // peer keeps deriving the held transform from the holder's carry anchor through
+    // CarryController, exactly as before. The mismatch between the two views is the spring's lag
+    // and is documented in the CARRY-1 handoff, measured, rather than hidden.
+    private CarrySpring? _spring;
+    private SandboxAvatar? _springHolder;
+
+    /// <summary>How far a full-heft item sags below the hand anchor, metres — the feel system's
+    /// own <c>Interactor.CarryDroop</c> default. Here rather than on <see cref="CarrySpring"/>
+    /// because the droop is a fact about where the HAND is, not about how the spring chases it;
+    /// the lab keeps its copy in <c>Interactor.HandAnchor</c> for the same reason.</summary>
+    private const float CarryDroopM = 0.11f;
+
     /// <summary>Called on every peer by the spawn function before the node enters the tree, so the
     /// prop is born with the right id, kind, and place.</summary>
     public void Init(int id, PropKind kind, Transform3D at)
@@ -54,6 +91,7 @@ public partial class NetworkedProp : Node3D
         Name = id.ToString();      // identity: same node name on every peer
         Transform = at;            // Props root sits at the origin, so local == world
         HomeTransform = at;
+        LastGoodTransform = at;
     }
 
     /// <summary>Adoption path for an AUTHORED prop (see PropManager.AdoptAuthoredProps): called
@@ -66,6 +104,7 @@ public partial class NetworkedProp : Node3D
         PropId = id;
         Kind = kind;
         HomeTransform = at;
+        LastGoodTransform = at;
     }
 
     public override void _Ready()
@@ -98,6 +137,17 @@ public partial class NetworkedProp : Node3D
         // for free too — the level designer never has to set physics flags by hand.
         Body.Freeze = true;
         Body.FreezeMode = RigidBody3D.FreezeModeEnum.Kinematic;
+
+        // The feel component, resolved once (see _feel). Child _Ready runs before the parent's,
+        // so an authored prop's Interactable is already bound to this body by now.
+        foreach (Node child in Body.GetChildren())
+        {
+            if (child is Interactable found)
+            {
+                _feel = found;
+                break;
+            }
+        }
     }
 
     /// <summary>Where this prop currently is, for observers/logging. Reads the physical body.</summary>
@@ -108,9 +158,19 @@ public partial class NetworkedProp : Node3D
     /// remote holder = interpolated proxy) — zero per-tick streaming while held. The
     /// <see cref="IsInstanceValid"/> guard closes the freed-holder crash if the holder avatar is
     /// despawned while still bound (e.g. a disconnect race).</summary>
-    public void BindToHolder(Node3D holderAvatar)
+    /// <param name="springOnThisPeer">True on the ONE peer whose local player is the holder: the
+    /// prop is then carried by the feel system's critically damped spring
+    /// (<see cref="CarrySpring"/>) instead of by the anchor chase, which is what makes it read as
+    /// held in the hand rather than welded to a socket. Every other peer passes false and is
+    /// unchanged. See <see cref="BindToHolderSpring"/>.</param>
+    public void BindToHolder(Node3D holderAvatar, bool springOnThisPeer = false)
     {
         HolderPeerId = long.TryParse(holderAvatar.Name.ToString(), out long id) ? (int)id : 0;
+        if (springOnThisPeer && holderAvatar is SandboxAvatar springHolder)
+        {
+            BindToHolderSpring(springHolder);
+            return;
+        }
         // A grab is legal while the prop is still Loose (chasing down a rolling ball is
         // half the game), so this transition can arrive mid-stream-follow. Stop following
         // here for the same reason Unbind must: with _looseFollowing left true, the stream
@@ -128,6 +188,88 @@ public partial class NetworkedProp : Node3D
         Body.OnPickedUp(_netHolder); // reuses existing freeze + collision-off + snap-to-anchor
     }
 
+    /// <summary>
+    /// <b>The holder's own view of what they are carrying</b> (CARRY-1): the feel system's spring,
+    /// driving this prop's frozen kinematic body toward the holder's hand every physics tick.
+    ///
+    /// <para><b>Why the holder alone.</b> A spring is a LOCAL prediction of a server-authoritative
+    /// fact — "peer N holds prop P". Running it on every peer would mean every peer integrating a
+    /// slightly different spring against a slightly different interpolated anchor, so no two
+    /// players would agree where the crate is, for a purely cosmetic gain. Running it on the
+    /// holder alone costs one view-to-view mismatch (the spring's lag, measured in the handoff)
+    /// and buys the one thing the carry was rebuilt for: on the screen of the person holding it,
+    /// the object has weight.</para>
+    ///
+    /// <para><b>No snap to the anchor, deliberately.</b> <see cref="Carryable.OnPickedUp"/> places
+    /// the prop AT the hand on the grab frame, which is right for a chase that would otherwise
+    /// visibly slide the prop up off the floor. It is wrong for a spring: seeding at the item and
+    /// letting it travel is the documented anti-pop (<see cref="CarrySpring.Seed"/>), and it is
+    /// the one frame in which the grab reads. So this takes the freeze/collision/cue half of the
+    /// pickup (<see cref="Carryable.OnPickedUpBySpring"/>) and leaves the placement to the
+    /// spring.</para>
+    /// </summary>
+    private void BindToHolderSpring(SandboxAvatar holder)
+    {
+        _looseFollowing = false;
+        _netHolder = null;
+        _springHolder = holder;
+        _spring = new CarrySpring();
+        Body.OnPickedUpBySpring();
+        _spring.Seed(Body.GlobalTransform, HandAnchor());
+    }
+
+    /// <summary>Where the hand is THIS tick, for the spring: the holder's replicated carry mount,
+    /// raised by the load lift an armful gets, nudged by the item's own hold offset, and dropped
+    /// by the droop its heft earns. Identical in shape to <c>Interactor.HandAnchor</c>; the inputs
+    /// differ because the anchor here is a replicated transform rather than a lab rig.</summary>
+    private Vector3 HandAnchor()
+    {
+        if (_springHolder == null || !IsInstanceValid(_springHolder))
+            return Body.GlobalPosition;
+        Transform3D mount = Body.EffectiveCarryAnchor(_springHolder.CarryAnchorGlobalTransform);
+        Interactable? it = _feel;
+        Vector3 offset = it?.HoldOffset ?? Vector3.Zero;
+        return mount.Origin + mount.Basis * offset - Vector3.Up * (CarryDroopM * SpringHeft);
+    }
+
+    /// <summary>The feel-system component on this prop's body, if it has one. Every prop in this
+    /// game is authored with one (CARRY-1 packet item 6); the null path is the code-built CI
+    /// fallback, which has no <c>.tscn</c> to carry one.
+    ///
+    /// <para><b>Resolved once, in <see cref="_Ready"/>, not per access.</b> The carry reads it
+    /// three times a physics tick (the anchor, the heft, the hold rotation) and
+    /// <c>Node.GetChildren()</c> allocates a <c>Godot.Collections.Array</c> every call — 180
+    /// native allocations a second for a component that cannot change. <c>Interactor</c>'s own
+    /// header records what that costs when it is left alone.</para></summary>
+    private Interactable? _feel;
+
+    /// <summary>0 for weightless, 1 at or above the spring's mass reference. Reads the
+    /// <see cref="Interactable"/>'s heft where there is one — ONE number for how heavy a thing is,
+    /// so a prop that lags in the hand also thuds when it lands — and the body's own mass
+    /// otherwise.</summary>
+    private float SpringHeft =>
+        _spring?.HeftOf(_feel?.HeftKg ?? Body.MassKg) ?? 0f;
+
+    /// <summary>The holder's live spring-vs-anchor gap in metres, or 0 when this peer is not the
+    /// holder. Instrumentation only — BotHarness samples it so the mismatch the handoff reports is
+    /// a measurement rather than an estimate.</summary>
+    public float SpringLagM => _spring != null ? _spring.LagTo(HandAnchor()) : 0f;
+
+    /// <summary>True while this peer is the one carrying this prop on the spring.</summary>
+    public bool SpringActive => _spring != null;
+
+    /// <summary>Drop the holder-side spring. Every transition out of Held runs through here, and
+    /// it must, or the spring keeps writing this body's transform every tick underneath whatever
+    /// the network says is happening to it.</summary>
+    private void ClearSpring()
+    {
+        if (_spring == null)
+            return;
+        _spring = null;
+        _springHolder = null;
+        Body.ReleaseHoldForNetworkFollow();
+    }
+
     /// <summary>Server-dictated: detach and rest at <paramref name="restingAt"/>. Every caller —
     /// grab/drop's reliable transition on every peer, AND the server's own settle-latch — must
     /// stop any stream following here, not just in <see cref="SettleToRest"/>: on a plain client,
@@ -139,6 +281,7 @@ public partial class NetworkedProp : Node3D
     {
         HolderPeerId = 0;
         _netHolder = null;
+        ClearSpring();
         _looseFollowing = false;
         Body.OnDropped();          // rejoins physics locally, but we immediately pin it below:
         Body.Freeze = true;
@@ -156,7 +299,30 @@ public partial class NetworkedProp : Node3D
     {
         HolderPeerId = 0;
         _netHolder = null;
+        ClearSpring();
         Body.OnThrown(impulse);
+    }
+
+    /// <summary>
+    /// Server-only: <b>the place verb's release</b> — put the prop exactly at
+    /// <paramref name="at"/> and hand it to physics with no linear velocity and no spin, so it
+    /// settles where it was set down rather than tumbling off it.
+    ///
+    /// <para>Loose rather than straight to Resting, and that is the point: a placed prop still has
+    /// to fall the last centimetre onto whatever is under it and still has to latch through the
+    /// server's own settle loop, so a placement that ends up balanced on a rolling ball behaves
+    /// like physics rather than like a decision. What "place" removes is the DROP's toss arc and
+    /// <see cref="Carryable.OnThrown"/>'s random tumble spin — both of which exist to make a
+    /// discarded object look discarded, and both of which would undo the orientation the player
+    /// just spent a rotate-and-line-up on.</para>
+    /// </summary>
+    public void PlaceLooseServer(Transform3D at)
+    {
+        HolderPeerId = 0;
+        _netHolder = null;
+        ClearSpring();
+        Body.GlobalTransform = at;
+        Body.OnPlaced();
     }
 
     /// <summary>Every peer: the reliable Held -> Loose transition (via ApplyPropState). Records
@@ -171,6 +337,7 @@ public partial class NetworkedProp : Node3D
     {
         HolderPeerId = 0;
         _netHolder = null;
+        ClearSpring();
         Body.ReleaseHoldForNetworkFollow();
         _looseFollowing = true;
         _netLooseTarget = t;
@@ -205,6 +372,15 @@ public partial class NetworkedProp : Node3D
 
     public override void _PhysicsProcess(double delta)
     {
+        // The holder's own spring wins, on the holder's peer only, and runs on the SERVER too
+        // when the host is the one carrying (a host is a player; its held prop deserves the same
+        // hand as everybody else's). The early-out below is specifically about the loose STREAM,
+        // which the server never follows because it is the thing producing it.
+        if (_spring != null)
+        {
+            StepSpring((float)delta);
+            return;
+        }
         // Only a CLIENT following a Loose stream does anything here — the server's own prop
         // IS the simulation (RigidBody3D physics runs on it directly, no follow needed), and a
         // prop that isn't currently Loose has nothing to chase.
@@ -213,5 +389,26 @@ public partial class NetworkedProp : Node3D
         float w = 1f - Mathf.Exp(-25f * (float)delta);
         Body.GlobalPosition = Body.GlobalPosition.Lerp(_netLooseTarget.Origin, w);
         Body.GlobalBasis = Body.GlobalBasis.Orthonormalized().Slerp(_netLooseTarget.Basis.Orthonormalized(), w);
+    }
+
+    /// <summary>One holder-side carry tick. The pose the spring trails is the holder's own carry
+    /// mount, turned by whatever the player has spun the item to since they picked it up
+    /// (<see cref="SandboxAvatar.HeldPropLocalRotation"/> — local to the holder, and carried
+    /// across to everyone else only by the transform a PLACE sends), then by the item's authored
+    /// hold rotation.</summary>
+    private void StepSpring(float dt)
+    {
+        if (_springHolder == null || !IsInstanceValid(_springHolder) || !IsInstanceValid(Body))
+        {
+            ClearSpring();
+            return;
+        }
+        Transform3D mount = Body.EffectiveCarryAnchor(_springHolder.CarryAnchorGlobalTransform);
+        Interactable? it = _feel;
+        Basis hold = it != null
+            ? Basis.FromEuler(it.HoldRotationDegrees * (Mathf.Pi / 180.0f))
+            : Basis.Identity;
+        Basis pose = mount.Basis.Orthonormalized() * _springHolder.HeldPropLocalRotation * hold;
+        Body.GlobalTransform = _spring!.Step(dt, HandAnchor(), pose, SpringHeft);
     }
 }

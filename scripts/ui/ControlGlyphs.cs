@@ -69,7 +69,12 @@ public static class ControlGlyphs
         }),
         new("CARRY", new[]
         {
-            new Row("Pick up / drop", new[] { "interact" }),
+            // CARRY-1 (2026-09-19): E is still ONE key with one grammar — "act on what is in
+            // front of me, or deal with what is in my hand" — but what the second half means now
+            // depends on where you are looking, so the row says both. Appended to, never
+            // reordered (this table's standing rule).
+            new Row("Pick up / put down", new[] { "interact" }),
+            new Row("Turn what you're holding", new[] { "rotate_held" }),
             new Row("Throw", new[] { "throw" }),
             // Two-slot carry (2026-08-07). Three rows rather than one because they answer three
             // different questions a player actually asks, and collapsing them would hide the rule

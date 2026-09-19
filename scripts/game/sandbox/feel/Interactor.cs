@@ -274,13 +274,13 @@ public partial class Interactor : Node3D
 	/// looked at.</summary>
 	public string LastVerdict { get; private set; } = "—";
 
-	private Vector3 _carryPos;
-	private Vector3 _carryVel;
-	private Basis _carryBasis = Basis.Identity;
-	private Vector3 _anchorPrev;
-	private Vector3 _anchorVelSmooth;
-	private Vector3 _itemPrev;
-	private Vector3 _itemVelSmooth;
+	/// <summary>The carry itself — one critically damped spring and one trailing rotation — lives
+	/// in <see cref="CarrySpring"/> so the networked holder (CARRY-1) drives a held prop through
+	/// the identical arithmetic instead of a second copy of it. Every dial below is still this
+	/// node's; they are pushed into the spring each tick (see <see cref="UpdateCarry"/>) so a live
+	/// slider in the lab panel still moves what the label says it moves.</summary>
+	private readonly CarrySpring _spring = new();
+
 	private float _lean;
 
 	public override void _Ready()
@@ -476,14 +476,9 @@ public partial class Interactor : Node3D
 
 		// Seed the spring AT THE ITEM'S CURRENT POSE, not at the hand. Seeding at the target makes
 		// the item teleport into the hand on frame one, which throws away the one frame in which
-		// the grab is most readable.
-		_carryPos = it.Body.GlobalPosition;
-		_carryBasis = it.Body.GlobalBasis.Orthonormalized();
-		_carryVel = Vector3.Zero;
-		_itemPrev = _carryPos;
-		_itemVelSmooth = Vector3.Zero;
-		_anchorPrev = HandAnchor(it);
-		_anchorVelSmooth = Vector3.Zero;
+		// the grab is most readable. (See CarrySpring.Seed — the rule moved with the maths.)
+		PushDials();
+		_spring.Seed(it.Body.GlobalTransform, HandAnchor(it));
 
 		// Heavier things ring slower and for longer, from the same heft the spring reads.
 		float hzScale = Mathf.Lerp(1.0f, 0.55f, heft * SquashMassResponse);
@@ -503,54 +498,34 @@ public partial class Interactor : Node3D
 		return Carrier.GlobalPosition + b * (HandOffset + it.HoldOffset) - Vector3.Up * (CarryDroop * heft);
 	}
 
+	/// <summary>Copy this node's live exports into the shared spring. Done every tick rather than
+	/// once at grab time because these are LAB SLIDERS: a dial that only takes effect on the next
+	/// pickup is a dial that appears not to work, which is the exact failure mode this repo's
+	/// panels exist to avoid (see <see cref="SetReachRadius"/> for the same rule in the physics
+	/// server's direction).</summary>
+	private void PushDials()
+	{
+		_spring.MassReference = MassReference;
+		_spring.LightResponse = LightResponse;
+		_spring.HeavyResponse = HeavyResponse;
+		_spring.RotationResponse = RotationResponse;
+		_spring.SwingDegrees = SwingDegrees;
+		_spring.SwingReferenceSpeed = SwingReferenceSpeed;
+		_spring.SwingSmoothing = SwingSmoothing;
+	}
+
 	private void UpdateCarry(float dt)
 	{
 		var it = Carried!;
 		if (!GodotObject.IsInstanceValid(it) || Carrier == null) { Carried = null; return; }
 
-		float heft = HeftOf(it);
-		float omega = Mathf.Lerp(LightResponse, HeavyResponse, heft);
-
-		Vector3 anchor = HandAnchor(it);
-		Vector3 anchorVel = dt > 0.0f ? (anchor - _anchorPrev) / dt : Vector3.Zero;
-		_anchorPrev = anchor;
-		_anchorVelSmooth = _anchorVelSmooth.Lerp(anchorVel, Smoothing(SwingSmoothing, dt));
-
-		// ---- position: one critically damped spring ----------------------------------------
-		Spring(ref _carryPos, ref _carryVel, anchor, omega, dt);
-
-		// ---- rotation: the carry pose, plus a trailing tilt ---------------------------------
-		Basis target = Carrier.GlobalBasis * Basis.FromEuler(it.HoldRotationDegrees * (Mathf.Pi / 180.0f));
-
-		Vector3 v = _anchorVelSmooth;
-		float speed = v.Length();
-		if (speed > 0.01f)
-		{
-			// AXIS = velocity CROSS up, so the tilt trails the motion instead of leading it. The
-			// opposite order leans the item INTO its direction of travel, which reads as the item
-			// dragging the character along and is one sign flip away from correct — the kind of
-			// mistake that looks like a tuning problem rather than a bug.
-			Vector3 axis = v.Cross(Vector3.Up);
-			if (axis.LengthSquared() > 1e-6f)
-			{
-				float amt = Mathf.Clamp(speed / SwingReferenceSpeed, 0.0f, 1.0f) * heft;
-				float ang = Mathf.DegToRad(SwingDegrees) * amt;
-				target = new Basis(axis.Normalized(), ang) * target;
-			}
-		}
-
-		_carryBasis = _carryBasis.Orthonormalized()
-			.Slerp(target.Orthonormalized(), Smoothing(1.0f / (omega * RotationResponse), dt))
-			.Orthonormalized();
-
-		it.Body.GlobalTransform = new Transform3D(_carryBasis, _carryPos);
-
-		// The item's OWN velocity, not the hand's, is what a release inherits. A heavy item that
-		// lagged behind the hand should leave at the speed it was actually travelling — which is
-		// the whole reason the lag is worth simulating rather than faking with an offset.
-		Vector3 itemVel = dt > 0.0f ? (_carryPos - _itemPrev) / dt : Vector3.Zero;
-		_itemPrev = _carryPos;
-		_itemVelSmooth = _itemVelSmooth.Lerp(itemVel, Smoothing(0.06f, dt));
+		PushDials();
+		// The carry POSE — where the item is held relative to the carrier's facing — is this
+		// node's question; the spring only trails it. Keeping the pose here is what lets the
+		// networked holder hand the same spring a completely different pose (the replicated carry
+		// anchor's own basis, plus the player's live rotate-held offset) without forking it.
+		Basis pose = Carrier.GlobalBasis * Basis.FromEuler(it.HoldRotationDegrees * (Mathf.Pi / 180.0f));
+		it.Body.GlobalTransform = _spring.Step(dt, HandAnchor(it), pose, HeftOf(it));
 	}
 
 	private void UpdateLean(float dt)
@@ -657,14 +632,14 @@ public partial class Interactor : Node3D
 		Vector3 fwd = Camera != null ? -Camera.GlobalBasis.Z : -GlobalBasis.Z;
 		fwd = new Vector3(fwd.X, 0, fwd.Z).Normalized();
 
-		Vector3 linear = _itemVelSmooth * ThrowScale + fwd * ThrowForward + extraImpulse;
+		Vector3 linear = _spring.ItemVelocity * ThrowScale + fwd * ThrowForward + extraImpulse;
 		float cap = speedCap > 0.0f ? speedCap : MaxThrowSpeed;
 		if (linear.Length() > cap) linear = linear.Normalized() * cap;
 
 		// Spin about the axis the swing was already tilting on, so the tumble continues the motion
 		// the carry established rather than starting a new one. Falling back to the item's own
 		// right axis when it was stationary keeps a standing drop from landing perfectly flat.
-		Vector3 v = _itemVelSmooth;
+		Vector3 v = _spring.ItemVelocity;
 		Vector3 axis = v.LengthSquared() > 0.01f ? v.Cross(Vector3.Up).Normalized() : it.Body.GlobalBasis.X;
 		Vector3 angular = axis * (ReleaseSpin + v.Length() * ThrowSpin);
 
@@ -675,39 +650,17 @@ public partial class Interactor : Node3D
 	}
 
 	// --------------------------------------------------------------------------------- maths
+	//
+	// THE SPRING AND THE SMOOTHING MOVED to CarrySpring (CARRY-1, 2026-09-19) so the networked
+	// holder runs the identical arithmetic rather than a copy of it; read that file for why each
+	// closed form is the one it is. These two forwarders exist so every call site in this class
+	// still reads the way it did.
 
-	/// <summary>
-	/// A critically damped spring, in the closed form that is unconditionally stable.
-	///
-	/// The naive integration (<c>v += (k*x - c*v) * dt</c>) blows up as soon as <c>omega * dt</c>
-	/// approaches 1, which for a snappy light item at 60 Hz is a value the tuning range reaches. It
-	/// does not blow up quietly: the item flies to infinity and the frame after that the transform
-	/// is NaN and the object is gone. This form is exact enough at any dt and any omega, which is
-	/// what lets the response dials be exposed at all.
-	/// </summary>
-	private static void Spring(ref Vector3 x, ref Vector3 v, Vector3 target, float omega, float dt)
-	{
-		float f = omega * dt;
-		float exp = 1.0f / (1.0f + f + 0.48f * f * f + 0.235f * f * f * f);
-		Vector3 change = x - target;
-		Vector3 temp = (v + change * omega) * dt;
-		v = (v - temp * omega) * exp;
-		x = target + (change + temp) * exp;
-	}
-
-	/// <summary>
-	/// Frame-rate independent lerp factor for a given time constant.
-	///
-	/// A bare <c>Lerp(a, b, 0.1f)</c> smooths TWICE AS FAST at 120 Hz as at 60, so every feel dial
-	/// in a system that uses one is secretly a function of the player's monitor. This is the
-	/// exponential form, and it costs one <c>exp</c>.
-	/// </summary>
-	private static float Smoothing(float tau, float dt) =>
-		tau <= 0.0f ? 1.0f : 1.0f - Mathf.Exp(-dt / tau);
+	private static float Smoothing(float tau, float dt) => CarrySpring.Smoothing(tau, dt);
 
 	/// <summary>For the readout: how far the carried item is currently trailing its hand.</summary>
 	public float CarryLag => Carried != null && GodotObject.IsInstanceValid(Carried)
-		? _carryPos.DistanceTo(HandAnchor(Carried)) : 0.0f;
+		? _spring.LagTo(HandAnchor(Carried)) : 0.0f;
 
 	public int NearCount => _near.Count;
 }
