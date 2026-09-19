@@ -352,6 +352,13 @@ public static class AvatarMotor
     /// Still a blend and not a snap: <c>0.09 s</c> to close 2/3 of the angle.</summary>
     public static float AimTurnLerp => MotorTuning.Current.AimTurnLerp;
 
+    /// <summary><b>Knob 58 (FP-1): the body faces the look, not the travel.</b> On in this game —
+    /// see <see cref="MotorTuning.BodyYawFollowsAim"/> for the argument and for what it costs a
+    /// bot. Read as a threshold, the same way <see cref="TouchdownSlideImmediate"/> and
+    /// <see cref="DuckWalkGuaranteed"/> read theirs, so one spelling of "is this toggle on"
+    /// serves every 0/1 row.</summary>
+    public static bool BodyYawFollowsAim => MotorTuning.Current.BodyYawFollowsAim > 0.5f;
+
     public static float SprintMultiplier => MotorTuning.Current.SprintMultiplier;
 
     /// <summary>Floor of the carry-encumbrance factor (mirrors CarryController): the
@@ -822,8 +829,17 @@ public static class AvatarMotor
         // it is TRAVELLING while it carves, exactly as §4.4 says ("facing: travel, not wish,
         // exactly as the skid does"). The two states are disjoint, so this is one condition and not
         // a precedence.
+        //
+        // FP-1: with BodyYawFollowsAim on (this game's default), an intent's own already-sanitized
+        // look yaw IS the facing, and it wins over the skid/slide clause for the same reason an
+        // explicit faceYaw does — in first person the player is looking somewhere on purpose while
+        // they slide, and a body that swung round to face its drift would be the camera arguing
+        // with the mouse. An explicit faceYaw from a caller still beats the knob: it is derived
+        // from the same aim PLUS something the authority owns, so it is the more informed answer.
+        float? aimedFacing = faceYaw
+            ?? (BodyYawFollowsAim ? SanitizeAimYaw(intent.AimYaw) : (float?)null);
         float yaw = ResolveYaw(prev.Yaw,
-            skidding || sliding ? new Vector3(velocity.X, 0f, velocity.Z) : wish, faceYaw, dt);
+            skidding || sliding ? new Vector3(velocity.X, 0f, velocity.Z) : wish, aimedFacing, dt);
 
         body.Position = prev.Position;
         body.Rotation = new Vector3(0, yaw, 0);

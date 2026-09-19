@@ -24,6 +24,20 @@ public sealed class LaunchOptions
     /// default — headless CI never sets it, so bot behavior is unchanged.</summary>
     public bool SpectateCam { get; private set; }
 
+    /// <summary>--first-person-cam: attach the REAL <c>FirstPersonCamera</c> to a --bot avatar, so
+    /// a windowed bot renders (and captures) through the rig a player looks through rather than
+    /// through the orbit camera <see cref="SpectateCam"/> builds. View-only and off by default —
+    /// the bot's intent source, movement and logging are untouched, and the cursor is deliberately
+    /// NOT captured: a suite that seizes the mouse of whoever is at the keyboard is a suite nobody
+    /// runs twice (FP-1, 2026-09-19).</summary>
+    public bool FirstPersonCam { get; private set; }
+
+    /// <summary>--first-person-selftest: <see cref="FirstPersonCam"/> plus the probe that measures
+    /// the rig and prints <c>[fp-selftest] SUMMARY failures=&lt;n&gt; result=PASS|FAIL</c>. What
+    /// <c>tests/Run-FirstPersonTest.ps1</c> gates on. Implies the camera, so a runner cannot ask
+    /// for the measurement of a rig it forgot to build.</summary>
+    public bool FirstPersonSelfTest { get; private set; }
+
     /// <summary>--windowed: force this launch into a window, whatever the persisted display
     /// setting says, and WITHOUT writing anything back.
     ///
@@ -740,6 +754,12 @@ public sealed class LaunchOptions
                     break;
                 case "--spectate-cam":
                     options.SpectateCam = true;
+                    break;
+                case "--first-person-cam":
+                    options.FirstPersonCam = true;
+                    break;
+                case "--first-person-selftest":
+                    options.FirstPersonSelfTest = true;
                     break;
                 case "--windowed":
                     options.Windowed = true;

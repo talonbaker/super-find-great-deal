@@ -7,6 +7,13 @@ namespace MpFoundation.Game.Sandbox;
 /// (move_*/jump) plus the sandbox-only interact/throw actions. This is the only class
 /// in the sandbox that reads Input for locomotion — swap it out and the avatar is
 /// fully remote-drivable.
+///
+/// <para><b>Third-person only since FP-1 (2026-09-19).</b> No networked human reaches this any
+/// more — <c>SandboxAvatar.ConfigureNetworkedInstance</c> builds
+/// <see cref="FirstPersonIntentSource"/> instead. What still reaches it is the offline dev
+/// harnesses that keep an orbit camera (<c>SandboxWorld</c>, <c>FeelSandboxWorld</c>). The two
+/// sources share one sampler (<see cref="HumanInputSampler"/>): they differ in which rig supplies
+/// the look yaw, and in nothing else, so a new input verb lands in one place.</para>
 /// </summary>
 public sealed class LocalInputIntentSource : IIntentSource
 {
@@ -33,24 +40,7 @@ public sealed class LocalInputIntentSource : IIntentSource
     private const JoyButton WalkFallbackButton = JoyButton.LeftStick;
 
     private readonly SandboxCamera _camera;
-
-    /// <summary><b>The virtual analog stick.</b> A key is on or off; a stick reports a held
-    /// deflection — and the difference is not cosmetic, because the movement step derives its target
-    /// speed from the length of <see cref="MoveIntent.MoveDir"/>. A boolean key therefore asks for
-    /// full speed on the frame it goes down no matter how gently the motor ramps, and the ramp is
-    /// the only thing left doing the work. Climbing this instead means a tap is a nudge and a hold
-    /// builds, on the keyboard, exactly as it does on a pad.
-    ///
-    /// <para><b>Client-side and harmless if it were forged.</b> It only ever scales a direction the
-    /// server re-sanitizes into the unit disc (<c>AvatarMotor.SanitizeMoveDir</c>), so the most a
-    /// doctored value can claim is "full stick", which is what holding a key already claims.</para></summary>
-    private float _analog;
-
-    /// <summary>BT-7: the double-tap-to-sprint detector. It owns no input of its own — it is fed
-    /// the four <c>move_*</c> levels <see cref="NextIntent"/> already samples, and its output is
-    /// ORed into the sprint intent. See <see cref="DoubleTapSprint"/> for the state machine and
-    /// for why this costs the protocol nothing.</summary>
-    private readonly DoubleTapSprint _doubleTapSprint = new();
+    private readonly HumanInputSampler _sampler = new();
 
     public LocalInputIntentSource(SandboxCamera camera)
     {
@@ -69,7 +59,39 @@ public sealed class LocalInputIntentSource : IIntentSource
         InputMap.ActionAddEvent(WalkActionName, new InputEventJoypadButton { ButtonIndex = WalkFallbackButton });
     }
 
-    public MoveIntent NextIntent(double delta)
+    public MoveIntent NextIntent(double delta) => _sampler.Sample(_camera, delta);
+}
+
+/// <summary>
+/// <b>A person at a keyboard, turned into one <see cref="MoveIntent"/> per tick, against whatever
+/// rig supplies the look angles.</b> Extracted from <see cref="LocalInputIntentSource"/> by FP-1
+/// (2026-09-19) when the first-person rig arrived: the two human sources differ in exactly one
+/// thing — which <see cref="ILookAngles"/> the WASD vector is rotated by — and a copied sampler
+/// would mean the walk modifier, the double-tap sprint and the virtual analog stick each had two
+/// homes that could drift apart. Owns the two pieces of per-player input STATE (the ramp and the
+/// double-tap latch), so one instance belongs to one source and neither can leak into the other.
+/// </summary>
+internal sealed class HumanInputSampler
+{
+    /// <summary><b>The virtual analog stick.</b> A key is on or off; a stick reports a held
+    /// deflection — and the difference is not cosmetic, because the movement step derives its target
+    /// speed from the length of <see cref="MoveIntent.MoveDir"/>. A boolean key therefore asks for
+    /// full speed on the frame it goes down no matter how gently the motor ramps, and the ramp is
+    /// the only thing left doing the work. Climbing this instead means a tap is a nudge and a hold
+    /// builds, on the keyboard, exactly as it does on a pad.
+    ///
+    /// <para><b>Client-side and harmless if it were forged.</b> It only ever scales a direction the
+    /// server re-sanitizes into the unit disc (<c>AvatarMotor.SanitizeMoveDir</c>), so the most a
+    /// doctored value can claim is "full stick", which is what holding a key already claims.</para></summary>
+    private float _analog;
+
+    /// <summary>BT-7: the double-tap-to-sprint detector. It owns no input of its own — it is fed
+    /// the four <c>move_*</c> levels <see cref="Sample"/> already samples, and its output is
+    /// ORed into the sprint intent. See <see cref="DoubleTapSprint"/> for the state machine and
+    /// for why this costs the protocol nothing.</summary>
+    private readonly DoubleTapSprint _doubleTapSprint = new();
+
+    public MoveIntent Sample(ILookAngles look, double delta)
     {
         if (Input.MouseMode != Input.MouseModeEnum.Captured)
         {
@@ -84,7 +106,8 @@ public sealed class LocalInputIntentSource : IIntentSource
 
         Vector2 input = Input.GetVector("move_left", "move_right", "move_forward", "move_back");
         float deflection = Mathf.Min(1f, input.Length());
-        bool walking = InputMap.HasAction(WalkActionName) && Input.IsActionPressed(WalkActionName);
+        string walkAction = LocalInputIntentSource.WalkActionName;
+        bool walking = InputMap.HasAction(walkAction) && Input.IsActionPressed(walkAction);
         // BT-7: double-tapping a direction latches sprint, exactly as holding Shift does. Fed the
         // levels, not the edges — the detector finds its own edges (see DoubleTapSprint).
         bool doubleTapSprint = _doubleTapSprint.Update(
@@ -106,7 +129,7 @@ public sealed class LocalInputIntentSource : IIntentSource
         _analog = LocomotionProfile.StepKeyAnalog(_analog, target, (float)delta);
 
         // Rotate flat input by the camera yaw so "forward" is where the player looks.
-        Basis yaw = new(Vector3.Up, _camera.Yaw);
+        Basis yaw = new(Vector3.Up, look.Yaw);
         Vector3 dir = yaw * new Vector3(input.X, 0, input.Y);
         if (dir.LengthSquared() > 1e-6f)
             dir = dir.Normalized() * _analog;
@@ -143,9 +166,87 @@ public sealed class LocalInputIntentSource : IIntentSource
             // what it does is resolved from what is in the hand (see MoveIntent.Fire's own doc
             // comment), and a registered verb is itself a request to the server.
             Fire = Input.IsActionJustPressed("fire"),
-            AimYaw = _camera.Yaw,
-            AimPitch = _camera.Pitch,
+            AimYaw = look.Yaw,
+            AimPitch = look.Pitch,
         };
+    }
+}
+
+/// <summary>
+/// <b>The human source this game actually ships</b> (FP-1, 2026-09-19). WASD relative to
+/// <see cref="FirstPersonCamera.Yaw"/>, aim angles straight off the same rig, every other verb
+/// exactly as <see cref="LocalInputIntentSource"/> reports it — because it IS that sampler, not a
+/// copy of it (see <see cref="HumanInputSampler"/>).
+///
+/// <para><b>A sibling of the third-person source, and nothing below it is forked.</b> The motor
+/// never learns a camera existed: <c>MoveIntent.MoveDir</c> was already world space and
+/// <c>AimYaw</c>/<c>AimPitch</c> were already the look angles the server rebuilds the aim ray
+/// from, so first person is a different way of FILLING the same tick of intent, not a different
+/// tick. Prediction, reconciliation, the wire format and every bot are untouched by this class.</para>
+/// </summary>
+public sealed class FirstPersonIntentSource : IIntentSource
+{
+    /// <summary>A person, so everything gated on <see cref="IIntentSource.IsHumanInput"/> — the
+    /// persisted-profile gate above all — treats this stream the way it treated the third-person
+    /// one. A new human source that forgot this line would silently stop earning its player
+    /// anything, which is the direction that default is pointed in.</summary>
+    public bool IsHumanInput => true;
+
+    private readonly FirstPersonCamera _camera;
+    private readonly HumanInputSampler _sampler = new();
+
+    public FirstPersonIntentSource(FirstPersonCamera camera)
+    {
+        _camera = camera;
+        LocalInputIntentSource.EnsureWalkAction();
+    }
+
+    public MoveIntent NextIntent(double delta) => _sampler.Sample(_camera, delta);
+}
+
+/// <summary>
+/// <b>A scripted brain looks where it walks</b> (FP-1, 2026-09-19). Decorator over any non-human
+/// <see cref="IIntentSource"/>: leaves every field of the wrapped intent alone and fills
+/// <see cref="MoveIntent.AimYaw"/> from that same intent's own <see cref="MoveIntent.MoveDir"/>,
+/// holding the last heading while the brain stands still.
+///
+/// <para><b>Why it exists.</b> <c>MotorTuning.BodyYawFollowsAim</c> makes the body face the look
+/// yaw the intent carries, and a scripted brain carries none — so without this every bot in the
+/// repo would pivot to world zero the moment the knob went on, walking sideways through every
+/// capture a later packet takes and turning a fixture's replicated facing into a lie. The formula
+/// is <c>AvatarMotor.ResolveYaw</c>'s own travel-facing one, so a bot's facing is bit-identical to
+/// what it was before the knob existed.</para>
+///
+/// <para><b>It is also the honest value.</b> <c>AimYaw</c> is what the SERVER rebuilds an aim ray
+/// from; a bot that reported zero was claiming to look due north no matter which way it walked,
+/// which was already a latent lie and would have bitten the first server-side verb to read it.</para>
+///
+/// <para><b>Deliberately not applied to a human source</b> — a person's look is their camera's,
+/// not their feet's, and that is the entire point of first person.
+/// <see cref="IIntentSource.IsHumanInput"/> is forwarded rather than defaulted, per that member's
+/// own contract for decorators.</para>
+/// </summary>
+public sealed class TravelFacingIntentSource : IIntentSource
+{
+    private readonly IIntentSource _inner;
+    private float _yaw;
+
+    public TravelFacingIntentSource(IIntentSource inner) => _inner = inner;
+
+    /// <summary>Forwarded, never defaulted — see <see cref="IIntentSource.IsHumanInput"/>'s
+    /// decorator note. In practice always false, because a human source is never wrapped.</summary>
+    public bool IsHumanInput => _inner.IsHumanInput;
+
+    public MoveIntent NextIntent(double delta)
+    {
+        MoveIntent intent = _inner.NextIntent(delta);
+        Vector3 dir = intent.MoveDir;
+        dir.Y = 0f;
+        // The same threshold and the same arithmetic AvatarMotor.ResolveYaw's travel branch uses,
+        // so "faces where it is going" means one thing in this repo and not two.
+        if (dir.LengthSquared() > 0.05f)
+            _yaw = Mathf.Atan2(-dir.X, -dir.Z);
+        return intent with { AimYaw = _yaw };
     }
 }
 

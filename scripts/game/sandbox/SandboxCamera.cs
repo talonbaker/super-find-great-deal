@@ -44,9 +44,12 @@ namespace MpFoundation.Game.Sandbox;
 /// children's global position every physics frame, which forbids the graded arm
 /// return below. The arm just measures; this script places the lens.
 /// </summary>
-public partial class SandboxCamera : Node3D
+public partial class SandboxCamera : Node3D, ILookAngles
 {
-    private const float MouseSensitivity = 0.0025f;
+    /// <summary>Radians of look per pixel of mouse travel. <b>Public since FP-1</b> — the
+    /// first-person rig reads this one rather than declaring a second copy, so the day a
+    /// sensitivity slider lands there is one number for it to move.</summary>
+    public const float MouseSensitivity = 0.0025f;
     // A stick reports a HELD position, not a delta like the mouse, so it cannot share the
     // mouse's event-driven _UnhandledInput path — it is polled in _PhysicsProcess instead
     // (see ApplyStickLook). 2.6 rad/s at full deflection (~150 deg/s): deliberate rather than

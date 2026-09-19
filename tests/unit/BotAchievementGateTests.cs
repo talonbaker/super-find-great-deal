@@ -57,14 +57,28 @@ public class BotAchievementGateTests
     }
 
     /// <summary>
-    /// <b>Exactly one implementation in the whole game assembly may claim to be a person.</b> The
-    /// failure this guards is a scripted source quietly opting in — which would put achievement
-    /// writes back into the shared real profile with no other symptom. Enumerating every
-    /// implementer rather than checking the known ones is the point: the failure is an ADDITION.
+    /// <b>Only a person's own input may claim to be a person's.</b> The failure this guards is a
+    /// scripted source quietly opting in — which would put achievement writes back into the shared
+    /// real profile with no other symptom. Enumerating every implementer rather than checking the
+    /// known ones is the point: the failure is an ADDITION.
+    ///
+    /// <para><b>The expected set moved at FP-1 (2026-09-19), and every addition is accounted
+    /// for.</b> <c>FirstPersonIntentSource</c> is the human source this game ships and MUST claim
+    /// true — a human source that forgot to would silently stop earning its player anything.
+    /// <c>TravelFacingIntentSource</c> is a DECORATOR: it declares the member only to FORWARD what
+    /// it wraps, exactly as the interface's own doc comment requires of a decorator, and the
+    /// assertion below proves it forwards rather than asserting true. A scripted source appearing
+    /// in this list without one of those two reasons is the defect.</para>
     /// </summary>
     [Fact]
     public void OnlyLocalInputClaimsToBeHumanInput()
     {
+        // The decorator declares the member; it must FORWARD, never claim. Proved on an instance,
+        // because "declares it" and "answers true" are different facts and only the second one
+        // reaches the profile.
+        Assert.False(new TravelFacingIntentSource(new ScriptedDouble()).IsHumanInput);
+        Assert.True(new TravelFacingIntentSource(new HumanDouble()).IsHumanInput);
+
         Type[] implementers = typeof(IIntentSource).Assembly
             .GetTypes()
             .Where(t => t is { IsClass: true, IsAbstract: false } && typeof(IIntentSource).IsAssignableFrom(t))
@@ -83,6 +97,13 @@ public class BotAchievementGateTests
             .OrderBy(n => n, StringComparer.Ordinal)
             .ToArray();
 
-        Assert.Equal(new[] { nameof(LocalInputIntentSource) }, claimHuman);
+        Assert.Equal(
+            new[]
+            {
+                nameof(FirstPersonIntentSource),    // the human source this game ships (FP-1)
+                nameof(LocalInputIntentSource),     // the third-person source the dev harnesses keep
+                nameof(TravelFacingIntentSource),   // a decorator: forwards, asserted above
+            },
+            claimHuman);
     }
 }
