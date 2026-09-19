@@ -144,10 +144,21 @@
                              Assertion 4 must go red. The fault is planted in DATA because what
                              assertion 4 defends is data.
       -PlantNoImpactEvent    deletes the Rpc(PropImpact ...) send in PropManager.FlushImpacts,
-                             IN THE .cs, and rebuilds. Assertions 8 and 9 must go red: nobody
-                             hears an impact any more, host included, because the local path is
-                             gone and the wire path has been cut. What assertion 8 defends is a
-                             MESSAGE, so the fault is planted in the code that sends it.
+                             IN THE .cs, and rebuilds. What assertion 8 defends is a MESSAGE, so
+                             the fault is planted in the code that sends it. MEASURED: 9
+                             failures, and the interesting part is WHICH nine. Assertions 2 and
+                             8 go red on all three materials, assertion 6's positive control
+                             fires ("every impact logged intensity 0.000"), assertion 5 reports
+                             its orphan, and the remote peer is back to the exact "Impact 0"
+                             SFX-1 shipped.
+
+                             ASSERTION 9 PASSES UNDER THIS PLANT, vacuously -- "all 0 impacts
+                             came via=wire" -- and that is correct rather than a hole, because 9
+                             is a no-DOUBLE check and there is nothing to double. Its positive
+                             control is assertion 8: 9 can only be trusted on a run where 8
+                             found impacts, and 8 is a gate, so a run cannot be green with 9
+                             vacuous. Written down because the first draft of this header
+                             claimed both would go red, and they do not.
 
     Exit 0 = PASS. No human interaction, though each phase opens one or two small windows.
 #>
