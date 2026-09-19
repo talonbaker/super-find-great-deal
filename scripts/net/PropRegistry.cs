@@ -107,10 +107,42 @@ public sealed class PropRegistry
     /// caller to branch. Waking something in a hand is not: it would take the prop off a player
     /// without any of the release funnel's broadcasts, so the hand would keep claiming it on
     /// every peer. A caller that means to empty a hand has <see cref="Release"/>.</para>
+    ///
+    /// <para><b>Not <see cref="SetLoose"/>, and the difference is the Held guard</b> (INT-0B,
+    /// 2026-09-19, where the two verbs met). <see cref="SetLoose"/> is REACH-1's dev nudge and
+    /// takes a prop loose from ANY mode including Held; this one is the shipped external-force
+    /// edge and refuses a hand. A caller in the GAME wants this one.</para>
     /// </summary>
     public bool Wake(int id, Transform3D at)
     {
         if (!_props.TryGetValue(id, out PropState s) || s.Mode == PropMode.Held)
+            return false;
+        _props[id] = s.AsLoose(at);
+        return true;
+    }
+
+    /// <summary>
+    /// Puts a prop into <see cref="PropMode.Loose"/> at <paramref name="at"/> from ANY mode —
+    /// the sibling of <see cref="SetResting"/> in the other direction. Returns false on an
+    /// unknown id.
+    ///
+    /// <para><b>Why it exists next to <see cref="Release"/>, which looks like the same thing.</b>
+    /// <see cref="Release"/> is the drop/throw verb and deliberately refuses anything that is not
+    /// HELD: a resting prop must not be made loose by a stray release packet. REACH-1's
+    /// <c>PropManager.ServerNudgeLoose</c> needs exactly what Release refuses — a RESTING prop
+    /// shoved back into physics with nobody holding it — because §5b's sixth planted case is a
+    /// prop "pushed through the floor by a scripted impulse" in a room with no players in it, and
+    /// every shipped route into Loose starts from a hand. Keeping the two verbs separate is what
+    /// stops the dev hook from loosening the rule the real one enforces.</para>
+    ///
+    /// <para><b>Not <see cref="Wake"/></b> (INT-0B, 2026-09-19): DOOR-1's burst shove landed the
+    /// same Resting -> Loose edge for the game, and it REFUSES a Held prop. This one does not,
+    /// because a planted-room nudge is allowed to be blunter than anything a player can cause.
+    /// Two verbs on purpose; do not collapse them.</para>
+    /// </summary>
+    public bool SetLoose(int id, Transform3D at)
+    {
+        if (!_props.TryGetValue(id, out PropState s))
             return false;
         _props[id] = s.AsLoose(at);
         return true;

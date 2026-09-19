@@ -1,0 +1,354 @@
+[gd_scene load_steps=29 format=3]
+
+; REACH-1 (2026-09-19) — THE PLANTED ROOM. A copy of SearchRoom.tscn's shell with §5b's six
+; failure cases authored into it, one fixture per case, plus a seventh that proves the
+; depenetration branch. --reach-selftest runs in this world and nothing else does.
+;
+; WHY A COPY (the packet's instruction, and the reason behind it): every fixture below is a
+; DELIBERATE DEFECT — a crate inside a partition wall, a crate inside a shelf back, a crate on a
+; ledge nobody can stand under. Authoring those into the room the game is played in would ship
+; three props in illegal poses and would make every other suite's prop-count and
+; authored-vs-live assertions have to know about them.
+;
+; THE ROOM. Same construction as SearchRoom: 14 x 10 x 3.5 m interior box, floor top y = 0,
+; ceiling underside y = 3.5, walls' inner faces at x = +/-7 and z = +/-5. Read
+; HoldingRoom.tscn's header for the convention and for why nothing here may be built in code
+; (.claude/rules/godot-scenes.md). Instanced at the ORIGIN, unlike the supermarket's three rooms,
+; so every coordinate in this file is also a world coordinate and the self-test's expectations
+; can be read straight off it.
+;
+; THE FLOOR IS FOUR SLABS WITH A HOLE IN IT. §5b's sixth case is a prop "pushed through the floor
+; by physics", and there is no honest way to reach that through an intact slab: Carryable sets
+; ContinuousCd = true precisely so a thrown prop cannot tunnel, and switching that off for the
+; fixture would be testing a body the game never ships. So the room has a 3.4 x 3.4 m open pit in
+; the +X/+Z corner, Prop_7_Faller hangs over it (frozen at rest, like every other authored prop),
+; and the scripted impulse is what commits it. What is being proved is the RECOVERY, not the fall.
+;
+; THE PROP IDS. PropManager.AdoptAuthoredProps sorts on NODE PATH, so the Prop_<n>_<name> naming
+; below IS the id order: 1000..1008 in the order they appear. The self-test looks them up BY NAME
+; and reads PropId off each, so renaming one does not silently repoint a case at a different
+; crate — but keep the numbering anyway, because the ids are what the suite log prints.
+;
+;   Prop_0_Wall        1000  inside the partition wall          -> refused (InsideStatic)
+;   Prop_1_ShelfBack   1001  inside the static shelf's back     -> refused (InsideStatic)
+;   Prop_2_HighLedge   1002  on a ledge 3 m up                  -> refused (NoStandingPoint)
+;   Prop_3_UnderBin    1003  under an overturned bin            -> allowed
+;   Prop_4_Bin         1004  ... the bin (scenery for 1003)
+;   Prop_5_InBox       1005  inside a closed movable box        -> allowed
+;   Prop_6_Box         1006  ... the box (scenery for 1005)
+;   Prop_7_Faller      1007  pushed through the floor           -> returned to last good
+;   Prop_8_Shallow     1008  0.12 m into a plinth               -> depenetrated, then allowed
+
+[ext_resource type="Script" path="res://scripts/game/world/ReachPlantWorld.cs" id="1_world"]
+[ext_resource type="PackedScene" path="res://scenes/game/props/Crate.tscn" id="2_crate"]
+[ext_resource type="Script" path="res://scripts/game/props/NetworkedProp.cs" id="3_netprop"]
+[ext_resource type="PackedScene" path="res://scenes/game/props/HollowShell.tscn" id="4_bin"]
+[ext_resource type="PackedScene" path="res://scenes/game/props/ClosedShell.tscn" id="5_box"]
+
+[sub_resource type="StandardMaterial3D" id="Mat_floor"]
+resource_name = "planted room floor"
+albedo_color = Color(0.3, 0.32, 0.36, 1)
+roughness = 0.9
+
+[sub_resource type="StandardMaterial3D" id="Mat_wall"]
+resource_name = "planted room walls"
+albedo_color = Color(0.44, 0.46, 0.5, 1)
+roughness = 0.95
+
+[sub_resource type="BoxMesh" id="BoxMesh_floor_a"]
+size = Vector3(14.8, 0.4, 7.4)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_floor_a"]
+size = Vector3(14.8, 0.4, 7.4)
+
+[sub_resource type="BoxMesh" id="BoxMesh_floor_b"]
+size = Vector3(11.4, 0.4, 3.4)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_floor_b"]
+size = Vector3(11.4, 0.4, 3.4)
+
+[sub_resource type="BoxMesh" id="BoxMesh_slab"]
+size = Vector3(14.8, 0.4, 10.8)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_slab"]
+size = Vector3(14.8, 0.4, 10.8)
+
+[sub_resource type="BoxMesh" id="BoxMesh_wall_x"]
+size = Vector3(0.4, 3.5, 10.8)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_wall_x"]
+size = Vector3(0.4, 3.5, 10.8)
+
+[sub_resource type="BoxMesh" id="BoxMesh_wall_z"]
+size = Vector3(14.8, 3.5, 0.4)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_wall_z"]
+size = Vector3(14.8, 3.5, 0.4)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_bounds"]
+size = Vector3(14.0, 3.5, 10.0)
+
+[sub_resource type="BoxMesh" id="BoxMesh_partition"]
+size = Vector3(0.6, 2.5, 3)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_partition"]
+size = Vector3(0.6, 2.5, 3)
+
+[sub_resource type="BoxMesh" id="BoxMesh_shelf_back"]
+size = Vector3(4, 2.4, 0.3)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_shelf_back"]
+size = Vector3(4, 2.4, 0.3)
+
+[sub_resource type="BoxMesh" id="BoxMesh_shelf_plate"]
+size = Vector3(4, 0.08, 1.2)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_shelf_plate"]
+size = Vector3(4, 0.08, 1.2)
+
+[sub_resource type="BoxMesh" id="BoxMesh_ledge"]
+size = Vector3(1, 0.2, 1)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_ledge"]
+size = Vector3(1, 0.2, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_plinth"]
+size = Vector3(1, 0.5, 1)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_plinth"]
+size = Vector3(1, 0.5, 1)
+
+[node name="ReachPlantRoom" type="Node3D"]
+script = ExtResource("1_world")
+
+; --- the shell -----------------------------------------------------------------------------
+; FloorA covers z in [-5.4, 2.0] across the full width; FloorB covers z in [2.0, 5.4] out to
+; x = 4.0. What is left open is the pit: x in [4.0, 7.4], z in [2.0, 5.4].
+
+[node name="FloorA" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.2, -1.7)
+
+[node name="Collision" type="CollisionShape3D" parent="FloorA"]
+shape = SubResource("BoxShape3D_floor_a")
+
+[node name="Mesh" type="MeshInstance3D" parent="FloorA"]
+mesh = SubResource("BoxMesh_floor_a")
+surface_material_override/0 = SubResource("Mat_floor")
+
+[node name="FloorB" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.7, -0.2, 3.7)
+
+[node name="Collision" type="CollisionShape3D" parent="FloorB"]
+shape = SubResource("BoxShape3D_floor_b")
+
+[node name="Mesh" type="MeshInstance3D" parent="FloorB"]
+mesh = SubResource("BoxMesh_floor_b")
+surface_material_override/0 = SubResource("Mat_floor")
+
+[node name="Ceiling" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3.7, 0)
+
+[node name="Collision" type="CollisionShape3D" parent="Ceiling"]
+shape = SubResource("BoxShape3D_slab")
+
+[node name="Mesh" type="MeshInstance3D" parent="Ceiling"]
+mesh = SubResource("BoxMesh_slab")
+surface_material_override/0 = SubResource("Mat_wall")
+
+[node name="WallXPos" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 7.2, 1.75, 0)
+
+[node name="Collision" type="CollisionShape3D" parent="WallXPos"]
+shape = SubResource("BoxShape3D_wall_x")
+
+[node name="Mesh" type="MeshInstance3D" parent="WallXPos"]
+mesh = SubResource("BoxMesh_wall_x")
+surface_material_override/0 = SubResource("Mat_wall")
+
+[node name="WallXNeg" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -7.2, 1.75, 0)
+
+[node name="Collision" type="CollisionShape3D" parent="WallXNeg"]
+shape = SubResource("BoxShape3D_wall_x")
+
+[node name="Mesh" type="MeshInstance3D" parent="WallXNeg"]
+mesh = SubResource("BoxMesh_wall_x")
+surface_material_override/0 = SubResource("Mat_wall")
+
+[node name="WallZPos" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.75, 5.2)
+
+[node name="Collision" type="CollisionShape3D" parent="WallZPos"]
+shape = SubResource("BoxShape3D_wall_z")
+
+[node name="Mesh" type="MeshInstance3D" parent="WallZPos"]
+mesh = SubResource("BoxMesh_wall_z")
+surface_material_override/0 = SubResource("Mat_wall")
+
+[node name="WallZNeg" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.75, -5.2)
+
+[node name="Collision" type="CollisionShape3D" parent="WallZNeg"]
+shape = SubResource("BoxShape3D_wall_z")
+
+[node name="Mesh" type="MeshInstance3D" parent="WallZNeg"]
+mesh = SubResource("BoxMesh_wall_z")
+surface_material_override/0 = SubResource("Mat_wall")
+
+[node name="RoomLight" type="OmniLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3, 0)
+light_energy = 2.2
+omni_range = 20.0
+shadow_enabled = false
+
+[node name="PlantSpawn_0" type="Marker3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.1, 1)
+
+; The authored bounds volume layer 1 and layer 2 both test against. Group in the [node] header,
+; as the rules file requires: wired anywhere else it fails silently.
+
+[node name="RoomBounds" type="Area3D" parent="." groups=["room_bounds"]]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.75, 0)
+monitoring = false
+monitorable = false
+collision_layer = 0
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape3D" parent="RoomBounds"]
+shape = SubResource("BoxShape3D_bounds")
+
+; --- the fixtures --------------------------------------------------------------------------
+
+; CASE 1's wall. 0.6 m thick, freestanding, interior — so a crate at its centre is inside STATIC
+; GEOMETRY and inside the room's bounds at once. It has to be thick: getting a 0.44 m crate out
+; of it needs 0.52 m of push against a 0.15 m ceiling, which is exactly the situation layer 2's
+; last-good fallback exists for.
+
+[node name="PartitionWall" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5, 1.25, 0)
+
+[node name="Collision" type="CollisionShape3D" parent="PartitionWall"]
+shape = SubResource("BoxShape3D_partition")
+
+[node name="Mesh" type="MeshInstance3D" parent="PartitionWall"]
+mesh = SubResource("BoxMesh_partition")
+surface_material_override/0 = SubResource("Mat_wall")
+
+; CASE 2's shelf. A back panel and two plates, standing 0.85 m off the -Z wall. The back panel is
+; 0.3 m deep, so a crate centred in it needs 0.37 m of push — over the ceiling again, by less.
+
+[node name="ShelfBack" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1, 1.2, -4)
+
+[node name="Collision" type="CollisionShape3D" parent="ShelfBack"]
+shape = SubResource("BoxShape3D_shelf_back")
+
+[node name="Mesh" type="MeshInstance3D" parent="ShelfBack"]
+mesh = SubResource("BoxMesh_shelf_back")
+surface_material_override/0 = SubResource("Mat_wall")
+
+[node name="ShelfDeck" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1, 0.9, -3.3)
+
+[node name="Collision" type="CollisionShape3D" parent="ShelfDeck"]
+shape = SubResource("BoxShape3D_shelf_plate")
+
+[node name="Mesh" type="MeshInstance3D" parent="ShelfDeck"]
+mesh = SubResource("BoxMesh_shelf_plate")
+surface_material_override/0 = SubResource("Mat_wall")
+
+[node name="ShelfTop" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1, 2.4, -3.3)
+
+[node name="Collision" type="CollisionShape3D" parent="ShelfTop"]
+shape = SubResource("BoxShape3D_shelf_plate")
+
+[node name="Mesh" type="MeshInstance3D" parent="ShelfTop"]
+mesh = SubResource("BoxMesh_shelf_plate")
+surface_material_override/0 = SubResource("Mat_wall")
+
+; CASE 3's ledge. Top face at y = 3.0, one metre square, standing clear of everything so that no
+; candidate standing point on either ring falls over it — the ring at half radius is 1.2 m out
+; and the ledge's half-extent is 0.5 m.
+
+[node name="HighLedge" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5, 2.9, -3)
+
+[node name="Collision" type="CollisionShape3D" parent="HighLedge"]
+shape = SubResource("BoxShape3D_ledge")
+
+[node name="Mesh" type="MeshInstance3D" parent="HighLedge"]
+mesh = SubResource("BoxMesh_ledge")
+surface_material_override/0 = SubResource("Mat_wall")
+
+; CASE 7's plinth. Half a metre tall; Prop_8_Shallow rests 0.12 m into its top face, which is
+; deeper than the 0.02 m tolerance and INSIDE the 0.15 m depenetration ceiling — the one fixture
+; in the room whose correction succeeds.
+
+[node name="ShallowPlinth" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3, 0.25, 3)
+
+[node name="Collision" type="CollisionShape3D" parent="ShallowPlinth"]
+shape = SubResource("BoxShape3D_plinth")
+
+[node name="Mesh" type="MeshInstance3D" parent="ShallowPlinth"]
+mesh = SubResource("BoxMesh_plinth")
+surface_material_override/0 = SubResource("Mat_wall")
+
+; --- the planted props ------------------------------------------------------------------------
+; Structure, and it is not optional: a NetworkedProp (Node3D + script) whose child is literally
+; named "Body" and instances a prop scene. See SearchRoom.tscn's header.
+
+[node name="Prop_0_Wall" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5, 0.9, 0)
+script = ExtResource("3_netprop")
+
+[node name="Body" parent="Prop_0_Wall" instance=ExtResource("2_crate")]
+
+[node name="Prop_1_ShelfBack" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2, 1.2, -4)
+script = ExtResource("3_netprop")
+
+[node name="Body" parent="Prop_1_ShelfBack" instance=ExtResource("2_crate")]
+
+[node name="Prop_2_HighLedge" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5, 3.23, -3)
+script = ExtResource("3_netprop")
+
+[node name="Body" parent="Prop_2_HighLedge" instance=ExtResource("2_crate")]
+
+[node name="Prop_3_UnderBin" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.22, -1)
+script = ExtResource("3_netprop")
+
+[node name="Body" parent="Prop_3_UnderBin" instance=ExtResource("2_crate")]
+
+[node name="Prop_4_Bin" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -1)
+script = ExtResource("3_netprop")
+
+[node name="Body" parent="Prop_4_Bin" instance=ExtResource("4_bin")]
+
+[node name="Prop_5_InBox" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.5, 0.31, 1.5)
+script = ExtResource("3_netprop")
+
+[node name="Body" parent="Prop_5_InBox" instance=ExtResource("2_crate")]
+
+[node name="Prop_6_Box" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.5, 0, 1.5)
+script = ExtResource("3_netprop")
+
+[node name="Body" parent="Prop_6_Box" instance=ExtResource("5_box")]
+
+[node name="Prop_7_Faller" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5.5, 0.3, 3.5)
+script = ExtResource("3_netprop")
+
+[node name="Body" parent="Prop_7_Faller" instance=ExtResource("2_crate")]
+
+[node name="Prop_8_Shallow" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3, 0.6, 3)
+script = ExtResource("3_netprop")
+
+[node name="Body" parent="Prop_8_Shallow" instance=ExtResource("2_crate")]

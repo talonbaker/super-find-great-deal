@@ -162,12 +162,174 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
     public const float PlaceOverlapToleranceM = PlacementIntegrity.DefaultOverlapToleranceM;
 
     /// <summary>
+    /// REACH-1, program doc §5b layer 2: how far the rest audit may push a prop to get it out of
+    /// something, metres.
+    ///
+    /// <para>0.15 m is the packet's value and it is a deliberate ceiling rather than a
+    /// tolerance. It is large enough to cover every overlap the solver actually produces on a
+    /// settle (a crate that rolled a few centimetres into a wall) and far too small to move a
+    /// crate out of the middle of a 1 m pillar — which is the point: a push that big would be
+    /// the server silently relocating the object the hider chose a place for. Past this, the
+    /// correction is "back to the last good transform", where the prop demonstrably fitted.</para>
+    /// </summary>
+    public const float DepenetrateMaxM = 0.15f;
+
+    /// <summary>
     /// <b>A surface's own opinion about where a placed prop goes</b>, or null for free placement,
     /// which is the default and the game's normal verb. Server-side only; see
     /// <see cref="IPlacementValidator"/> for the contract and for why TASK-1's pads plug in here
     /// rather than teaching this class about pads.
     /// </summary>
     public IPlacementValidator? PlacementValidator { get; set; }
+
+    // --- REACH-1: layer 2's public surface ---------------------------------------------------
+
+    /// <summary>
+    /// Server-only: raised every time a prop latches Resting (or is recovered off the kill
+    /// plane), with the audit that ran on that latch. <b>This is the "re-evaluate when the target
+    /// latches Resting" half of §5b layer 3</b> — the reachability fact source subscribes here
+    /// rather than polling, so an audit costs one evaluation per settle and not one per tick.
+    /// </summary>
+    public event System.Action<int, RestAudit.Result>? RestLatched;
+
+    /// <summary>Rest audits run since this manager was set up. Server-only.</summary>
+    public long RestAuditCount { get; private set; }
+
+    /// <summary>Rest audits that MOVED a prop. The ratio of this to
+    /// <see cref="RestAuditCount"/> is the honest "how often does the physics actually clip a
+    /// prop into something" number, which nothing in this lineage has ever measured.</summary>
+    public long RestCorrectionCount { get; private set; }
+
+    /// <summary>Physics queries the rest audits have issued, counted inside the code that issues
+    /// them. The packet asks for queries/second under load, and an estimate from
+    /// <see cref="RestAuditCount"/> would be wrong by whatever the correction path costs.</summary>
+    public long IntegrityQueryCount { get; private set; }
+
+    /// <summary>Audits that ended <see cref="RestAudit.Outcome.Stuck"/> — a prop that could
+    /// neither be pushed out nor returned anywhere legal. Never expected to be non-zero in a
+    /// real session; the count exists so a playtest can say so rather than assume it.</summary>
+    public long StuckPropCount { get; private set; }
+
+    // The last audit per prop, so layer 3 can ask "is this one inside the scenery" without
+    // re-running layer 2 (two answers to one question is the defect PlacementIntegrity's own
+    // header warns about). Server-only; small, one entry per prop that has ever rested.
+    private readonly System.Collections.Generic.Dictionary<int, RestAudit.Result> _lastAudit = new();
+
+    /// <summary>The most recent rest audit for a prop, or null if it has never latched Resting
+    /// on this server. Null is meaningful: "never audited" is not "audited and fine".</summary>
+    public RestAudit.Result? LastAuditFor(int propId) =>
+        _lastAudit.TryGetValue(propId, out RestAudit.Result r) ? r : null;
+
+    /// <summary>Every prop this peer has a node for, in registry order. Server-side the registry
+    /// is authoritative, so this is every prop in the world; used by the reachability sampler to
+    /// build its exclusion set and to classify a ray hit as movable.</summary>
+    public System.Collections.Generic.IEnumerable<NetworkedProp> LiveProps
+    {
+        get
+        {
+            foreach (PropState p in _registry.All)
+            {
+                NetworkedProp? node = NodeFor(p.Id);
+                if (node != null && GodotObject.IsInstanceValid(node))
+                    yield return node;
+            }
+        }
+    }
+
+    /// <summary>
+    /// <b>Layer 2, the whole of it, in one server-side method.</b> Audits <paramref name="propId"/>
+    /// where it currently is, applies the correction §5b prescribes (depenetrate, else last
+    /// good), latches the prop Resting at the resulting transform, broadcasts it through the
+    /// ordinary funnel every peer already converges on, and raises
+    /// <see cref="RestLatched"/>.
+    ///
+    /// <para><b>Three callers, one implementation, deliberately.</b> The settle latch in
+    /// <c>_PhysicsProcess</c> is the live one; the planted self-test calls it on an authored pose
+    /// (a prop that is frozen at rest has never latched, so there is no event to wait for and
+    /// re-implementing the latch in a test would be testing the test); and §5b layer 3's
+    /// precondition — "the target must be Resting and must pass layer 2" — calls it on the
+    /// Confirm press. Two implementations of "may this prop stay here" would be two answers to
+    /// one question, which is the same argument <see cref="PlacementIntegrity"/>'s header makes
+    /// about layer 1.</para>
+    ///
+    /// <para>Off-server, or for an unknown prop, it does nothing and reports a default result
+    /// (<see cref="RestAudit.Reason.None"/> / <see cref="RestAudit.Outcome.Good"/> with zero
+    /// queries) — "there was nothing to audit" rather than "the audit passed".</para>
+    /// </summary>
+    public RestAudit.Result ServerAuditRest(int propId)
+    {
+        if (!_isServer)
+            return default;
+        NetworkedProp? node = NodeFor(propId);
+        if (node == null || !GodotObject.IsInstanceValid(node) || node.Body == null)
+            return default;
+        // NEVER on a held prop. The correction ends in SettleToRest, which unbinds the prop from
+        // its holder — so auditing something in somebody's hands would take it out of them, and
+        // the one caller that could reach this case (the Confirm-time precondition, on a hider
+        // who has not put the object down) is precisely the one the round is about to refuse for
+        // a different reason.
+        if (_registry.TryGet(propId, out PropState held) && held.Mode == PropMode.Held)
+            return default;
+
+        Transform3D at = node.Body.GlobalTransform;
+        RestAudit.Result audit = RestAudit.Audit(node, at, PlaceOverlapToleranceM, DepenetrateMaxM);
+        NoteAudit(propId, audit);
+        Transform3D settled = audit.Corrected ? audit.To : at;
+        _registry.SetResting(propId, settled);
+        node.SettleToRest(settled);
+        Rpc(MethodName.ApplyPropState, propId, (int)PropMode.Resting, 0, settled);
+        _looseSettle.Remove(propId);
+        _lastStreamed.Remove(propId);
+        RestLatched?.Invoke(propId, audit);
+        return audit;
+    }
+
+    /// <summary>
+    /// Server-side dev hook: put a resting prop back into loose physics with
+    /// <paramref name="impulse"/>, from wherever it currently sits.
+    ///
+    /// <para><b>What it exists for, and nothing else.</b> §5b's sixth planted case is "pushed
+    /// through the floor by a scripted impulse", and there is no other way to reach the
+    /// kill-plane recovery path from a test: every shipped route into Loose goes through a HELD
+    /// prop being dropped or thrown, and the planted room has no players in it. Server-only, and
+    /// the only caller in the tree is the self-test the flag <c>--reach-selftest</c> arms.</para>
+    /// </summary>
+    public void ServerNudgeLoose(int propId, Vector3 impulse)
+    {
+        if (!_isServer)
+            return;
+        NetworkedProp? node = NodeFor(propId);
+        if (node == null || !_registry.TryGet(propId, out PropState p) || p.Mode == PropMode.Held)
+            return;
+        Transform3D at = node.Body.GlobalTransform;
+        // SetLoose, not Release: Release is the drop/throw verb and refuses anything that is not
+        // HELD, which is correct for it and is exactly what this hook needs to get past — the
+        // planted room has no players in it. See PropRegistry.SetLoose's own note.
+        _registry.SetLoose(propId, at);
+        Rpc(MethodName.ApplyPropState, propId, (int)PropMode.Loose, 0, at);
+        node.BeginLooseServer(impulse);
+    }
+
+    /// <summary>Books one audit and logs the ones that acted. A passing audit is silent by
+    /// design: 150 props settling after a shove would otherwise print 150 lines saying nothing
+    /// happened, and the line that matters would be invisible inside them.</summary>
+    private void NoteAudit(int propId, RestAudit.Result audit)
+    {
+        RestAuditCount++;
+        IntegrityQueryCount += audit.Queries;
+        _lastAudit[propId] = audit;
+        if (!audit.Corrected)
+            return;
+        RestCorrectionCount++;
+        if (audit.Outcome == RestAudit.Outcome.Stuck)
+        {
+            StuckPropCount++;
+            // LOUD. A prop that cannot be put anywhere legal is the case §5b exists to prevent,
+            // and a warning is how a playtest proves the game did not hit it.
+            GD.PushWarning($"[reach] STUCK {audit.Describe(propId)}");
+        }
+        GD.Print($"[reach] layer2 {audit.Describe(propId)}");
+    }
 
     // --- Loose-physics tuning (server-only; see the _PhysicsProcess loop below) -----------
     /// <summary>Below this linear speed squared (~0.2 m/s), a Loose prop is considered
@@ -466,11 +628,23 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
 
             if (node.Body.GlobalPosition.Y < Carryable.KillPlaneY)
             {
-                _registry.SetResting(p.Id, node.HomeTransform);
-                node.SettleToRest(node.HomeTransform);
-                Rpc(MethodName.ApplyPropState, p.Id, (int)PropMode.Resting, 0, node.HomeTransform);
+                // REACH-1 (§5b layer 2, the kill-plane path): recovered to the LAST GOOD
+                // transform, not to HomeTransform. For a prop that never rested anywhere legal
+                // the two are the same value (NetworkedProp.Init seeds last-good from the spawn
+                // pose), which is why the existing throw/OOB suites are unmoved; for a prop the
+                // hider carried across the room and a seeker then knocked into the void, the
+                // difference is whether the game hands the object back where it was hidden or
+                // back on its starting shelf.
+                RestAudit.Result oob = RestAudit.AuditKillPlane(node, node.Body.GlobalTransform,
+                    PlaceOverlapToleranceM);
+                NoteAudit(p.Id, oob);
+                Transform3D home = oob.To;
+                _registry.SetResting(p.Id, home);
+                node.SettleToRest(home);
+                Rpc(MethodName.ApplyPropState, p.Id, (int)PropMode.Resting, 0, home);
                 _looseSettle.Remove(p.Id);
                 _lastStreamed.Remove(p.Id);
+                RestLatched?.Invoke(p.Id, oob);
                 continue;
             }
 
@@ -494,24 +668,14 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
                 _looseSettle[p.Id] = c;
                 if (c >= SettleTicks)
                 {
-                    // The rest transform becomes this prop's last-known-good ONLY if it passes the
-                    // same two tests a placement has to (program doc §5b). CARRY-1 only RECORDS:
-                    // a rest that fails is left exactly where physics put it and the previous good
-                    // transform is kept, because the correction — depenetrate, then fall back — is
-                    // REACH-1's layer 2 and shipping half of it would be a prop teleporting with
-                    // no audit behind it. One shape query per settle event, which is what §5b
-                    // costed it at.
-                    PlacementIntegrity.Verdict rest =
-                        PlacementIntegrity.Check(node.Body, t, null, PlaceOverlapToleranceM);
-                    if (rest.Allowed)
-                        node.NoteLastGood(t);
-                    else
-                        ServerLog.Info("rest not good", $"prop={p.Id} {rest}");
-                    _registry.SetResting(p.Id, t);
-                    node.SettleToRest(t);
-                    Rpc(MethodName.ApplyPropState, p.Id, (int)PropMode.Resting, 0, t);
-                    _looseSettle.Remove(p.Id);
-                    _lastStreamed.Remove(p.Id);
+                    // REACH-1 (§5b layer 2): the rest transform is AUDITED, not merely recorded.
+                    // CARRY-1 landed the recording half and left the correction to this lane on
+                    // purpose — a prop teleporting with no audit behind it is indistinguishable
+                    // from a desync, so the two halves had to ship with the log line that
+                    // explains the move. The whole latch body lives in ServerAuditRest so the
+                    // self-test and the Confirm-time precondition run the IDENTICAL code rather
+                    // than a second copy of it.
+                    ServerAuditRest(p.Id);
                 }
             }
             else

@@ -143,6 +143,18 @@ try {
         # and belongs where a marathon has nothing queued behind it.
         @{ Name = "Sfx: material voices (SFX-1)";        Script = "Run-MaterialSfxTest.ps1" }
 
+        # --- REACH-1 (2026-09-19): placement integrity layers 2 and 3 (program doc S5b) ---
+        # Last, per the standing rule. FOUR server launches on its own port (7903) and two of
+        # them take two bots each, so it takes part in the join-index spawn dealing and belongs
+        # at the end of the network suites.
+        #
+        # IT IS THE LONGEST SUITE IN THE REGISTRY, about two and a half minutes: a planted-room
+        # self-test, two full two-bot rounds (one refused, one accepted -- the second is the
+        # control, without which a layer 3 that refused everything would pass the first), and a
+        # twenty-second cost measurement with 150 props. That is deliberate rather than
+        # unavoidable; the alternative was four suites on four ports.
+        @{ Name = "Reach: placement integrity (REACH-1)"; Script = "Run-ReachTest.ps1" }
+
         # WHAT WAS REMOVED HERE AT THE FORK (BASE-1, 2026-09-19), so a reader of an old handoff
         # can tell "deleted" from "lost": the bubble-test world, the shared bubble counter and the
         # last-bubble celebration, the TV portal, the Puffin Lab, the watcher's night gate, the

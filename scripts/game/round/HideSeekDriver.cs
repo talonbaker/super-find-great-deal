@@ -238,7 +238,30 @@ public partial class HideSeekDriver : Node
             _script?.Advance(delta);
 
         HideSeekPhase before = _state.Phase;
-        _state = HideSeekLoop.Step(_state, CollectFacts(), (float)delta, _tuning);
+
+        // THE CONFIRM-TIME AUDIT (REACH-1, §5b layer 3). Facts are collected once; if the hider
+        // pressed Confirm on this tick, every source that caches an expensive fact is told to
+        // re-measure and the facts are collected AGAIN, so the value the loop refuses on is the
+        // one measured on the press rather than the one measured when the object last came to
+        // rest. Two Combine calls on a Confirm tick and one on every other tick — Confirm happens
+        // once or twice a round.
+        HideSeekInput facts = CollectFacts();
+        if (facts.HiderPressedConfirm)
+        {
+            bool audited = false;
+            foreach (IRoundFactSource source in _sources)
+            {
+                if (source is IConfirmTimeAudit audit)
+                {
+                    audit.AuditBeforeConfirm();
+                    audited = true;
+                }
+            }
+            if (audited)
+                facts = CollectFacts();
+        }
+
+        _state = HideSeekLoop.Step(_state, facts, (float)delta, _tuning);
         foreach (IRoundFactSource source in _sources)
             source.AfterStep();
 
