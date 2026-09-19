@@ -656,3 +656,108 @@ the same distance as the body to three decimals.** Proved able to fail with `Top
 planted on `FirstPersonCamera.Attach`: spread 73.999 m, `lens moved 0.00 m` against body jumps of
 40.63 / 42.09 / 80.16 m — while the epoch-bump half stayed green, which is what shows the two
 halves are independent.
+
+## A second suite needs a desktop, and four ways a sound can be inaudible to somebody (SFX-1, measured 2026-09-19)
+
+`tests/Run-MaterialSfxTest.ps1` joins the registry on **udp/7902**. Continuing the ladder INT-0
+settled: 7893/7894/7895 `Run-CarryNetTest`, 7896 `Run-RoundLoopSmoke`, 7897 `Run-FirstPersonTest`,
+7898 `Run-PlaceTest`, **7902 `Run-MaterialSfxTest`**. It starts at 7902 rather than 7899 on
+purpose — wave-2 lanes this worktree could not see had claimed 7899 and 7901 and DOOR-1 was
+taking another while this was written, so the whole 7899–7901 band was left alone. INT-0's rule
+stands and this is the second lane to pay for it: **a "next free port" computed from a snapshot
+of `tests/` is not free while a wave is live.**
+
+### `Run-AllTests.ps1` now needs a desktop session for TWO suites, and the reason is not the same
+
+FP-1's entry above says its suite opens a window because what it tests is what a camera renders.
+This one opens three (two in phase 1, one in phase 2) because of an **early-out**, not a
+renderer: `ActorFx.Fire` returns immediately when `NetworkManager.IsHeadless`, and
+`IsHeadless` is `DisplayServer.GetName() == "headless"` — **a property of the display, not of the
+`--server` flag.** So a headless `--server` and a headless `--bot` both play nothing, and a
+**windowed `--server` is a host who is a player**, which is also the only peer that simulates
+loose prop physics. Any future audio suite has to put a window on whichever peer it wants to
+listen with, and if it wants to hear an IMPACT that peer must be the simulating one.
+
+### Four ways a prop sound was inaudible, all found by one suite, all one-sided
+
+Worth keeping because each one produced a *partly* working feature, which is the kind that ships.
+
+| What was measured | Why it happened |
+|---|---|
+| Props thrown into a **wall** sounded (4.0 and 6.3 m/s); four props dropped 0.6–1.1 m onto the **floor** were silent, every run | `LinearVelocity` read inside `body_entered` has already had the normal impulse applied for a head-on landing. A glancing contact leaves residual velocity; a landing does not. Sample the speed going INTO the physics step (`Carryable.ApproachSpeedMps`). |
+| Every impact audible to the **host**, none to the other player | A Loose prop on a non-authority peer is a **frozen kinematic body** lerped toward a streamed transform: `LinearVelocity` is 0 forever, and Godot reports such a body no contact at all. `ObservedSpeedMps` fixes the first half; the second half needs a bit on the wire. |
+| Every **throw** audible to the host, none to the other player | `Carryable.OnThrown` is reached only from `NetworkedProp.BeginLooseServer`, which is server-only. The every-peer half of the same transition is `BeginLoose` (via `ApplyPropState`, `CallLocal`). |
+| A can dropped on an already-settled can made **no sound at all** | A "lower instance id wins" de-dup picks the winner before knowing whether the winner will be asked — and a settled prop is frozen kinematic, so Godot never asks it. **A first-come claim cannot fail that way.** |
+
+**Generalises: a de-duplication rule that decides its winner up front is silent whenever only the
+loser is asked.** The failure looks identical to "the feature does nothing" and passes any test
+that counts sounds near a position, because the count it is looking for is 1 and the count it
+gets is 0 only in the cases nobody staged.
+
+### A positive control stopped being able to fire, silently, because a constant moved
+
+`FootstepAudioTests.SixSprintingPlayersStayInsideTheOneShotBudget`'s control read
+`uncapped > SfxLab.PoolSize - 6`: true at a pool of 14 (12 > 8), false at 18 (12 > 12). SFX-1
+raised the pool and the control went red **while every safety assertion above it stayed green**,
+which is the good outcome of a badly-written one. It is now stated against the cap
+(`uncapped > culled`), which is pool-size independent. **A positive control written against an
+absolute constant expires the day that constant moves; write it against the thing it is
+controlling for.**
+
+### The voice budget under forty simultaneous impacts, and a bar that pool size cannot reach
+
+Measured, phase 2 — forty mixed props released together with two players walking through them,
+which is the shelf-collapse event the aisles will produce:
+
+| PoolSize | fires | PeakLive3DVoices | OneShotSteals | stolen |
+|---|---|---|---|---|
+| 14 | 54 | **14** | 26 | **48 %** |
+| 18 | 56 | **18** | 22 | **39 %** |
+
+**The peak landing exactly ON the pool size both times is the tell** — the pool saturated, rather
+than the mix happening to want that many. The 18 was paid for out of `SfxLab.LoopPoolSize`
+(5 → 1): four of those slots were reserved for an outdoor fire bed in a game about a forest at
+night, and this one is a supermarket. `AudioVoiceBudget.Ceiling` is untouched at 24.
+
+**The 10 % steal bar is not reachable by pool size at this fixture and the suite says so rather
+than chasing it**: forty simultaneous impacts want forty voices. It reports the design bar and
+gates on a 60 % regression bar. The fix is source-side limiting — the same answer
+`FootstepAudioDirector` already gives for six sprinting players — and it is a design call.
+
+### `Voice: proximity gate` is load-flaky too, and `Carry: drift`'s red is a STAGING red (SFX-1, measured 2026-09-19)
+
+SFX-1's marathon on `feat/2026-09-19-sfx-1`: **35 suites, 33 PASS / 2 FAIL.** Both reds
+discriminated the documented way, and the machine was **not** idle for either the marathon or the
+re-runs — `C:\repos\sfgd-reach1` (REACH-1) held the machine-wide mutex for four minutes
+immediately before the re-runs and two Godot processes belonging to it were already alive, which
+per the SHADER-2 entry above makes the clearing stronger rather than weaker.
+
+| Suite | Marathon | Standalone, `-SkipBuild`, machine busy | The quantity |
+|---|---|---|---|
+| `Carry: drift (hold+walk)` | FAIL | **3/3 PASS** | mean **0.997–0.998 m**, peak **1.067–1.071 m**, growth 0.001–0.002 m, n=83 |
+| `Voice: proximity gate` | FAIL | **3/3 PASS** | vgate-pa: far **1066–1101** packets at 45.7 m, ~2195 relays taken by the PA exemption, 0 gated |
+
+**`Carry: drift` is not on the flake list above and its red belongs to the family that is.** The
+failing lines are `prop 1 not held by bot ... during walk window` and `too few
+held-while-walking distance samples (0)` — the staging half, in the suite's own words, and
+`tests/logs/carrydrift.server.out.log` names the cause outright:
+
+```
+[server] grab denied peer=390899326 reason=OutOfRange
+```
+
+The bot never got within `GrabRange`, so the drift measurement had nothing to measure.
+**CARRY-1's warning above was followed rather than skipped**: that packet's red was written in
+this file's own flake vocabulary and turned out to be a real regression, and the discriminator
+was one grep of the server log. Here the grep says `OutOfRange` — a distance, i.e. the bot's walk
+— where CARRY-1's said `DoesNotFitThere` / `Overlapping`, a refusal its own diff had introduced.
+And **the measured quantity did not move**: INT-0 recorded mean 0.997 / peak 1.071 / n=84 on the
+merged base, against 0.997–0.998 / 1.067–1.071 / n=83 here. A `Carry: drift` red whose
+`body-distance` numbers have moved is the real thing; one whose grab never landed is not.
+
+**`Voice: proximity gate` is new to this list.** Its red is `FAIL: vgate-pa: a bot exited 1`, and
+the speaker bot's own JSONL stops at **t=9227 ms of a 22 s run** — it died mid-run rather than
+after finishing, so it is NOT the `-1073741795`-after-`[bot] done` teardown artifact BASE-1
+recorded, and its `.err.log` is empty. Read the failing PHASE first: phases 1 and 2 both printed
+`ok` in the same failing run, so a red here that names `vgate-on` or `vgate-off` is a different
+animal from one that names a bot exit code.
