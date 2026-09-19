@@ -293,6 +293,29 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
     /// fallback exactly as before.</summary>
     public bool OwnedByNetwork { get; set; }
 
+    /// <summary><b>Where an accepted contact goes instead of straight to the speakers</b>
+    /// (SFX-2, 2026-09-19). Set by <c>NetworkedProp</c> on a networked prop's body, alongside
+    /// <see cref="OwnedByNetwork"/>; null on every offline/sandbox <see cref="Carryable"/>, which
+    /// keeps the original local fire exactly as it was.
+    ///
+    /// <para><b>Why the fire moves off this class for networked props.</b> SFX-1 measured the
+    /// defect and could not close it: a Loose prop on a non-authority peer is a FROZEN KINEMATIC
+    /// body, and Godot reports such a body no contact at all — so <see cref="OnBodyEntered"/>
+    /// never runs there, and the seeker heard nothing when the hider knocked a can off a shelf
+    /// in the next aisle. Only the server sees every contact, so only the server can say what
+    /// happened; it announces, and every peer INCLUDING THE HOST plays from the announcement.
+    /// One path, one sound — if the host kept its local fire as well it would hear each hit
+    /// twice, which is a flam rather than a louder hit.</para>
+    ///
+    /// <para><b>An <c>Action</c> rather than a call into the prop layer</b>, so this file — the
+    /// engine-side physical body, shared with the offline feel sandbox — keeps knowing nothing
+    /// about netcode. The delegate is owned by the node that already owns this body's networked
+    /// identity, and it is that node which decides that a client reports nothing.</para>
+    ///
+    /// <para>The parameter is the 0..1 intensity from <see cref="ImpactIntensity"/>, already
+    /// computed here because the relative-contact-speed rule lives here.</para></summary>
+    public System.Action<float>? ImpactReporter { get; set; }
+
     /// <summary>In someone's hands, by either of the two mechanisms: the anchor chase
     /// (<see cref="_holder"/>) or the holder-side feel spring (<see cref="_springHeld"/>, CARRY-1).
     ///
@@ -613,13 +636,16 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
     /// makes a discarded prop look discarded; applying it to a placement would spin away the
     /// orientation the player just lined the object up in, which is the one thing the verb
     /// exists to preserve.</summary>
-    public virtual void OnPlaced()
-    {
-        // SFX-1: Placed, not Dropped. CARRY-1 split the verbs in the gameplay layer and left the
-        // presentation layer unable to tell them apart; see ActorEvent.Placed.
-        ActorFx.Fire(GetParent(), Profile, ActorEvent.Placed, GlobalPosition);
-        Release(Vector3.Zero, Vector3.Zero);
-    }
+    /// <remarks><b>Deliberately does NOT fire <c>ActorEvent.Placed</c> any more</b> (SFX-2), for
+    /// exactly the reason <see cref="OnThrown"/> above does not fire <c>Thrown</c>: this entry
+    /// point is reached only from <c>NetworkedProp.PlaceLooseServer</c>, which is server-only, so
+    /// a set-down announced here is a tick only the host can hear. SFX-1 wrote that limitation
+    /// down and left it — <i>"the deliberate set-down tick stays on PlaceLooseServer, where the
+    /// verb IS known, and is therefore host-only today"</i>. SFX-2 spends the byte that carries
+    /// the verb (<c>PropRelease.Placed</c>), so the fire now lives in
+    /// <c>NetworkedProp.BeginLoose</c>, the every-peer half of the same transition, and firing
+    /// here as well would give the host two ticks for one placement.</remarks>
+    public virtual void OnPlaced() => Release(Vector3.Zero, Vector3.Zero);
 
     /// <summary>Networked-follow only: on a peer that does NOT simulate this prop's physics
     /// (every client, once it's Loose), stop chasing the holder's anchor without touching
@@ -642,11 +668,21 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
     /// discarded and is exactly wrong for a fixture: measured, a can released above another can
     /// tumbled out from under itself and landed 9 cm to the side, so the collision the suite
     /// existed to observe never happened. And the release is silent here because the
-    /// <c>ApplyPropState</c> broadcast that accompanies it already fires
-    /// <c>ActorEvent.Thrown</c> on every peer through <c>NetworkedProp.BeginLoose</c> — a second
-    /// fire would double every release. Distinct from <see cref="OnPlaced"/>, which is the
-    /// player's deliberate set-down and owns the <c>Placed</c> tick.</para></summary>
-    public void ReleaseAtRestServer() => Release(Vector3.Zero, Vector3.Zero);
+    /// <c>ApplyPropState</c> broadcast that accompanies it already fires the release event on
+    /// every peer through <c>NetworkedProp.BeginLoose</c> — a second fire would double every
+    /// release.</para>
+    ///
+    /// <para><b>SFX-2 renamed this from <c>ReleaseAtRestServer</c> and gave it a second
+    /// caller</b>, because the name had stopped being true. <c>NetworkedProp.Unbind</c> — the
+    /// EVERY-PEER Resting latch — used to reach physics through <see cref="OnDropped"/>, whose
+    /// toss arc it discarded on the very next line and whose <c>ActorEvent.Dropped</c> fire it
+    /// did not: so every settle, every disconnect release and every round-reset rehome announced
+    /// a DROP on every peer. That was inaudible only because no profile in the repo maps
+    /// <c>Dropped</c> to a sound, which is luck rather than design, and the packet's rule is
+    /// explicit — <b>a reset is <c>None</c>, not <c>Dropped</c></b>. Unbind calls this instead;
+    /// the physical outcome is identical (Unbind re-freezes and re-pins immediately afterwards),
+    /// and the announcement is now the release byte's job alone.</para></summary>
+    public void RejoinPhysicsSilently() => Release(Vector3.Zero, Vector3.Zero);
 
     private void Release(Vector3 velocity) =>
         Release(velocity, new Vector3(GD.Randf() * 4 - 2, GD.Randf() * 4 - 2, GD.Randf() * 4 - 2));
@@ -845,9 +881,29 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
         }
         _thunkCooldown = ThunkCooldownSec;
         PunchScale(new Vector3(1.2f, 0.78f, 1.2f));
-        ActorFx.Fire(GetParent(), Profile, ActorEvent.Impact, GlobalPosition,
-            ImpactIntensity(relativeSpeed));
+        float intensity = ImpactIntensity(relativeSpeed);
+        // SFX-2: ON A NETWORKED PROP THE SERVER SAYS WHAT HAPPENED, and every peer — this one
+        // included — plays it from the announcement. See ImpactReporter for why the local fire
+        // must not also run here: two paths would give the host two sounds per hit, and giving
+        // the other player none was SFX-1's one unclosed defect. The reporter itself decides
+        // that a client reports nothing (only the server sees every contact).
+        if (ImpactReporter is { } report)
+        {
+            report(intensity);
+            return;
+        }
+        ActorFx.Fire(GetParent(), Profile, ActorEvent.Impact, GlobalPosition, intensity);
     }
+
+    /// <summary>Play one impact on THIS peer's copy of the prop, at <paramref name="intensity"/>
+    /// — the receiving half of the server's announcement (SFX-2). The squash is deliberately NOT
+    /// re-punched here: it is applied at the contact by whichever peer actually had one, and a
+    /// remote peer's frozen kinematic body has no contact to squash from. Stated rather than
+    /// hidden — a networked prop's impact SQUASH is still host-only, and it is a follow-up, not
+    /// part of this packet's "what you hear is what happened".</summary>
+    internal void PlayWireImpact(float intensity) =>
+        ActorFx.Fire(GetParent(), Profile, ActorEvent.Impact, GlobalPosition, intensity,
+            via: ActorFx.ViaWire);
 
     protected void PunchScale(Vector3 to)
     {

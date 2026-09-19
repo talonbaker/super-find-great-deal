@@ -30,8 +30,14 @@ public static class ActorFx
     /// applies uniformly to every response the event fires. Conflating them would have let a
     /// distant footstep still trip a MinIntensity gate and spawn its dust.
     /// <c>FootstepAudioDirector</c> is the first caller; it passes its distance taper here.</summary>
+    /// <para><paramref name="via"/> tags the <c>--log-sfx</c> line with WHICH PATH produced the
+    /// sound, and exists because SFX-2 gave prop impacts a second one. Default
+    /// <see cref="ViaLocal"/>; the wire handler passes <see cref="ViaWire"/>. It changes nothing
+    /// about what plays — see the field's own doc for why the tag is a new field rather than a
+    /// different value in <c>src=</c>.</para>
     public static void Fire(Node context, PresentationProfile? profile,
-        ActorEvent evt, Vector3 position, float intensity = 0f, float volumeTrimDb = 0f)
+        ActorEvent evt, Vector3 position, float intensity = 0f, float volumeTrimDb = 0f,
+        string? via = null)
     {
         // Null-profile check comes first: it's a free reference compare, and warning
         // here means an unassigned profile gets diagnosed even on a headless server
@@ -51,7 +57,7 @@ public static class ActorFx
         if (NetworkManager.Instance == null || NetworkManager.Instance.IsHeadless)
             return;
 
-        FireCore(context, profile, evt, position, intensity, volumeTrimDb);
+        FireCore(context, profile, evt, position, intensity, volumeTrimDb, via);
     }
 
     /// <summary>The actual response loop — MinIntensity gate, CustomSound-over-Sound
@@ -65,7 +71,8 @@ public static class ActorFx
     /// calling Fire headless. PresentationSelfTest.RunFireCore calls this directly
     /// (same assembly, no reflection needed) to exercise the real response logic.</summary>
     internal static void FireCore(Node context, PresentationProfile profile,
-        ActorEvent evt, Vector3 position, float intensity, float volumeTrimDb = 0f)
+        ActorEvent evt, Vector3 position, float intensity, float volumeTrimDb = 0f,
+        string? via = null)
     {
         EventResponse[] responses = profile.ResponsesFor(evt);
         for (int i = 0; i < responses.Length; i++)
@@ -94,7 +101,7 @@ public static class ActorFx
                     // — two props in contact are, by definition, in the same place.
                     GD.Print($"[sfx] sfx {r.Sound} event={evt} intensity={intensity:F3} "
                         + $"at ({position.X:F2},{position.Y:F2},{position.Z:F2}) "
-                        + $"src={context.Name} t={Time.GetTicksMsec()}");
+                        + $"src={context.Name} t={Time.GetTicksMsec()} via={via ?? ViaLocal}");
                 }
             }
 
@@ -127,6 +134,29 @@ public static class ActorFx
         => Mathf.Max(0.25f, 1f + intensityPitchRange * Mathf.Clamp(intensity, 0f, 1f));
 
     // --- --log-sfx instrumentation (SFX-1) ----------------------------------------------------
+
+    /// <summary><b>This sound came from something that happened on this machine</b> — a local
+    /// contact, a local press, a state transition applied here. The <c>--log-sfx</c> default.
+    /// </summary>
+    public const string ViaLocal = "local";
+
+    /// <summary><b>This sound came from the server saying it happened</b> (SFX-2): the prop
+    /// impact event on <c>NetProfile.PropImpactChannel</c>. It is the only value a non-host peer
+    /// can log for an <c>Impact</c>, because a client's Loose prop is a frozen kinematic body
+    /// Godot reports no contact on — so <c>via=wire</c> in a witness's log IS the proof that the
+    /// seeker can hear the hider.
+    ///
+    /// <para><b>Why a new field and not <c>src=wire</c></b>, which is what the packet asked for.
+    /// <c>src</c> is the context node's name, which for a networked prop is its PROP ID, and
+    /// three of <c>tests/Run-MaterialSfxTest.ps1</c>'s assertions are built on that: "each
+    /// material fired its own voice" needs to know which prop played, "no crossed wires" — the
+    /// one the <c>-PlantCrossedProfile</c> mutation must break — needs to know that a tin sound
+    /// came from a tin prop, and the once-per-contact pairing needs the sound attributed to a
+    /// body. Overwriting <c>src</c> with a literal would have destroyed all three to add one
+    /// bit. SFX-1's own handoff records losing that attribution once already ("the first run
+    /// logged every release as <c>src=Props</c> ... a real defect and not only a logging one").
+    /// So the path is its own field and <c>src</c> still names the prop.</para></summary>
+    public const string ViaWire = "wire";
 
     /// <summary><c>--log-sfx</c>: print one line per sound actually played. Set once at boot from
     /// <c>LaunchOptions</c> rather than read per fire, because this sits inside the per-footstep

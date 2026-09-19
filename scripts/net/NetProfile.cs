@@ -203,15 +203,18 @@ public static class NetProfile
     // renumbered on 2026-08-11).
     //
     //   2 Voice · 3 Move · 4 Prop · 5 Cycle · 6 Run · 10 Water · 11 Incapacity · 13 Sight
-    //   16 Flashlight · 17 Honk · 21 Round
+    //   16 Flashlight · 17 Honk · 21 Round · 22 PropImpact
     //
     // The gaps (7-9, 12, 14, 15) belonged to systems that were cut from this build; they are left
     // unassigned rather than compacted so the surviving numbers keep their history. 18-20 are
     // likewise unclaimed: 21 was RESERVED for the round loop in the design this game's round came
     // from and the packet that landed it here names 21 explicitly, so the reservation was honoured
     // rather than compacted down to 18 — a channel number that moved between a design doc and the
-    // code is exactly the kind of drift this ladder exists to stop. NEXT FREE CHANNEL IS 22 (18-20
-    // are available to a lane that wants a low number and does not mind the gap).
+    // code is exactly the kind of drift this ladder exists to stop. SFX-2 took 22 on 2026-09-19
+    // (PropImpactChannel), after checking this ladder on EVERY wave-2 branch on the remote rather
+    // than on its own base — the discipline INT-0 paid for when three lanes claimed 7896. NEXT
+    // FREE CHANNEL IS 23 (18-20 are available to a lane that wants a low number and does not mind
+    // the gap).
     //
     // Two systems written on different branches will both reach for the next number they can see,
     // so check this ladder against the tip you are merging into, not against the tip you branched
@@ -325,6 +328,39 @@ public static class NetProfile
     /// the fork for the one refusal that matters (a Watis World client reaching this
     /// server).</para></summary>
     public const int RoundChannel = 21;
+
+    /// <summary>The server's prop-impact announcement (SFX-2, 2026-09-19): one small unreliable
+    /// message per accepted contact — prop id, one intensity byte, the position — so that every
+    /// peer hears a can come off a shelf and not only the host.
+    ///
+    /// <para><b>Its own channel, and NOT <see cref="PropChannel"/>, although that is the obvious
+    /// neighbour.</b> Channel 4 carries two things already: the reliable ordered
+    /// <c>ApplyPropState</c> stream (grab, release, settle — the messages a player's hand
+    /// depends on) and the 30 Hz unreliable loose-transform stream. A burst of forty impacts
+    /// cannot be allowed to sit in front of a grab, which is the whole reason the packet says to
+    /// keep this out of the state RPC's lane; and sharing the unreliable loose stream would mean
+    /// an impact competing for delivery with the very transform updates that describe the
+    /// collapse it belongs to.</para>
+    ///
+    /// <para><b>Unreliable, deliberately, and this is the direction a cosmetic one-shot must
+    /// fail in.</b> Reliable-on-its-own-channel would also keep clear of the grab, but it would
+    /// buy delivery with ORDER and RETRANSMISSION: a shelf going over would queue its impacts,
+    /// and an impact that arrives 300 ms late is worse than one that never arrives — it is a
+    /// clank from a can that has already stopped rolling, in a game whose seeker is navigating
+    /// by sound. <c>HonkChannel</c>'s own entry above states the same rule for the same reason
+    /// ("a beat that arrives late has already missed the moment it was answering"). Nothing here
+    /// is state: a lost impact costs one sound and no peer diverges.</para>
+    ///
+    /// <para><b>22, the next free number</b> — see the ladder comment above, and note that it
+    /// was checked against every wave-2 branch on the remote rather than against this lane's
+    /// base, which is the discipline INT-0 paid for.</para>
+    ///
+    /// <para><b>No protocol bump for the channel</b>, on <c>SightChannel</c>'s reasoning: a new
+    /// method on an existing node, and a peer with no <c>PropImpact</c> to dispatch to plays no
+    /// impact, which is the state SFX-1 shipped rather than a wrong one. <see cref="ProtocolVersion"/>
+    /// is 16 for this wave already and SFX-2 deliberately does not bump it again — see the v16
+    /// entry.</para></summary>
+    public const int PropImpactChannel = 22;
 
     // --- Input codec bounds ------------------------------------------------------
     /// <summary>How many recent inputs each packet re-sends for loss tolerance (client) and the
