@@ -46,6 +46,7 @@ public partial class GameHud : CanvasLayer
     private const double PollIntervalSec = 0.1;
 
     private DayPhaseWidget? _dayPhase;
+    private RoundStripWidget? _roundStrip;
     private HudHowToPlayHint? _howToPlay;
     private double _poll;
 
@@ -84,8 +85,8 @@ public partial class GameHud : CanvasLayer
 
         // The bubble tally that used to take the HEAD of the top-centre column went with the
         // bubbles at the fork (BASE-1, 2026-09-19). The column still derives its rungs from
-        // measured heights rather than assuming what is above them, so the next occupant of that
-        // slot (HOLD-1's board, ROUND-1's phase/timer strip) drops in without moving anything.
+        // measured heights rather than assuming what is above them, which is exactly what let
+        // ROUND-1's strip drop in below without moving anything; HOLD-1's board is next.
 
         if (_profile.DayPhase)
         {
@@ -103,6 +104,24 @@ public partial class GameHud : CanvasLayer
                 PublishColumn();
             };
             CentreTop(_dayPhase);
+        }
+
+        // The round strip (ROUND-1): phase, clock, your role, round number, and the refusal
+        // sentence when a press is turned down. Centred on resize for the same reason the readout
+        // above it is — its line changes length every time the phase or the role does, and a fixed
+        // width would have to be re-guessed on each one.
+        if (_profile.RoundStrip)
+        {
+            _roundStrip = new RoundStripWidget();
+            _roundStrip.SetAnchorsPreset(Control.LayoutPreset.CenterTop);
+            _roundStrip.OffsetTop = Design.UiColumns.RoundStripTop;
+            root.AddChild(_roundStrip);
+            _roundStrip.Resized += () =>
+            {
+                CentreTop(_roundStrip);
+                PublishColumn();
+            };
+            CentreTop(_roundStrip);
         }
 
         // Bottom-right, and its own column: the permanent control-reference hint. Not polled —
@@ -129,6 +148,7 @@ public partial class GameHud : CanvasLayer
         // stay pushed down by a readout nobody is drawing (see UiColumns).
         Design.UiColumns.DayPhaseHeight = 0f;
         Design.UiColumns.BubbleCountHeight = 0f;
+        Design.UiColumns.RoundStripHeight = 0f;
         Design.UiColumns.HowToPlayHintHeight = 0f;
     }
 
@@ -146,6 +166,14 @@ public partial class GameHud : CanvasLayer
         if (_dayPhase != null)
             _dayPhase.OffsetTop = Design.UiColumns.DayPhaseTop;
 
+        // The round strip reports its height and takes its own top from the rung above. A HIDDEN
+        // strip reports 0 (it is hidden until the round is synced, and while paused), so the
+        // column closes up rather than reserving space for a readout nobody is drawing.
+        Design.UiColumns.RoundStripHeight =
+            shown && _roundStrip is { Visible: true } ? _roundStrip.Size.Y : 0f;
+        if (_roundStrip != null)
+            _roundStrip.OffsetTop = Design.UiColumns.RoundStripTop;
+
         // The bottom-right column. Published only — the hint is placed once, at build, and never
         // reads this back. See the trap on UiColumns.PlaceHowToPlayHint for why that separation is
         // load-bearing rather than tidiness.
@@ -162,9 +190,14 @@ public partial class GameHud : CanvasLayer
         _poll += delta;
         if (_poll < PollIntervalSec)
             return;
+        double sincePoll = _poll;
         _poll = 0;
 
         _dayPhase?.Tick();
+        // Fed the REAL interval since the last poll, not PollIntervalSec: the strip counts a
+        // refusal's two seconds down on this clock, and a hard-coded constant would silently
+        // change how long a sentence stays up the day somebody retunes the poll.
+        _roundStrip?.Tick(sincePoll);
     }
 
     /// <summary>Re-centres a top-anchored widget on its own current width. Called on every resize

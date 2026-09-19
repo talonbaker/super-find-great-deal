@@ -414,13 +414,39 @@ public partial class BotHarness : Node
         List<PhaseEventSample> runHistory = RunDriver.Instance != null
             ? new List<PhaseEventSample>(RunDriver.Instance.History)
             : new List<PhaseEventSample>();
+        // Hide-seek round instrumentation (ROUND-1): this peer's own converged view of the round,
+        // polled off HideSeekDriver.Instance every sample in exactly the style CycleDriver.Phase
+        // above is polled. `roundSynced` is the whole reason this is a block of fields rather than
+        // one: "Holding, round 1, nobody scoring" and "I have not heard from the server yet" are
+        // the same bytes, and the second is a true-sounding wrong answer — the trap the comment on
+        // the Sample record below was written about, honoured here.
+        //
+        // The SCORES are flattened to a string-keyed map because JSON object keys are strings and
+        // a peer id is an int; the round's whole wire design refuses to clamp an identity, so it
+        // is not about to lose one to a serializer. Run-RoundLoopSmoke.ps1 compares two peers'
+        // maps for equality at Tally, which is the "both received the same wire" assertion.
+        var round = Round.HideSeekDriver.Instance;
+        Round.HideSeekView roundView = round?.View ?? default;
+        var roundScores = new Dictionary<string, int>();
+        if (roundView.Scores is not null)
+            foreach (KeyValuePair<int, int> row in roundView.Scores)
+                roundScores[row.Key.ToString()] = row.Value;
+        var roundTally = roundView.LastTally;
         var sample = new Sample(Time.GetTicksMsec(),
             System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), // cross-process comparable
             Multiplayer.GetUniqueId(), peers, props,
             Voice.VoiceManager.Instance.GetReceiveCounts(),
             avatarCount, _propManager.RuntimePropCount, dupNames, heldPropId, colorIdx,
             cyclePhase, cyclesElapsed, cycleSynced,
-            runCycles, runEnded, runSynced, runHistory, entities);
+            runCycles, runEnded, runSynced, runHistory,
+            round?.Synced ?? false, (int)roundView.Phase, roundView.Round, roundView.RemainingSec,
+            roundView.HiderPeerId, roundView.SeekerPeerId, (int)roundView.Refusal,
+            roundView.FoundTick, roundScores,
+            roundTally is { } card
+                ? new RoundTallySample(card.RoundIndex, card.HiderPeerId, card.HiderGained,
+                    card.SeekerPeerId, card.SeekerGained, card.EndedByDisconnect)
+                : null,
+            entities);
         string line = JsonSerializer.Serialize(sample, JsonOptions);
         if (_writer != null)
         {
@@ -455,6 +481,11 @@ public partial class BotHarness : Node
         int AvatarCount, int PropCount, List<string> DupNames, int HeldPropId, int ColorIdx,
         float CyclePhase, int CyclesElapsed, bool CycleSynced,
         int RunCycles, bool RunEnded, bool RunSynced, List<PhaseEventSample> RunHistory,
+        // The hide-seek round (ROUND-1), with its own Synced flag for the reason stated two
+        // paragraphs down and at the computation site.
+        bool RoundSynced, int RoundPhase, int RoundIndex, float RoundRemaining,
+        int RoundHider, int RoundSeeker, int RoundRefusal, int RoundFoundTick,
+        Dictionary<string, int> RoundScores, RoundTallySample? RoundTally,
         // (The LoopUi / playthrough-flow / quota / bubble / honk columns were dropped with
         // their systems at the fork - BASE-1, 2026-09-19. What every one of them had in common is
         // the reason to copy the pattern rather than the fields: each recorded a SYNCED flag
@@ -462,6 +493,12 @@ public partial class BotHarness : Node
         // same bytes and the second is a true-sounding wrong answer. Anything ROUND-1 samples
         // here needs its own synced flag for that reason.)
         List<EntitySample> Entities);
+
+    // The frozen card as this peer folded it, or null before the first round finishes. Carries
+    // its own RoundIndex because the loop's index has already advanced by the time the card
+    // exists — see HideSeekTally's doc.
+    private sealed record RoundTallySample(int RoundIndex, int HiderPeerId, int HiderGained,
+        int SeekerPeerId, int SeekerGained, bool EndedByDisconnect);
 
     // One server-simulated NetworkedEntity as this peer sees it: name, rendered position, and the
     // peak per-frame render step since the last sample (teleport frames excluded — see the

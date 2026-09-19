@@ -138,6 +138,7 @@ public class HudLayoutTests
     {
         UiColumns.DayPhaseHeight = 34f;
         UiColumns.QuotaStripHeight = 52f;
+        UiColumns.RoundStripHeight = 0f;
 
         Assert.Equal(UiColumns.Edge, UiColumns.DayPhaseTop);
         // The positive control for this rule: at the margin they WOULD collide. If the strip's top
@@ -155,8 +156,10 @@ public class HudLayoutTests
     {
         UiColumns.DayPhaseHeight = 0f;
         UiColumns.QuotaStripHeight = 0f;
+        UiColumns.RoundStripHeight = 0f;
 
         Assert.Equal(UiColumns.Edge, UiColumns.QuotaStripTop);
+        Assert.Equal(UiColumns.Edge, UiColumns.RoundStripTop);
         Assert.Equal(UiColumns.Edge, UiColumns.PhaseToastTop);
     }
 
@@ -170,8 +173,41 @@ public class HudLayoutTests
     {
         UiColumns.DayPhaseHeight = 34f;
         UiColumns.QuotaStripHeight = stripHeight;
+        UiColumns.RoundStripHeight = 0f;
 
         Assert.Equal(UiColumns.QuotaStripTop + stripHeight + UiColumns.Gap, UiColumns.PhaseToastTop);
+    }
+
+    /// <summary>
+    /// ROUND-1's strip is a rung of its own, and the two occupants that would sit above it in
+    /// another world are BOTH absent in this one by profile — so the test that matters is not
+    /// "does it clear them" but "does it derive its top rather than assume the margin".
+    ///
+    /// <para>Checked in both configurations: alone (the supermarket, where it must sit AT the
+    /// margin because nothing is above it) and under a full column (a world that ran a clock and a
+    /// cache strip and a round, where it must clear both). A strip that hardcoded
+    /// <c>UiColumns.Edge</c> would pass the first and land across the cache strip in the
+    /// second.</para>
+    /// </summary>
+    [Fact]
+    public void TheRoundStrip_TakesTheHeadWhenAlone_AndStacksWhenItIsNot()
+    {
+        UiColumns.DayPhaseHeight = 0f;
+        UiColumns.QuotaStripHeight = 0f;
+        UiColumns.RoundStripHeight = 44f;
+        Assert.Equal(UiColumns.Edge, UiColumns.RoundStripTop);
+        Assert.Equal(UiColumns.Edge + 44f + UiColumns.Gap, UiColumns.PhaseToastTop);
+
+        UiColumns.DayPhaseHeight = 34f;
+        UiColumns.QuotaStripHeight = 52f;
+        Assert.True(UiColumns.RoundStripTop >= UiColumns.QuotaStripTop + 52f,
+            "the round strip starts inside the winter-cache strip");
+        Assert.True(UiColumns.PhaseToastTop >= UiColumns.RoundStripTop + 44f,
+            "the phase toast starts inside the round strip");
+
+        UiColumns.DayPhaseHeight = 0f;
+        UiColumns.QuotaStripHeight = 0f;
+        UiColumns.RoundStripHeight = 0f;
     }
 
     // --- the bottom-left column ----------------------------------------------------------------

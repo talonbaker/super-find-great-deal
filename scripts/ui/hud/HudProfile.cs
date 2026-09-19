@@ -58,6 +58,16 @@ public readonly struct HudProfile
     /// it, and every profile below sets it false.</summary>
     public bool BubbleCount { get; private init; }
 
+    /// <summary>Top-centre: the round's phase, clock, your role and the round number
+    /// (<see cref="RoundStripWidget"/>, ROUND-1). The one readout this game actually earns — every
+    /// other flag on this struct answers "does this world run the system behind that number", and
+    /// the supermarket runs exactly one such system.
+    ///
+    /// <para>On for any world with a round, off elsewhere. The widget holds itself off the frame
+    /// until <c>HideSeekDriver</c> is synced regardless, so a world that leaves this on and never
+    /// starts a round shows nothing rather than a plausible "HOLDING · ROUND 1".</para></summary>
+    public bool RoundStrip { get; private init; }
+
     /// <summary>Bottom-right: the permanent "ESC · HOW TO PLAY" hint
     /// (<see cref="HudHowToPlayHint"/>). On everywhere by default, unlike every other flag here.
     ///
@@ -76,6 +86,7 @@ public readonly struct HudProfile
         DayPhase = true,
         QuotaStrip = true,
         BubbleCount = false,
+        RoundStrip = false,
         HowToPlayHint = true,
     };
 
@@ -96,6 +107,7 @@ public readonly struct HudProfile
         DayPhase = false,
         QuotaStrip = false,
         BubbleCount = false,
+        RoundStrip = true,
         HowToPlayHint = true,
     };
 

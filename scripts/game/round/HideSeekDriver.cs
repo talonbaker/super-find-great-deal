@@ -198,12 +198,29 @@ public partial class HideSeekDriver : Node
         if (!_isServer)
             return;
 
-        _script?.Advance(delta);
+        // THE SCRIPT CLOCK ONLY RUNS ONCE SOMEBODY IS HERE, and that is not a nicety. Measured
+        // from server boot, a schedule would be racing the clients' own launch: the server is
+        // listening seconds before the first Godot client has finished loading, so a `start@8`
+        // could fire into an empty room, be refused for the only time it was ever going to fire,
+        // and leave a suite watching a round that simply never begins. That is precisely the
+        // "a step whose correctness depends on WHEN an earlier step landed" failure
+        // .claude/rules/test-suite.md records, and the fix there was the same one: derive the
+        // schedule from the thing it has to outlive.
+        if (_roster.Count > 0)
+            _script?.Advance(delta);
 
         HideSeekPhase before = _state.Phase;
         _state = HideSeekLoop.Step(_state, CollectFacts(), (float)delta, _tuning);
         foreach (IRoundFactSource source in _sources)
             source.AfterStep();
+
+        // Logged on the server as well as broadcast, because a refusal is the one outcome whose
+        // whole point is that nobody is left guessing. A suite reading a round that never started
+        // finds the reason here rather than inferring it from a phase that did not move.
+        if (_state.Refusal != HideSeekRefusal.None)
+            GD.Print($"[round] refused: {_state.Refusal} — "
+                     + $"{HideSeekText.RefusalSentence(_state.Refusal)} "
+                     + $"(phase={_state.Phase} humans={_roster.Count})");
 
         if (_state.Phase != before)
             OnServerPhaseChanged(before, _state.Phase);

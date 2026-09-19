@@ -38,10 +38,11 @@ public static class UiColumns
     public const float Gap = UiScale.SpaceSnug;
 
     // --- the top-centre column ------------------------------------------------------------
-    // Three independent CanvasLayers, top to bottom: the day/phase readout (GameHud, layer 80),
-    // the winter-cache strip (QuotaStripWidget, layer 82), and the transient phase toast
-    // (PhaseToastLayer, layer 60). Each reports its own occupied height; each reads the rung
-    // above it. A rung that is absent or hidden reports 0 and the column simply closes up.
+    // Independent CanvasLayers, top to bottom: the day/phase readout (GameHud, layer 80), the
+    // winter-cache strip (QuotaStripWidget, layer 82), the round strip (GameHud, layer 80 —
+    // ROUND-1), and the transient phase toast (PhaseToastLayer, layer 60). Each reports its own
+    // occupied height; each reads the rung above it. A rung that is absent or hidden reports 0 and
+    // the column simply closes up.
 
     /// <summary>Height the day/phase readout is currently occupying; 0 when no HUD renders.
     /// Written by <c>GameHud</c>, read by everything below it.</summary>
@@ -74,9 +75,30 @@ public static class UiColumns
     /// frame margin when there is no HUD (the flow-screen demo, the self-test).</summary>
     public static float QuotaStripTop => Below(DayPhaseTop, DayPhaseHeight);
 
-    /// <summary>Top offset for the transient phase toast — under both persistent readouts, so a
-    /// sunset line never lands across the strip it is telling the player to go and fill.</summary>
-    public static float PhaseToastTop => Below(QuotaStripTop, QuotaStripHeight);
+    /// <summary>Height the round strip is currently occupying (ROUND-1, 2026-09-19); 0 while the
+    /// round is unsynced or this world's <c>HudProfile</c> never built it. Written by
+    /// <c>GameHud</c>.
+    ///
+    /// <para>It is a rung of its own rather than a rename of the cache strip's, even though the
+    /// two are never on screen together in this game: <c>QuotaStripHeight</c> is still published
+    /// and still measured by the layout self-test, and quietly re-pointing an existing rung at a
+    /// different occupant is how a column's arithmetic stops matching what is drawn.</para>
+    ///
+    /// <para><b>Measured, not constant</b>, for the reason the whole top-centre column is: this
+    /// strip's line grows and shrinks with its own content — "HOLDING · YOU HIDE · ROUND 1" is one
+    /// row, and a refused press adds a second.</para></summary>
+    public static float RoundStripHeight { get; set; }
+
+    /// <summary>Top offset for the round strip: under the cache strip if there is one, under the
+    /// day/phase readout if there is one, or at the frame margin. In the supermarket the two rungs
+    /// above are both absent by profile, so it takes the head of the column — but it DERIVES that
+    /// rather than assuming it, which is what makes a future world that wants both a stacked pair
+    /// instead of the collision this class exists to prevent.</summary>
+    public static float RoundStripTop => Below(QuotaStripTop, QuotaStripHeight);
+
+    /// <summary>Top offset for the transient phase toast — under every persistent readout, so a
+    /// toast never lands across the strip it is talking about.</summary>
+    public static float PhaseToastTop => Below(RoundStripTop, RoundStripHeight);
 
     // --- the bottom-left column ------------------------------------------------------------
     // The room code (Gameplay's own Hud layer) sits a fixed clearance above the bottom edge. It

@@ -56,7 +56,9 @@ public sealed class ScriptedRoundFactSource : IRoundFactSource
     }
 
     /// <summary>Advances the schedule. Called by the driver once per sim tick, BEFORE the facts
-    /// are read, so a verb due this tick lands on this tick rather than the next.
+    /// are read, so a verb due this tick lands on this tick rather than the next — and only once
+    /// at least one player is present, so the schedule is measured from the moment the round could
+    /// begin rather than from server boot (see the call site).
     ///
     /// <para>A tick long enough to pass several marks fires them all, in order, on that tick —
     /// the same "never drop a mark" shape <c>BotHarness.MaybeCapture</c> uses, and it matters here
