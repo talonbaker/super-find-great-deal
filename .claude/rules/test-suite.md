@@ -718,7 +718,8 @@ on `feat/2026-09-19-door-1`, machine otherwise idle:
 | seeker's deepest z after the burst | **1.12–1.14 m** against the 5.0 m task-room face |
 | best prop movement inside the burst radius, on a CLIENT's log | **0.99–1.38 m** (bar 0.3 m) |
 
-### The port ladder now reads 7893/7894/7895 (CarryNet) · 7896 (RoundLoop) · 7897 (FirstPerson) · 7898 (Place) · 7899 (VoiceRoom) · **7900 (BurstDoor)** · 7901 · 7902+ (SFX-1)
+### The port ladder as DOOR-1 saw it — **superseded**: one ladder table now lives in the
+### REACH-1 section below (INT-0B, 2026-09-19). DOOR-1 kept 7900; the reasoning below stands.
 
 **INT-0's "three lanes off one base chose the same port" happened again one wave later, with the
 ladder comment already in place, and the missing sentence is this: a port is not claimed until it
@@ -843,7 +844,7 @@ per the SHADER-2 entry above makes the clearing stronger rather than weaker.
 | Suite | Marathon | Standalone, `-SkipBuild`, machine busy | The quantity |
 |---|---|---|---|
 | `Carry: drift (hold+walk)` | FAIL | **3/3 PASS** | mean **0.997–0.998 m**, peak **1.067–1.071 m**, growth 0.001–0.002 m, n=83 |
-| `Voice: proximity gate` | FAIL | **3/3 PASS** | vgate-pa: far **1066–1101** packets at 45.7 m, ~2195 relays taken by the PA exemption, 0 gated |
+| `Voice: proximity gate` | FAIL | **3/3 PASS** | **WITHDRAWN — see the note at the end of this section (INT-0B, 2026-09-19): the red was an external kill, not a flake** |
 
 **`Carry: drift` is not on the flake list above and its red belongs to the family that is.** The
 failing lines are `prop 1 not held by bot ... during walk window` and `too few
@@ -870,6 +871,20 @@ recorded, and its `.err.log` is empty. Read the failing PHASE first: phases 1 an
 `ok` in the same failing run, so a red here that names `vgate-on` or `vgate-off` is a different
 animal from one that names a bot exit code.
 
+> **WITHDRAWN — `Voice: proximity gate` is NOT load-flaky** (INT-0B, 2026-09-19, on the
+> orchestrator's ruling; SFX-2 withdraws the same entry on its own branch and had not landed when
+> this tree was built, so it is withdrawn here). **A bot that stops mid-run with an empty
+> `.err.log` is what an EXTERNAL KILL looks like** — another session reaching for a Godot
+> process that was not its own — and that is what happened to SFX-1's run. It is not a property
+> of this suite, and leaving it on the flake list would teach the next lane to explain away a
+> real red here. SFX-1's paragraph above is kept verbatim rather than deleted (this file's own
+> header forbids deleting another agent's entry) and this note is the correction. **The
+> discriminator that matters is the one the rest of that paragraph already gives: read the
+> failing PHASE.** A red naming `vgate-on` or `vgate-off` is about the gate; a bot exit code is
+> about the machine, and if the bot's own log stops mid-run, look for a neighbour's kill before
+> looking at the suite. **Stop Godot only by PIDs you recorded; never `taskkill /IM`, never
+> `Get-Process godot* | Stop-Process`** — that rule is what this entry cost.
+
 ## REACH-1: udp/7903, and four measured things about the placement audit (2026-09-19)
 
 ### The port ladder, written down rather than recomputed
@@ -877,17 +892,27 @@ animal from one that names a bot exit code.
 `tests/Run-ReachTest.ps1` claims **udp/7903** for all four of its phases. The ladder as it
 stands, which is the list to read before picking the next one:
 
-| Port | Suite |
-|---|---|
-| 7893 / 7894 / 7895 | `Run-CarryNetTest.ps1` (contention / authority / teleport) |
-| 7896 | `Run-RoundLoopSmoke.ps1` (ROUND-1) |
-| 7897 | `Run-FirstPersonTest.ps1` (FP-1) |
-| 7898 | `Run-PlaceTest.ps1` (CARRY-1) |
-| 7899 | VOICE-1 |
-| 7900 | DOOR-1 |
-| 7901 | claimed in the same wave |
-| 7902 | SFX-1 |
-| **7903** | **`Run-ReachTest.ps1` (REACH-1)** |
+**THE LADDER — one table, and this is it** (consolidated by INT-0B, 2026-09-19, when the six
+wave-2 lanes were merged and their five separate part-tables could finally be resolved into one).
+Every number below is a REGISTERED suite's bind port on the merged tree, audited by grepping
+every `$Port` in `tests/` after the last merge: **all distinct.** Read this table before picking
+the next one, and take **7905**.
+
+| Port | Suite | Lane |
+|---|---|---|
+| 7893 / 7894 / 7895 | `Run-CarryNetTest.ps1` (contention / authority / teleport) | CARRY-1 |
+| 7896 | `Run-RoundLoopSmoke.ps1` | ROUND-1 (MATCH-1 extended it; port unchanged) |
+| 7897 | `Run-FirstPersonTest.ps1` | FP-1 (moved off 7896 by INT-0) |
+| 7898 | `Run-PlaceTest.ps1` | CARRY-1 (moved off 7896 by INT-0) |
+| 7899 | `Run-VoiceRoomTest.ps1` | VOICE-1 |
+| 7900 | `Run-BurstDoorTest.ps1` | DOOR-1 |
+| 7901 | *reserved, no suite yet* | BTN-1 (merges at INT-1) |
+| 7902 | `Run-MaterialSfxTest.ps1` | SFX-1 (SFX-2 merges at INT-1 on the same port) |
+| 7903 | `Run-ReachTest.ps1` | REACH-1 |
+| **7904** | **`Run-RoundClockTest.ps1`** (and `Capture-RoundClock.ps1`, unregistered) | **CLOCK-1** |
+
+Everything below 7893 is the pre-fork ladder and is unchanged: 7777, 7778, 7788, 7799, 7807,
+7809/7810, 7815, 7816, 7817, 7818, 7821, 7822, 7830, 7831, 7834.
 
 7903 was **given by the orchestrator, not computed from a snapshot of `tests/`** — which is
 INT-0's lesson above applied rather than re-learned. 7899-7902 do not appear in this branch's
@@ -1012,14 +1037,9 @@ computed from a snapshot of `tests/` is not free while five lanes are branched o
 none can see the others**, which is exactly the shape of wave 2. So the orchestrator hands the
 numbers out and each lane WRITES DOWN the one it was given, here and in its own script's header:
 
-| Port | Suite | Lane |
-|---|---|---|
-| 7893 / 7894 / 7895 | `Run-CarryNetTest.ps1` (three phases) | CARRY-1 |
-| 7896 | `Run-RoundLoopSmoke.ps1` | ROUND-1 |
-| 7897 | `Run-FirstPersonTest.ps1` | FP-1 (moved off 7896 by INT-0) |
-| 7898 | `Run-PlaceTest.ps1` | CARRY-1 (moved off 7896 by INT-0) |
-| 7899–7903 | claimed by wave-2 lanes | REACH-1, DOOR-1, VOICE-1, SFX-1, BTN-1 |
-| **7904** | **`Run-RoundClockTest.ps1`** | **CLOCK-1** |
+**CLOCK-1 took 7904.** Its table has been folded into the one ladder table in the REACH-1
+section above (INT-0B, 2026-09-19) rather than kept as a fifth partial copy — five lanes each
+writing down the part of the ladder they could see is exactly how 7899 was claimed twice.
 
 **A collision at RUN time on one of these is another lane's live process, not a defect.** That is
 the distinction INT-0 drew and it is worth restating from the other side: a registry collision

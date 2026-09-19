@@ -22,3 +22,26 @@ paths:
 - **Godot silently strips `project.godot` settings that match the engine default**,
   comments included. Do not treat an absent line as evidence a setting was never
   set; the export presets are the durable guard.
+
+## Two more, both measured on the supermarket's first LEVEL prefab (CLOCK-1, 2026-09-19)
+
+Cited from [`docs/agents/handoffs/2026-09-19-CLOCK-1.md`](../../docs/agents/handoffs/2026-09-19-CLOCK-1.md)
+§3.1 and §3.2, and added here by INT-0B because CLOCK-1 deliberately left this shared file alone
+while five lanes were branched off one base.
+
+- **An `[Export]` on a nested PackedScene instance line is SILENTLY DROPPED on this build.**
+  `RoundClock` carried `[Export] public string Room` and each room's `.tscn` set `room = "..."`
+  on the instance line; it read back as the empty string on all three clocks, with no error and
+  nothing in a diff to see — because the NATIVE properties on the same line (transform, mesh,
+  mass) apply perfectly, so the clock hangs in exactly the right place not knowing where it is.
+  **Derive identity from the node NAME instead** (`RoundClock.ResolveRoom` walks up to the
+  section scene's root name); a node name is native and survives instancing. This is the THIRD
+  time this repo has paid for the same trap — `PropManager.AuthoredKindOf` and
+  `Carryable.LoadLiftM` are the other two.
+- **Every LEVEL prefab must be listed in `SupermarketWorldSelfTest.SectionScenes`, or the
+  packed-vs-live check cannot see it.** `CountNodes` stops at an instance boundary (a node with
+  its own `SceneFilePath` is that file's business), which is the rule the PACKED side already
+  used — so a prefab that builds a child in `_Ready` is invisible from its room's count.
+  Measured: `AddChild(new Node3D())` planted in `RoundClock._Ready` left all three rooms green
+  at `packed=27/38/44`, and failed only once `RoundClock.tscn` was in `SectionScenes`
+  (`packed but 5 live`). There is no mechanism that notices a prefab was forgotten; it is a list.
