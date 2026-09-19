@@ -242,30 +242,76 @@ public class MaterialSfxTests
 
     // --- Once per contact --------------------------------------------------------------------
 
-    /// <summary>Exactly one of two colliding props plays the impact, and it is a TOTAL order so
-    /// there is no tie to fall through. Godot reports one contact to both bodies; the loser
-    /// staying silent is the difference between a hit and a flam.</summary>
+    /// <summary>Exactly one of two colliding props plays the impact, and the one that fires is
+    /// whichever was ASKED first. Godot reports one contact to both bodies; the loser staying
+    /// silent is the difference between a hit and a flam.</summary>
     [Fact]
-    public void PropOnPropContact_PicksExactlyOneOfTheTwoBodies()
+    public void PropOnPropContact_FiresForTheFirstCallerAndSuppressesTheSecond()
     {
-        foreach ((ulong a, ulong b) in new[] { (1ul, 2ul), (2ul, 1ul), (0ul, ulong.MaxValue), (7ul, 8ul) })
-        {
-            bool aFires = Carryable.WinsPropOnPropContact(a, b);
-            bool bFires = Carryable.WinsPropOnPropContact(b, a);
-            Assert.True(aFires ^ bFires,
-                $"ids {a}/{b}: {(aFires && bFires ? "BOTH" : "NEITHER")} body would play the impact");
-        }
+        var claims = new Dictionary<(ulong, ulong), ulong>();
+        Assert.True(Carryable.ClaimPropOnPropContact(claims, 7, 9, 1000, Carryable.PairClaimWindowMsec));
+        Assert.False(Carryable.ClaimPropOnPropContact(claims, 9, 7, 1002, Carryable.PairClaimWindowMsec));
+        // Order-independent: the pair is a pair however it is named.
+        Assert.False(Carryable.ClaimPropOnPropContact(claims, 7, 9, 1005, Carryable.PairClaimWindowMsec));
     }
 
-    /// <summary>The same pair always picks the same winner, whichever way round it is asked, and
-    /// a body never beats itself — the degenerate case a self-collision would produce.</summary>
+    /// <summary><b>The property that the instance-id rule this replaced did not have.</b> That
+    /// rule picked a winner up front, so when only the LOSER was ever asked — which is what a
+    /// can falling onto an already-settled can actually does, because a frozen kinematic body is
+    /// never told about the contact — nothing played at all. Here, whoever asks, fires.</summary>
     [Fact]
-    public void PropOnPropContact_IsStableAndNeverPicksABodyAgainstItself()
+    public void PropOnPropContact_IsNeverSilentWhenOnlyOneBodyIsAsked()
     {
-        Assert.True(Carryable.WinsPropOnPropContact(3, 9));
-        Assert.True(Carryable.WinsPropOnPropContact(3, 9));
-        Assert.False(Carryable.WinsPropOnPropContact(9, 3));
-        Assert.False(Carryable.WinsPropOnPropContact(5, 5));
+        var claims = new Dictionary<(ulong, ulong), ulong>();
+        // Only the higher id is ever asked. It must still fire.
+        Assert.True(Carryable.ClaimPropOnPropContact(claims, 99, 1, 1000, Carryable.PairClaimWindowMsec));
+        // And symmetrically, only the lower.
+        Assert.True(Carryable.ClaimPropOnPropContact(claims, 2, 98, 1000, Carryable.PairClaimWindowMsec));
+    }
+
+    /// <summary>Two genuinely separate collisions between the same pair both sound: the claim
+    /// expires. The window is far under the 0.4 s per-body cooldown, so this can never be the
+    /// thing that merges two hits.</summary>
+    [Fact]
+    public void PropOnPropContact_ClaimExpiresSoASecondCollisionIsHeard()
+    {
+        var claims = new Dictionary<(ulong, ulong), ulong>();
+        Assert.True(Carryable.ClaimPropOnPropContact(claims, 3, 4, 1000, Carryable.PairClaimWindowMsec));
+        Assert.False(Carryable.ClaimPropOnPropContact(claims, 3, 4,
+            1000 + Carryable.PairClaimWindowMsec, Carryable.PairClaimWindowMsec));
+        Assert.True(Carryable.ClaimPropOnPropContact(claims, 3, 4,
+            1001 + Carryable.PairClaimWindowMsec, Carryable.PairClaimWindowMsec));
+        Assert.True(Carryable.PairClaimWindowMsec < 400,
+            "the claim window must stay well under Carryable's 0.4 s per-body cooldown, or it "
+            + "becomes the thing that merges two separate collisions");
+    }
+
+    /// <summary>Different pairs never suppress each other — a shelf going over is many
+    /// simultaneous contacts, and each one is its own sound.</summary>
+    [Fact]
+    public void PropOnPropContact_DifferentPairsAreIndependent()
+    {
+        var claims = new Dictionary<(ulong, ulong), ulong>();
+        Assert.True(Carryable.ClaimPropOnPropContact(claims, 1, 2, 500, Carryable.PairClaimWindowMsec));
+        Assert.True(Carryable.ClaimPropOnPropContact(claims, 2, 3, 500, Carryable.PairClaimWindowMsec));
+        Assert.True(Carryable.ClaimPropOnPropContact(claims, 1, 3, 500, Carryable.PairClaimWindowMsec));
+        Assert.False(Carryable.ClaimPropOnPropContact(claims, 3, 1, 500, Carryable.PairClaimWindowMsec));
+    }
+
+    /// <summary>The table does not grow without bound over a long session. 400 distinct pairs
+    /// all expired, then one fresh claim: the sweep must leave the table small rather than
+    /// carrying every collision the session ever had.</summary>
+    [Fact]
+    public void PropOnPropContact_PrunesExpiredClaims()
+    {
+        var claims = new Dictionary<(ulong, ulong), ulong>();
+        for (ulong i = 0; i < 400; i++)
+            Carryable.ClaimPropOnPropContact(claims, i, i + 1000, 1000, Carryable.PairClaimWindowMsec);
+        int beforeSweep = claims.Count;
+        Carryable.ClaimPropOnPropContact(claims, 5000, 5001,
+            1000 + Carryable.PairClaimWindowMsec * 10, Carryable.PairClaimWindowMsec);
+        Assert.True(beforeSweep > 100, $"POSITIVE CONTROL FAILED: only {beforeSweep} claims were recorded, so there was nothing to prune");
+        Assert.True(claims.Count < 10, $"{claims.Count} claims survived a sweep in which every one of {beforeSweep} had expired");
     }
 
     // --- Material resolution ------------------------------------------------------------------

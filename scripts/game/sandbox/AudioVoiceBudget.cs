@@ -16,15 +16,25 @@ namespace MpFoundation.Game.Sandbox;
 /// <b>The arithmetic, in full.</b>
 /// <code>
 ///   5   VoiceSpeaker      one AudioStreamPlayer3D per REMOTE peer, Protocol.MaxPlayers - 1
-/// + 14  SfxLab one-shots  the pooled positional one-shot slots (PoolSize)
-/// +  5  SfxLab loops      the looping partition this packet adds (LoopPoolSize)
+/// + 18  SfxLab one-shots  the pooled positional one-shot slots (PoolSize)
+/// +  1  SfxLab loops      the looping partition (LoopPoolSize)
 /// ────
 ///  24   of a documented ceiling of 24
 /// </code>
 ///
+/// <b>That split was 5 / 14 / 5 until SFX-1 (2026-09-19), and the ceiling did not move.</b>
+/// Which is the shape this class was built to make possible: the sum is checked, so reallocating
+/// between partitions is a two-constant edit that cannot silently overrun, and the reason for
+/// this one is measured rather than preferred — forty props released together stole 26 of 54
+/// one-shots at a pool of 14 (<c>tests/Run-MaterialSfxTest.ps1</c> phase 2, 48% against a 10%
+/// bar). The four slots came off the loop partition because its only member is an outdoor fire
+/// bed and this game is indoors. See <see cref="SfxLab.PoolSize"/> and
+/// <see cref="SfxLab.LoopPoolSize"/> for the full argument, including why the loop partition
+/// keeps one slot instead of going to zero.
+///
 /// It lands exactly on the ceiling, which is deliberate and is the reason
-/// <see cref="SfxLab.LoopPoolSize"/> is 5 rather than the 6 the plan's `[playtest: K=6]` might
-/// suggest. §15's K=6 is the **impostor-glow** threshold — a draw-call budget. The audible
+/// <see cref="SfxLab.LoopPoolSize"/> was 5 rather than the 6 the plan's `[playtest: K=6]` might
+/// suggest (and is 1 today — see the note above). §15's K=6 is the **impostor-glow** threshold — a draw-call budget. The audible
 /// cutoff falls out of a **voice** budget, and the two are different budgets that happen to be
 /// described by one letter. Five is what was left after the speakers and the one-shot pool were
 /// paid for, and the alternative was taking a slot back off the one-shot pool — which is the pool

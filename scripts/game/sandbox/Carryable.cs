@@ -221,29 +221,69 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
     public static float ImpactIntensity(float relativeSpeed) =>
         Mathf.Clamp((relativeSpeed - ThunkSpeedThreshold) / (ImpactSpeedCeiling - ThunkSpeedThreshold), 0f, 1f);
 
-    /// <summary><b>Which of two colliding props plays the impact</b> — the one with the LOWER
-    /// instance id, and the other stays silent for that contact.
+    /// <summary><b>Which of two colliding props plays the impact: whichever one asks first.</b>
+    /// The first call for a pair inside <paramref name="windowMsec"/> returns true and records
+    /// the claim; a second call for the same pair inside the window returns false. Pure, and it
+    /// takes its clock and its table as arguments, so the Godot-free suite can drive it.
     ///
-    /// <para><b>Why this rule exists.</b> Godot reports one prop-on-prop contact to BOTH bodies,
-    /// so an unguarded handler fires the impact twice: two sounds, a millisecond apart, at almost
-    /// the same position. That is not "louder", it is a flam, and with a shelf of cans going over
-    /// it is also two voices out of fourteen per collision instead of one.</para>
+    /// <para><b>Why a rule is needed at all.</b> Godot reports one prop-on-prop contact to BOTH
+    /// bodies, so an unguarded handler fires the impact twice: two sounds a millisecond apart at
+    /// almost the same position. That is not "louder", it is a flam, and with a shelf of cans
+    /// going over it also spends two voices out of fourteen per collision.</para>
     ///
-    /// <para><b>Why instance id rather than the faster body.</b> Both were on the table. Speed is
-    /// the tempting rule — the thing that did the hitting ought to be the thing you hear — but it
-    /// is not a TOTAL order: two props at identical speeds (a shelf collapsing, where everything
-    /// is in the same free fall) tie, and a tie means both fire, which is the bug. Instance id is
-    /// unique by construction, so exactly one body wins every contact, always. The cost is that
-    /// the sound comes from the wrong one of two positions a few centimetres apart, which is
-    /// inaudible; the benefit is that "fires once" is true by construction rather than true
-    /// in the cases anyone tested.</para>
+    /// <para><b>Why FIRST-COME, and not "the lower instance id wins", which is what this was
+    /// until it was measured.</b> An id comparison is a total order and looks strictly better —
+    /// no ties, no state, no clock. It has one fatal property: it picks the winner before
+    /// knowing whether the winner will ever be asked. Measured on the stacked-can fixture in
+    /// <c>tests/Run-MaterialSfxTest.ps1</c> — a can dropped onto a can that had already settled
+    /// produced NO sound at all, run after run. Only the FALLING can got a <c>body_entered</c>
+    /// (the resting one is frozen kinematic, and Godot never asked it anything), and it happened
+    /// to hold the higher instance id because it was seeded second. The rule silenced the only
+    /// body in a position to speak.</para>
+    ///
+    /// <para><b>First-come cannot fail that way</b>: whoever is actually asked, fires. It costs a
+    /// small table and a clock, and it degrades in the right direction — the worst case is a
+    /// second callback arriving after the window, which plays one extra sound rather than
+    /// swallowing the only one.</para>
     ///
     /// <para>Process-local, and that is correct rather than merely tolerable: this is a
-    /// client-local cosmetic decision made independently on every peer, and within any one
-    /// process both bodies compare the same way, so each peer plays exactly one sound. Nothing
-    /// requires peers to agree on WHICH body played it.</para></summary>
-    public static bool WinsPropOnPropContact(ulong selfInstanceId, ulong otherInstanceId) =>
-        selfInstanceId < otherInstanceId;
+    /// client-local cosmetic decision taken independently on every peer, and nothing requires two
+    /// peers to agree on WHICH body played it — only that each peer plays it once.</para></summary>
+    public static bool ClaimPropOnPropContact(
+        System.Collections.Generic.IDictionary<(ulong, ulong), ulong> claims,
+        ulong a, ulong b, ulong nowMsec, ulong windowMsec)
+    {
+        (ulong, ulong) key = a < b ? (a, b) : (b, a);
+        if (claims.TryGetValue(key, out ulong claimedAt) && nowMsec - claimedAt <= windowMsec)
+            return false;
+        claims[key] = nowMsec;
+        // Opportunistic prune, so a long session of collisions cannot grow this without bound.
+        // Only when the table is big enough to be worth walking, and only of entries too old to
+        // suppress anything.
+        if (claims.Count > PairClaimPruneAt)
+        {
+            var stale = new System.Collections.Generic.List<(ulong, ulong)>();
+            foreach (System.Collections.Generic.KeyValuePair<(ulong, ulong), ulong> kv in claims)
+            {
+                if (nowMsec - kv.Value > windowMsec)
+                    stale.Add(kv.Key);
+            }
+            foreach ((ulong, ulong) k in stale)
+                claims.Remove(k);
+        }
+        return true;
+    }
+
+    /// <summary>How long one prop-on-prop contact stays claimed. Comfortably longer than the few
+    /// physics ticks Godot can take to tell the second body, and far shorter than the 0.4 s
+    /// per-body cooldown, so it can never merge two genuinely separate collisions.</summary>
+    public const ulong PairClaimWindowMsec = 60;
+
+    /// <summary>Table size at which <see cref="ClaimPropOnPropContact"/> bothers to sweep — above
+    /// the number of distinct pairs one frame of a collapsing shelf can produce.</summary>
+    private const int PairClaimPruneAt = 64;
+
+    private static readonly System.Collections.Generic.Dictionary<(ulong, ulong), ulong> PairClaims = new();
 
     /// <summary>Set by NetworkedProp on a networked prop's body. When true, this class's own
     /// KillPlaneY safety net (below) stands down — the networked layer owns out-of-bounds
@@ -422,6 +462,14 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
                 mesh = new SphereMesh { Radius = ProduceRadiusM, Height = ProduceRadiusM * 2f };
                 collider = new SphereShape3D { Radius = ProduceRadiusM };
                 Mass = ProduceMassKg;
+                // Damped, matching Produce.tscn, and for the reason that prefab records: an
+                // undamped sphere on a flat floor never stops. Measured — a code-built produce
+                // dropped 0.27 m rolled 1.9 m and the server logged "rest not good prop=3
+                // OutsideRoomBounds". The two birth paths have to agree or the seeded fixture
+                // stops being the same object as the shelved product, which is the whole reason
+                // the dimensions are shared constants.
+                LinearDamp = 2.0f;
+                AngularDamp = 3.0f;
                 break;
             default:
                 mesh = new BoxMesh { Size = new Vector3(0.44f, 0.44f, 0.44f) };
@@ -552,16 +600,13 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
         Release(-_lastAnchor.Basis.Z * 1.3f + Vector3.Up * 2.2f);
     }
 
-    /// <remarks>SFX-1: this now REPORTS the throw. It never did — the only
-    /// <c>ActorEvent.Thrown</c> fire site in the tree was <c>SandboxAvatar</c>'s offline
-    /// <c>CarryController.Thrown</c> hook, which no networked throw ever reaches (a networked
-    /// throw comes down <c>PropManager.RequestThrow</c> and lands here). The default profile maps
-    /// no Thrown response, so a crate is exactly as silent as it was.</remarks>
-    public virtual void OnThrown(Vector3 impulse)
-    {
-        ActorFx.Fire(GetParent(), Profile, ActorEvent.Thrown, GlobalPosition);
-        Release(impulse);
-    }
+    /// <remarks><b>Deliberately does NOT fire <c>ActorEvent.Thrown</c></b>, and SFX-1 tried it
+    /// here first. This entry point is reached only from <c>NetworkedProp.BeginLooseServer</c>,
+    /// which is server-only — so a throw announced here is a throw only the host can hear, and
+    /// the remote player watches a can leave a hand in silence. The fire lives in
+    /// <c>NetworkedProp.BeginLoose</c> instead, which is the every-peer half of the same
+    /// transition.</remarks>
+    public virtual void OnThrown(Vector3 impulse) => Release(impulse);
 
     /// <summary><b>Set down, not dropped</b> (CARRY-1's place verb): rejoin physics with no
     /// velocity and NO SPIN. The random tumble <see cref="Release(Vector3)"/> applies is what
@@ -589,6 +634,20 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
         _springHeld = false;
     }
 
+    /// <summary><b>Server-only fixture release</b> (SFX-1): rejoin physics exactly where the body
+    /// already is, with no toss arc and NO TUMBLE, and announce nothing.
+    ///
+    /// <para>Both omissions are load-bearing. <see cref="Release(Vector3)"/> applies a random
+    /// spin of up to 2 rad/s on every axis, which is what makes a DISCARDED object look
+    /// discarded and is exactly wrong for a fixture: measured, a can released above another can
+    /// tumbled out from under itself and landed 9 cm to the side, so the collision the suite
+    /// existed to observe never happened. And the release is silent here because the
+    /// <c>ApplyPropState</c> broadcast that accompanies it already fires
+    /// <c>ActorEvent.Thrown</c> on every peer through <c>NetworkedProp.BeginLoose</c> — a second
+    /// fire would double every release. Distinct from <see cref="OnPlaced"/>, which is the
+    /// player's deliberate set-down and owns the <c>Placed</c> tick.</para></summary>
+    public void ReleaseAtRestServer() => Release(Vector3.Zero, Vector3.Zero);
+
     private void Release(Vector3 velocity) =>
         Release(velocity, new Vector3(GD.Randf() * 4 - 2, GD.Randf() * 4 - 2, GD.Randf() * 4 - 2));
 
@@ -608,6 +667,10 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
     public override void _PhysicsProcess(double delta)
     {
         float dt = (float)delta;
+
+        // Before the physics server integrates this step — see ApproachSpeedMps for why the
+        // velocity read inside body_entered is the wrong number for a landing.
+        ApproachSpeedMps = LinearVelocity.Length();
 
         if (!_homeSet)
         {
@@ -677,19 +740,75 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
         _thunkCooldown -= delta;
     }
 
+    /// <summary><b>How fast this body is observed to be moving on a peer that is not simulating
+    /// it</b> — written every physics tick by <c>NetworkedProp</c> while it follows the server's
+    /// loose-transform stream, and zero otherwise.
+    ///
+    /// <para><b>Without this, a prop impact was audible to the host and to nobody else</b>, and
+    /// SFX-1 is the packet that found it. A Loose prop on a non-authority peer is a FROZEN
+    /// KINEMATIC body lerped toward a streamed transform, so its <c>LinearVelocity</c> is
+    /// permanently 0 — which meant <see cref="OnBodyEntered"/>'s speed gate rejected every
+    /// contact before this existed. The bug predates this packet (<c>Thunk</c> had it too); what
+    /// is new is a packet whose entire point is that a can hitting a floor is a thing the other
+    /// player hears, and a seeker who cannot hear the hider knock something over in the next
+    /// aisle is the game not working.</para>
+    ///
+    /// <para><b>Observed rather than replicated, deliberately.</b> The alternative is putting an
+    /// impact event on the wire, which is a protocol change for a cosmetic fact that every peer
+    /// can already derive: the loose stream IS the prop's motion, and a distance over a delta is
+    /// its speed. It is slightly noisier than a real velocity — the lerp smooths the arrival, so
+    /// this under-reads a hard impact rather than over-reading it, which is the right direction
+    /// for a threshold.</para></summary>
+    public float ObservedSpeedMps { get; set; }
+
+    /// <summary><b>This body's speed as it entered the current physics step</b>, before the
+    /// solver touched it — sampled at the top of <see cref="_PhysicsProcess"/>, which Godot calls
+    /// before the physics server integrates.
+    ///
+    /// <para><b>Reading LinearVelocity inside body_entered does not give you the impact speed,
+    /// and the failure is one-sided, which is what makes it so easy to miss.</b> Measured here:
+    /// a can and a cereal box thrown into a WALL reported 4.0 and 6.3 m/s and sounded correctly,
+    /// while four props dropped 0.6-1.1 m onto the FLOOR reported under the 2 m/s audible floor
+    /// and were silent — every single time, run after run. A glancing contact leaves residual
+    /// velocity for the signal handler to read; a head-on landing has already had its normal
+    /// impulse applied by the time the signal is emitted, so the handler reads a body that has
+    /// stopped. Half the impacts in a game working is exactly the kind of bug that ships.</para></summary>
+    public float ApproachSpeedMps { get; private set; }
+
     /// <summary><b>The speed that actually matters at a contact</b> (SFX-1): this body's velocity
     /// relative to what it hit, when what it hit is another rigid body, and its own velocity
     /// otherwise (static world geometry has no velocity to subtract).
     ///
     /// <para>Before SFX-1 the gate read this body's own <c>LinearVelocity</c> unconditionally,
     /// which is correct for the only case that existed — a prop thrown at a wall — and silently
-    /// wrong for the case this packet introduces. A can sitting on a shelf that a thrown box
+    /// wrong for two cases this packet cares about. A can sitting on a shelf that a thrown box
     /// slams into is stationary, so its own speed is zero and it would have made no sound at all
-    /// while being knocked across the room.</para></summary>
-    private float RelativeContactSpeed(Node body) =>
-        body is RigidBody3D other
-            ? (LinearVelocity - other.LinearVelocity).Length()
-            : LinearVelocity.Length();
+    /// while being knocked across the room; and on any peer that is not simulating the prop, the
+    /// velocity is zero forever (see <see cref="ObservedSpeedMps"/>).</para></summary>
+    private float RelativeContactSpeed(Node body)
+    {
+        float ownSpeed = SpeedOf(this);
+        if (body is not RigidBody3D other)
+            return ownSpeed;
+        float otherSpeed = other is Carryable otherProp ? SpeedOf(otherProp) : other.LinearVelocity.Length();
+        // Both bodies genuinely simulating: the vector difference is the real relative speed and
+        // is what a head-on collision needs (two props closing at 3 m/s each meet at 6, not 0).
+        // Where either side is only OBSERVED, there is no direction to subtract — the stream
+        // gives a distance per tick, not a velocity — so fall back to the faster of the two,
+        // which is the quantity that decides whether a contact was hard.
+        // Where either side is a body this peer is not simulating, or where the solver has
+        // already eaten the velocity, there is no usable direction to subtract — every source
+        // below is a SPEED, not a velocity — so the relative figure is the faster of the two,
+        // which is the quantity that decides whether a contact was hard.
+        return Mathf.Max(ownSpeed, otherSpeed);
+    }
+
+    /// <summary>The best available speed for a body at the moment of contact: whichever of the
+    /// three sources is largest. Live velocity is right for a glancing hit; the pre-step approach
+    /// speed is right for a landing the solver has already stopped; the observed speed is the
+    /// only one a non-simulating peer has at all.</summary>
+    private static float SpeedOf(Carryable body) =>
+        Mathf.Max(body.LinearVelocity.Length(), Mathf.Max(body.ApproachSpeedMps, body.ObservedSpeedMps));
 
     private void OnBodyEntered(Node body)
     {
@@ -702,10 +821,27 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
         // plays it. See WinsPropOnPropContact for the rule and why it is instance id. The loser
         // still takes the cooldown: it participated in a contact, and without this a shelf going
         // over would have every prop firing on the NEXT contact of the same pile-up 16 ms later.
-        if (body is Carryable otherProp && !WinsPropOnPropContact(GetInstanceId(), otherProp.GetInstanceId()))
+        if (body is Carryable otherProp)
         {
-            _thunkCooldown = ThunkCooldownSec;
-            return;
+            bool claimed = ClaimPropOnPropContact(PairClaims, GetInstanceId(),
+                otherProp.GetInstanceId(), Time.GetTicksMsec(), PairClaimWindowMsec);
+            // The SUPPRESSION is logged, not just the sound. Without this line the
+            // once-per-contact rule can only be checked by inference — "exactly one Impact
+            // appeared near this position at this moment" — which cannot tell a rule that
+            // suppressed the duplicate from a contact that only ever reported one body, and
+            // those are very different states of the world. With it, the suite asserts the
+            // thing directly: a suppression happened, and its partner played.
+            if (!claimed)
+            {
+                if (ActorFx.LogSfx)
+                {
+                    GD.Print($"[sfx] pair-suppressed self={GetParent()?.Name} "
+                        + $"other={otherProp.GetParent()?.Name} speed={relativeSpeed:F2} "
+                        + $"t={Time.GetTicksMsec()}");
+                }
+                _thunkCooldown = ThunkCooldownSec;
+                return;
+            }
         }
         _thunkCooldown = ThunkCooldownSec;
         PunchScale(new Vector3(1.2f, 0.78f, 1.2f));

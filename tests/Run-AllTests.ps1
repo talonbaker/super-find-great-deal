@@ -108,6 +108,15 @@ try {
         # in the join-index spawn dealing -- which is the other reason it goes at the end.
         @{ Name = "First person: rig + cull (FP-1)";     Script = "Run-FirstPersonTest.ps1" }
 
+        # SFX-1 (2026-09-19), on udp/7902, and it goes AFTER the first-person suite for the same
+        # reason that one goes last: it too opens a window, and for the same underlying cause
+        # rather than a similar one. ActorFx.Fire early-outs on a headless instance, so a
+        # headless observer hears nothing and can assert nothing -- "this suite needs a desktop
+        # session" is now true of two entries, not one. It also runs two sequential phases on one
+        # port and seeds forty props in the second, so it is the heaviest thing in the registry
+        # and belongs where a marathon has nothing queued behind it.
+        @{ Name = "Sfx: material voices (SFX-1)";        Script = "Run-MaterialSfxTest.ps1" }
+
         # WHAT WAS REMOVED HERE AT THE FORK (BASE-1, 2026-09-19), so a reader of an old handoff
         # can tell "deleted" from "lost": the bubble-test world, the shared bubble counter and the
         # last-bubble celebration, the TV portal, the Puffin Lab, the watcher's night gate, the

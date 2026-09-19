@@ -273,7 +273,11 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
         if (NetworkManager.Instance?.Options.SeedTestProps is { Count: > 0 } seeded)
         {
             foreach ((Vector3 at, PropKind kind) in seeded)
-                ServerSpawn(kind, PlaceAt(at));
+            {
+                NetworkedProp? spawned = ServerSpawn(kind, PlaceAt(at));
+                if (spawned != null)
+                    _seededIds.Add(spawned.PropId);
+            }
             GD.Print($"[props] --seed-test-props: seeded {seeded.Count} test prop(s) in world '{world}'");
         }
 
@@ -348,6 +352,55 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
     /// step with the pose predicate.</summary>
     public static bool TakesLoadLift(PropKind kind) => IsArmfulPose(kind);
 
+    // --- --seed-props-drop: let the fixture FALL, once, on a clock (SFX-1, 2026-09-19) --------
+    //
+    // WHY THIS HAD TO EXIST. A prop from ServerSpawn is born Resting, and NetworkedProp._Ready
+    // freezes a Resting prop kinematic on every peer — so a --seed-test-props fixture hangs
+    // exactly where it was seeded, in mid-air, forever. That is correct for every suite before
+    // this one (they all walk a bot up to a prop and grab it) and it is fatal to SFX-1's
+    // voice-budget measurement, whose whole event is forty props landing at once. Measured, not
+    // reasoned: the first run of tests/Run-MaterialSfxTest.ps1 seeded forty props 0.5–2.5 m up
+    // and the windowed peer logged sixteen sounds, every one of them a footstep.
+    //
+    // ON A CLOCK rather than at spawn, because SpawnInitialProps runs before any client has
+    // connected: a drop there is a drop nobody is present to hear, and by the time a peer joins
+    // the late-join dump hands it forty resting props. The delay is what puts the event inside
+    // the session.
+    //
+    // Server-only, off unless asked, and it fires EXACTLY ONCE — a re-drop loop would be a
+    // permanent noise source rather than an event.
+    private readonly System.Collections.Generic.List<int> _seededIds = new();
+    private double _seededDropClock;
+    private bool _seededDropFired;
+
+    private void StepSeededDrop(double delta)
+    {
+        double at = NetworkManager.Instance?.Options.SeedPropsDropAtSec ?? -1;
+        if (_seededDropFired || at < 0 || _seededIds.Count == 0)
+            return;
+        _seededDropClock += delta;
+        if (_seededDropClock < at)
+            return;
+        _seededDropFired = true;
+        int dropped = 0;
+        foreach (int id in _seededIds)
+        {
+            NetworkedProp? node = NodeFor(id);
+            if (node == null || !_registry.TryGet(id, out PropState s) || s.Mode != PropMode.Resting)
+                continue;
+            // The ordinary release path, deliberately: the same registry transition, the same
+            // reliable broadcast and the same BeginLooseServer a thrown prop takes, so what the
+            // budget measures is the real Loose pipeline rather than a test-only shortcut.
+            Transform3D pose = node.Body.GlobalTransform;
+            _registry.SetHolder(id, 1);
+            _registry.Release(id, pose);
+            Rpc(MethodName.ApplyPropState, id, (int)PropMode.Loose, 0, pose);
+            node.DropLooseServer();
+            dropped++;
+        }
+        GD.Print($"[props] --seed-props-drop: released {dropped} seeded prop(s) into Loose at t={_seededDropClock:F2}s");
+    }
+
     /// <summary>Server-only: drives every Loose prop's physics tick. Streams its live transform
     /// to every peer (unreliable — the next tick supersedes a dropped one), latches it to Resting
     /// once it has stayed slow for <see cref="SettleTicks"/> consecutive ticks, and recovers it to
@@ -358,6 +411,7 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
     {
         if (!_isServer)
             return;
+        StepSeededDrop(delta);
         _streamTick++;
         // Reuse a persistent scratch list instead of allocating a fresh List<PropState> every
         // physics tick (60 Hz) - this loop needs a snapshot because a Loose prop settling to

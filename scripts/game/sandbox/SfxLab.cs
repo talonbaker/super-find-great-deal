@@ -188,14 +188,44 @@ public static class SfxLab
     /// it — the whole budget now lands exactly on the ceiling, and a number that load-bearing
     /// should not be private to the class that happens to spend it. **Deliberately NOT reduced to
     /// make room for the looping partition:** this is the pool creature voices live in, and plan
-    /// §7.3 is the reason it exists.</summary>
-    public const int PoolSize = 14;
+    /// §7.3 is the reason it exists.
+    ///
+    /// <para><b>14 -> 18 (SFX-1, 2026-09-19), and it is paid for rather than borrowed.</b>
+    /// Measured by <c>tests/Run-MaterialSfxTest.ps1</c> phase 2 — forty mixed props released
+    /// together with two players walking through them, which is what a shelf going over will be:
+    /// <c>fires=54 peakLive3DVoices=14 oneShotSteals=26</c>. The peak landing exactly ON the pool
+    /// size is the tell that the pool SATURATED, rather than that the mix happened to want
+    /// fourteen; <b>48% of all sounds in that event were stolen</b>, against the packet's 10%
+    /// bar. A mix that steals half its cues has stopped being able to promise that the sound you
+    /// needed is the one that played — and in this game the cue you needed is the seeker hearing
+    /// which aisle the noise came from.</para>
+    ///
+    /// <para><b>The four slots come from <see cref="LoopPoolSize"/>, which this game does not
+    /// use.</b> The ceiling was exactly spent (5 + 14 + 5 = 24), so they had to come from
+    /// somewhere. The loop partition's only member is <c>SfxLoop.FireBody</c> — an OUTDOOR fire
+    /// bed, from a game about a forest at night, which <c>docs/PRUNE-BACKLOG.md</c> §1 already
+    /// lists as dead and kept for build-green. There are no fires in a supermarket. The
+    /// alternatives were worse: taking a slot off this pool is taking it off the pool that is
+    /// under pressure, and taking one off the voice speakers would cut the bluffing layer the
+    /// whole game is built on. 5 + 18 + 1 = 24, unchanged.</para></summary>
+    public const int PoolSize = 18;
 
     /// <summary>Looping partition size, and therefore the audible-fire cap
     /// (<see cref="AudioVoiceBudget.AudibleFireCap"/>). Five is what the ≤24 ceiling had left
     /// after 5 voice speakers and the 14 one-shot slots — see <see cref="AudioVoiceBudget"/> for
-    /// the full sum and for why this is not the plan's rendering-side K.</summary>
-    public const int LoopPoolSize = 5;
+    /// the full sum and for why this is not the plan's rendering-side K.
+    ///
+    /// <para><b>5 -> 1 (SFX-1, 2026-09-19).</b> Four of these slots were reserved for outdoor
+    /// fires in a game about a forest at night; this one is set in a supermarket and has no
+    /// fires, no <c>AmbientBed</c> and no <c>SparseSfxEmitter</c> in any live scene
+    /// (<c>docs/PRUNE-BACKLOG.md</c> §1 lists the whole family as dead and kept only for
+    /// build-green). They are spent on <see cref="PoolSize"/> instead, where a measured 48% of
+    /// one-shots were being stolen — see that member for the numbers. <b>ONE is kept rather than
+    /// zero, deliberately:</b> the partition's acquire/release lifecycle, its
+    /// refuse-rather-than-steal policy and its instrumentation all stay live and reachable,
+    /// where a zero-length pool would turn every one of them into code nobody can run and
+    /// nobody notices rotting until the first lane that wants a sustained layer arrives.</para></summary>
+    public const int LoopPoolSize = 1;
 
     /// <summary>Name of the SFX mix bus (created lazily, routed to Master).</summary>
     public const string Bus = "Sfx";

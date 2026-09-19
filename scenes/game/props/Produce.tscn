@@ -34,6 +34,13 @@ emission_energy_multiplier = 0.12
 ; (Carryable.ProduceVsBallRadiusM) rather than typed inline for exactly that reason.
 [node name="Produce" type="RigidBody3D"]
 mass = 0.25
+; DAMPED, like Sphere.tscn and for the reason Sphere.tscn does not say: an undamped sphere on a
+; flat floor never stops. Measured in the first run of tests/Run-MaterialSfxTest.ps1 -- a seeded
+; produce dropped 0.27 m at z = -3 rolled to z = -4.92 and the server logged
+; "rest not good prop=3 OutsideRoomBounds". An orange that leaves the aisle it was knocked off is
+; a worse bug than a quiet one.
+linear_damp = 2.0
+angular_damp = 3.0
 script = ExtResource("1_carryable")
 kind = 4
 material = 3

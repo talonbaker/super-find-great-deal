@@ -86,8 +86,15 @@ public static class ActorFx
                 SfxLab.SamplePeak();
                 if (LogSfx)
                 {
+                    // src is the context node's name, which for a networked prop is its PropId,
+                    // and t is the engine clock in ms. Both exist for tests/Run-MaterialSfxTest's
+                    // once-per-contact assertion: Godot reports one prop-on-prop contact to both
+                    // bodies, so proving the loser stayed silent needs the sound attributed to a
+                    // body and placed on a timeline. Neither is derivable from the position alone
+                    // — two props in contact are, by definition, in the same place.
                     GD.Print($"[sfx] sfx {r.Sound} event={evt} intensity={intensity:F3} "
-                        + $"at ({position.X:F2},{position.Y:F2},{position.Z:F2}) src={context.Name}");
+                        + $"at ({position.X:F2},{position.Y:F2},{position.Z:F2}) "
+                        + $"src={context.Name} t={Time.GetTicksMsec()}");
                 }
             }
 

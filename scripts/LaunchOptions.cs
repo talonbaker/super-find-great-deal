@@ -382,6 +382,13 @@ public sealed class LaunchOptions
     public IReadOnlyList<(Vector3 At, MpFoundation.Net.PropKind Kind)> SeedTestProps => _seedTestProps;
     private readonly List<(Vector3 At, MpFoundation.Net.PropKind Kind)> _seedTestProps = new();
 
+    /// <summary>--seed-props-drop &lt;sec&gt;: server-only, test-only. That many seconds into the
+    /// session, release every <c>--seed-test-props</c> prop from Resting into Loose, once, so the
+    /// fixture actually FALLS. See <c>PropManager.StepSeededDrop</c> for why a seeded prop
+    /// otherwise hangs in mid-air forever and why the delay is load-bearing. Negative (the
+    /// default) = never, so every suite written before SFX-1 is unaffected.</summary>
+    public double SeedPropsDropAtSec { get; private set; } = -1;
+
     /// <summary>--log-sfx: print one <c>[sfx] sfx &lt;name&gt; event=... intensity=... at (...)</c>
     /// line per sound <c>ActorFx</c> actually plays, plus one
     /// <c>[sfx] SUMMARY fires=... peakLive3DVoices=... oneShotSteals=...</c> line when a bot
@@ -1240,6 +1247,10 @@ public sealed class LaunchOptions
                     }
                     break;
                 }
+                case "--seed-props-drop":
+                    if (double.TryParse(Next(args, ref i), NumberStyles.Float, CultureInfo.InvariantCulture, out double dropAt))
+                        options.SeedPropsDropAtSec = dropAt;
+                    break;
                 case "--log-sfx":
                     options.LogSfx = true;
                     break;
