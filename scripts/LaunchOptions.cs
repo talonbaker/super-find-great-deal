@@ -370,9 +370,33 @@ public sealed class LaunchOptions
     /// Absent by default and read only on the server, so no non-test launch changes at all. The
     /// props it spawns are ordinary <see cref="MpFoundation.Game.Props.PropKind.Crate"/> props:
     /// a seeded crate and an authored crate are indistinguishable once picked up, which is the
-    /// point — a fixture that carried differently would prove nothing about carry.</summary>
-    public IReadOnlyList<Vector3> SeedTestProps => _seedTestProps;
-    private readonly List<Vector3> _seedTestProps = new();
+    /// point — a fixture that carried differently would prove nothing about carry.
+    ///
+    /// <para><b>SFX-1 (2026-09-19) appended an optional fourth field:</b>
+    /// <c>"x,y,z[,kind]"</c>, where kind is one of <c>crate</c> (the default, so every existing
+    /// caller is byte-for-byte unaffected), <c>ball</c>, <c>can</c>, <c>box</c> or
+    /// <c>produce</c>. A NAME rather than an ordinal, because an ordinal in a test script is a
+    /// second copy of the wire contract and would go quietly wrong the first time
+    /// <c>PropKind</c> grows. The material-SFX suite seeds forty mixed props in a heap with it;
+    /// nobody is going to author forty.</para></summary>
+    public IReadOnlyList<(Vector3 At, MpFoundation.Net.PropKind Kind)> SeedTestProps => _seedTestProps;
+    private readonly List<(Vector3 At, MpFoundation.Net.PropKind Kind)> _seedTestProps = new();
+
+    /// <summary>--seed-props-drop &lt;sec&gt;: server-only, test-only. That many seconds into the
+    /// session, release every <c>--seed-test-props</c> prop from Resting into Loose, once, so the
+    /// fixture actually FALLS. See <c>PropManager.StepSeededDrop</c> for why a seeded prop
+    /// otherwise hangs in mid-air forever and why the delay is load-bearing. Negative (the
+    /// default) = never, so every suite written before SFX-1 is unaffected.</summary>
+    public double SeedPropsDropAtSec { get; private set; } = -1;
+
+    /// <summary>--log-sfx: print one <c>[sfx] sfx &lt;name&gt; event=... intensity=... at (...)</c>
+    /// line per sound <c>ActorFx</c> actually plays, plus one
+    /// <c>[sfx] SUMMARY fires=... peakLive3DVoices=... oneShotSteals=...</c> line when a bot
+    /// finishes. <c>tests/Run-MaterialSfxTest.ps1</c>'s whole assertion surface: a headless run
+    /// has no audio device and a windowed one cannot be recorded, so the log IS the evidence that
+    /// a given material fired a given sound. Off by default and read nowhere in a real
+    /// session.</summary>
+    public bool LogSfx { get; private set; }
 
     // Aim-substrate convergence test additions (WP-L3, Run-AimTest.ps1).
     /// <summary>--aim-script &lt;raiseAtSec&gt;[,&lt;lowerAtSec&gt;]: bot wraps its movement brain in
@@ -1226,23 +1250,41 @@ public sealed class LaunchOptions
                     break;
                 case "--seed-test-props":
                 {
-                    // "x,y,z[;x,y,z...]" -- one Crate per triple, in whatever world is running.
-                    // A malformed triple is DROPPED rather than defaulted to the origin: a crate
+                    // "x,y,z[,kind][;x,y,z[,kind]...]" -- one prop per entry, in whatever world
+                    // is running, Crate when the kind is omitted.
+                    // A malformed entry is DROPPED rather than defaulted to the origin: a crate
                     // silently at (0,0,0) is a fixture in the wrong place, and the suite that
                     // asked for it would then fail on carry rather than on its own arguments.
+                    // An UNRECOGNISED kind name is dropped for the same reason and by the same
+                    // rule -- a typo that silently seeded a crate would let the material suite
+                    // report "the can never fired TinPick" about a can that was never a can.
                     foreach (string triple in Next(args, ref i).Split(';'))
                     {
                         string[] parts = triple.Split(',');
-                        if (parts.Length >= 3
-                            && double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out double sx)
-                            && double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out double sy)
-                            && double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out double sz))
+                        if (parts.Length < 3
+                            || !double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out double sx)
+                            || !double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out double sy)
+                            || !double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out double sz))
                         {
-                            options._seedTestProps.Add(new Vector3((float)sx, (float)sy, (float)sz));
+                            continue;
                         }
+                        MpFoundation.Net.PropKind kind = MpFoundation.Net.PropKind.Crate;
+                        if (parts.Length >= 4 && parts[3].Trim().Length > 0)
+                        {
+                            if (!TryParsePropKind(parts[3], out kind))
+                                continue;
+                        }
+                        options._seedTestProps.Add((new Vector3((float)sx, (float)sy, (float)sz), kind));
                     }
                     break;
                 }
+                case "--seed-props-drop":
+                    if (double.TryParse(Next(args, ref i), NumberStyles.Float, CultureInfo.InvariantCulture, out double dropAt))
+                        options.SeedPropsDropAtSec = dropAt;
+                    break;
+                case "--log-sfx":
+                    options.LogSfx = true;
+                    break;
                 case "--aim-script":
                 {
                     string[] parts = Next(args, ref i).Split(',');
@@ -1523,5 +1565,23 @@ public sealed class LaunchOptions
     {
         i++;
         return i < args.Length ? args[i] : "";
+    }
+
+    /// <summary><c>--seed-test-props</c>'s optional kind field, by NAME (SFX-1). Case- and
+    /// whitespace-insensitive, and it fails rather than defaulting — see the parse site for why
+    /// a silently-defaulted kind is worse than a dropped prop. Not
+    /// <c>Enum.TryParse</c>: that would also accept <c>"3"</c>, which is the ordinal, which is
+    /// the wire contract, which is the thing a test script must never restate.</summary>
+    private static bool TryParsePropKind(string name, out MpFoundation.Net.PropKind kind)
+    {
+        switch (name.Trim().ToLowerInvariant())
+        {
+            case "crate": kind = MpFoundation.Net.PropKind.Crate; return true;
+            case "ball": kind = MpFoundation.Net.PropKind.Ball; return true;
+            case "can": kind = MpFoundation.Net.PropKind.Can; return true;
+            case "box": kind = MpFoundation.Net.PropKind.Box; return true;
+            case "produce": kind = MpFoundation.Net.PropKind.Produce; return true;
+            default: kind = MpFoundation.Net.PropKind.Crate; return false;
+        }
     }
 }

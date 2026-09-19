@@ -116,8 +116,22 @@ public static class NetProfile
     /// and be handed a world, an avatar and a prop stream it has no matching content for — the
     /// silently-wrong failure this field exists to convert into a refused connection. The lobby
     /// scope tag below is the matchmaking half of the same fence; this is the ENet/direct-connect
-    /// half, which no lobby tag can reach.</para></summary>
-    public const int ProtocolVersion = 15;
+    /// half, which no lobby tag can reach.</para>
+    ///
+    /// <para><b>v16 (2026-09-19, SFX-1 — the supermarket's product shapes).</b> Three appended
+    /// <c>PropKind</c> ordinals: <c>Can = 2</c>, <c>Box = 3</c>, <c>Produce = 4</c>. No message
+    /// shape changed and no byte count moved — the kind was already an int in the spawner's data
+    /// array and in <c>PropState</c>. The bump is mandatory anyway, and v8's own entry in this
+    /// list is the ruling: <i>"A PropKind ordinal is a data-shape change of the worst kind across
+    /// builds: a stale client receiving an unknown kind falls through NetworkedProp.Init's switch
+    /// to the Crate default and renders the wrong object instead of failing loudly, which is
+    /// exactly what this field exists to convert into a refused connection."</i> A v15 peer in a
+    /// v16 session would stand in an aisle of cereal boxes and see wooden crates — and, since
+    /// SFX-1 resolves a prop's sound from its shape, would hear them as wooden crates too. That
+    /// is a divergence, not a cosmetic gap. Nothing in <c>NetCodec</c> hashes or range-checks the
+    /// enum, which was checked rather than assumed; the bump is on the meaning, as v6, v9, v10
+    /// and v13 were.</para></summary>
+    public const int ProtocolVersion = 16;
 
     /// <summary>Steam lobby scope tag — keeps this title's room codes from colliding with any
     /// other title developing against the same (shared Spacewar) App ID. Per-title value:

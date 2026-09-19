@@ -14,6 +14,32 @@ public enum PropKind
 {
     Crate,
     Ball,
+
+    // --- The supermarket's product shapes (SFX-1, 2026-09-19) --------------------------------
+    //
+    // APPENDED, and the ordinals are explicit so the append is visible in a diff. These ride the
+    // wire in the spawner's data array and in PropState, so inserting one anywhere above would
+    // turn every existing crate in a mixed-version session into something else.
+    //
+    // PROTOCOL BUMPED to v16 for exactly this append (NetProfile.ProtocolVersion). Nothing in
+    // NetCodec HASHES this enum — it writes the int and NetworkedProp casts it back — but
+    // NetProfile's own v8 entry already settled what that means: "A PropKind ordinal is a data-
+    // shape change of the worst kind across builds: a stale client receiving an unknown kind
+    // falls through NetworkedProp.Init's switch to the Crate default and renders the wrong
+    // object instead of failing loudly, which is exactly what this field exists to convert into
+    // a refused connection." A v15 peer handed Kind = 4 would show a wooden crate where the
+    // other player sees an orange, and would sound like one; that is the silently-wrong failure,
+    // not a cosmetic gap.
+
+    /// <summary>A can: tin, cylinder, 0.35 kg. See <c>Carryable.CanRadiusM</c>.</summary>
+    Can = 2,
+
+    /// <summary>A cereal box: cardboard, a NON-cubic box, 0.4 kg. The non-cubeness is what tells
+    /// it apart from <see cref="Crate"/> at adoption — see <c>Carryable.ShapeFromCollider</c>.</summary>
+    Box = 3,
+
+    /// <summary>Fruit or veg: soft, a small sphere, 0.25 kg.</summary>
+    Produce = 4,
 }
 
 /// <summary>

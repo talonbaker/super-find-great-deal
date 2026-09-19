@@ -82,6 +82,67 @@ public enum Sfx
     /// at all, so there was never a file to reach for, and Talon retunes it by editing the named
     /// constants beside <see cref="SfxLab.BangPcm"/>.</para></summary>
     Bang = 24,
+
+    // --- Material voices (SFX-1, 2026-09-19) ------------------------------------------------
+    //
+    // Four events x three materials, so that a can, a cereal box and an apple do not share one
+    // generic clink. The ordinals start at 25 because DOOR-1 landed Bang = 24 from a sibling
+    // branch off the same base (INT-0B merged the two); leaving the gap made that merge a no-op
+    // instead of a renumbering, and a renumbering here would silently repoint every .tres in
+    // assets/items/**/prop_presentation.tres at a different sound.
+    //
+    // ELEVEN members for twelve table cells, and the arithmetic is deliberate: the Thrown row of
+    // the packet's table is "one shared brief noise sweep" for all three materials, so Whoosh is
+    // one member serving three cells; TinBuzz is the twelfth, an Impact LAYER rather than an
+    // Impact sound (see the profile note below). Synthesis notes live on each recipe.
+
+    /// <summary>Tin, picked up: a short bright clink. See <see cref="SfxLab.TinPickPcm"/>.</summary>
+    TinPick = 25,
+
+    /// <summary>Tin, struck: inharmonic bar partials over a noise-burst front, ringing 0.4 s.
+    /// See <see cref="SfxLab.TinClankPcm"/>.</summary>
+    TinClank = 26,
+
+    /// <summary><b>The high-intensity half of a tin impact</b>, and it is a second RESPONSE on the
+    /// same event rather than a second recipe chosen in code. A baked one-shot cannot vary its
+    /// own timbre with hit speed — the PCM is rendered once and cached forever — so "at high
+    /// intensity add a buzz layer" is expressed the way this presentation system already
+    /// expresses conditional response: the tin profile maps Impact to BOTH
+    /// <see cref="TinClank"/> (always) and this (<c>MinIntensity</c> 0.6), and the existing
+    /// intensity gate in <c>ActorFx.FireCore</c> decides. Zero new code paths, and Talon can
+    /// retune the threshold in the .tres.</summary>
+    TinBuzz = 27,
+
+    /// <summary>Tin, set down: a 40 ms rim tick. See <see cref="SfxLab.TinTickPcm"/>.</summary>
+    TinTick = 28,
+
+    /// <summary>Cardboard, picked up: 0.2 s of band-passed noise rustle, no tone at all —
+    /// the contents shifting. See <see cref="SfxLab.CardPickPcm"/>.</summary>
+    CardPick = 29,
+
+    /// <summary>Cardboard, struck: a hollow "bop" with a rustle tail, and deliberately no ring.
+    /// See <see cref="SfxLab.CardThudPcm"/>.</summary>
+    CardThud = 30,
+
+    /// <summary>Cardboard, set down: a papery settle. See <see cref="SfxLab.CardSettlePcm"/>.</summary>
+    CardSettle = 31,
+
+    /// <summary>Produce, picked up: a dull soft tap, one damped low sine.
+    /// See <see cref="SfxLab.ProducePickPcm"/>.</summary>
+    ProducePick = 32,
+
+    /// <summary>Produce, struck: a damped thump with no ring at all.
+    /// See <see cref="SfxLab.ProduceThumpPcm"/>.</summary>
+    ProduceThump = 33,
+
+    /// <summary>Produce, set down: a soft plop. See <see cref="SfxLab.ProducePlopPcm"/>.</summary>
+    ProducePlop = 34,
+
+    /// <summary><b>Shared by every material</b> (the packet's Thrown row): a brief noise sweep as
+    /// the object leaves the hand, after which the impact does the work. One member rather than
+    /// three identical ones — the throw is a fact about the arm, not about the object.
+    /// See <see cref="SfxLab.WhooshPcm"/>.</summary>
+    Whoosh = 35,
 }
 
 /// <summary>
@@ -141,14 +202,44 @@ public static class SfxLab
     /// it — the whole budget now lands exactly on the ceiling, and a number that load-bearing
     /// should not be private to the class that happens to spend it. **Deliberately NOT reduced to
     /// make room for the looping partition:** this is the pool creature voices live in, and plan
-    /// §7.3 is the reason it exists.</summary>
-    public const int PoolSize = 14;
+    /// §7.3 is the reason it exists.
+    ///
+    /// <para><b>14 -> 18 (SFX-1, 2026-09-19), and it is paid for rather than borrowed.</b>
+    /// Measured by <c>tests/Run-MaterialSfxTest.ps1</c> phase 2 — forty mixed props released
+    /// together with two players walking through them, which is what a shelf going over will be:
+    /// <c>fires=54 peakLive3DVoices=14 oneShotSteals=26</c>. The peak landing exactly ON the pool
+    /// size is the tell that the pool SATURATED, rather than that the mix happened to want
+    /// fourteen; <b>48% of all sounds in that event were stolen</b>, against the packet's 10%
+    /// bar. A mix that steals half its cues has stopped being able to promise that the sound you
+    /// needed is the one that played — and in this game the cue you needed is the seeker hearing
+    /// which aisle the noise came from.</para>
+    ///
+    /// <para><b>The four slots come from <see cref="LoopPoolSize"/>, which this game does not
+    /// use.</b> The ceiling was exactly spent (5 + 14 + 5 = 24), so they had to come from
+    /// somewhere. The loop partition's only member is <c>SfxLoop.FireBody</c> — an OUTDOOR fire
+    /// bed, from a game about a forest at night, which <c>docs/PRUNE-BACKLOG.md</c> §1 already
+    /// lists as dead and kept for build-green. There are no fires in a supermarket. The
+    /// alternatives were worse: taking a slot off this pool is taking it off the pool that is
+    /// under pressure, and taking one off the voice speakers would cut the bluffing layer the
+    /// whole game is built on. 5 + 18 + 1 = 24, unchanged.</para></summary>
+    public const int PoolSize = 18;
 
     /// <summary>Looping partition size, and therefore the audible-fire cap
     /// (<see cref="AudioVoiceBudget.AudibleFireCap"/>). Five is what the ≤24 ceiling had left
     /// after 5 voice speakers and the 14 one-shot slots — see <see cref="AudioVoiceBudget"/> for
-    /// the full sum and for why this is not the plan's rendering-side K.</summary>
-    public const int LoopPoolSize = 5;
+    /// the full sum and for why this is not the plan's rendering-side K.
+    ///
+    /// <para><b>5 -> 1 (SFX-1, 2026-09-19).</b> Four of these slots were reserved for outdoor
+    /// fires in a game about a forest at night; this one is set in a supermarket and has no
+    /// fires, no <c>AmbientBed</c> and no <c>SparseSfxEmitter</c> in any live scene
+    /// (<c>docs/PRUNE-BACKLOG.md</c> §1 lists the whole family as dead and kept only for
+    /// build-green). They are spent on <see cref="PoolSize"/> instead, where a measured 48% of
+    /// one-shots were being stolen — see that member for the numbers. <b>ONE is kept rather than
+    /// zero, deliberately:</b> the partition's acquire/release lifecycle, its
+    /// refuse-rather-than-steal policy and its instrumentation all stay live and reachable,
+    /// where a zero-length pool would turn every one of them into code nobody can run and
+    /// nobody notices rotting until the first lane that wants a sustained layer arrives.</para></summary>
+    public const int LoopPoolSize = 1;
 
     /// <summary>Name of the SFX mix bus (created lazily, routed to Master).</summary>
     public const string Bus = "Sfx";
@@ -231,9 +322,16 @@ public static class SfxLab
     /// and a caller that must match another system's falloff needs both halves of the curve, not
     /// just the cutoff. Deliberately nullable rather than defaulted to a literal 10: writing the
     /// engine default down here would be a second copy of a number this file does not own.</para></summary>
+    /// <param name="pitchScale">A deliberate, caller-owned pitch multiplier, applied UNDER the
+    /// random jitter (final scale = <paramref name="pitchScale"/> x (1 +- jitter)) — SFX-1's
+    /// intensity-to-pitch mapping, where a heavy hit on cardboard or produce drops the pitch and
+    /// a heavy hit on tin raises it. Separate from <paramref name="pitchJitter"/> because the two
+    /// answer different questions: jitter exists so the twentieth footstep does not sound like
+    /// the first, and is noise by design; this is signal, and a listener is meant to be able to
+    /// hear it. Defaults to 1, so no existing call site moves by a cent.</param>
     public static void PlayStream3D(Node parent, Vector3 globalPos, AudioStream stream,
         float volumeDb = -6f, float pitchJitter = 0.08f, float maxDistance = 40f,
-        string? bus = null, float? unitSize = null)
+        string? bus = null, float? unitSize = null, float pitchScale = 1f)
     {
         AudioStreamPlayer3D? player = Rent(parent);
         if (player == null)
@@ -245,7 +343,7 @@ public static class SfxLab
         player.Bus = bus != null && AudioServer.GetBusIndex(bus) >= 0 ? bus : Bus;
         player.Stream = stream;
         player.VolumeDb = volumeDb;
-        player.PitchScale = 1f + (float)(Rng.NextDouble() * 2 - 1) * pitchJitter;
+        player.PitchScale = pitchScale * (1f + (float)(Rng.NextDouble() * 2 - 1) * pitchJitter);
         player.MaxDistance = maxDistance;
         // ALWAYS written, never conditionally: a pool slot is borrowed, and a setting left behind
         // by the previous borrower is a falloff curve the next caller never asked for. The
@@ -565,7 +663,31 @@ public static class SfxLab
         if (Cache.TryGetValue(kind, out AudioStreamWav? cached))
             return cached;
 
-        float[] samples = kind switch
+        var stream = ToWav(RenderPcm(kind));
+        Cache[kind] = stream;
+        return stream;
+    }
+
+    /// <summary>The sample rate every recipe in this class renders at. Public because the
+    /// Godot-free suite asserts each recipe's DURATION, and a duration is samples over a rate —
+    /// restating 48000 in the test file would be a second copy of a number this class owns.</summary>
+    public const int SampleRateHz = SampleRate;
+
+    /// <summary><b>The one-shot palette as raw PCM, before it becomes a Godot resource</b>
+    /// (SFX-1, 2026-09-19). This is the switch <see cref="Get"/> used to hold inline; <c>Get</c>
+    /// now calls it and only adds the <see cref="ToWav"/> bake and the cache.
+    ///
+    /// <para><b>Why it is a separate public method.</b> <see cref="Get"/> constructs an
+    /// <see cref="AudioStreamWav"/>, which is a <c>Resource</c> and therefore needs the native
+    /// engine; <c>tests/unit</c> has no engine. Every recipe below is pure managed arithmetic over
+    /// <c>Godot.Mathf</c>, which is ordinary managed code in GodotSharp.dll, so the buffers can be
+    /// rendered, measured and asserted in the xUnit suite with no audio device and no Godot
+    /// runtime — which is where SFX-1's gate lives. <see cref="GooseHonkPcm"/> and
+    /// <see cref="TriumphPcm"/> were already public for exactly this reason; this generalises it
+    /// to the whole palette instead of one member at a time.</para></summary>
+    public static float[] RenderPcm(Sfx kind)
+    {
+        return kind switch
         {
             Sfx.None => new float[SampleRate / 100], // 10 ms of silence; never played by Presentation, defensive only
             Sfx.Jump => EffortGrunt(0.14f),
@@ -588,12 +710,20 @@ public static class SfxLab
             Sfx.GooseHonk => GooseHonkPcm(),
             Sfx.Triumph => TriumphPcm(),
             Sfx.Bang => BangPcm(),
+            // Material voices (SFX-1). See the enum for what each one is for.
+            Sfx.TinPick => TinPickPcm(),
+            Sfx.TinClank => TinClankPcm(),
+            Sfx.TinBuzz => TinBuzzPcm(),
+            Sfx.TinTick => TinTickPcm(),
+            Sfx.CardPick => CardPickPcm(),
+            Sfx.CardThud => CardThudPcm(),
+            Sfx.CardSettle => CardSettlePcm(),
+            Sfx.ProducePick => ProducePickPcm(),
+            Sfx.ProduceThump => ProduceThumpPcm(),
+            Sfx.ProducePlop => ProducePlopPcm(),
+            Sfx.Whoosh => WhooshPcm(),
             _ => Sweep(0.05f, 400f, 400f),
         };
-
-        var stream = ToWav(samples);
-        Cache[kind] = stream;
-        return stream;
     }
 
     /// <summary>The looping palette, rendered once and cached, with <c>LoopMode.Forward</c> set —
@@ -1156,6 +1286,339 @@ public static class SfxLab
     // #152's brief stated Sfx.Crackle already existed when it did not. PR #154 landed the real one
     // (above), so the duplicate was deleted rather than reconciled — two crackle recipes cannot
     // both be the fire's sound, and #154's is the one with a unit-tested schedule behind it.
+
+    // --- Material voices (SFX-1, 2026-09-19) -------------------------------------------------
+    //
+    // SYNTHESIS NOTES, STATED ONCE FOR THE WHOLE FAMILY.
+    //
+    // A material is legible from three things and this palette spends all of its budget on them:
+    //
+    //   1. PARTIAL RATIOS. A struck tin can is a thin shell, and a shell's modes are inharmonic —
+    //      its overtones are NOT integer multiples of the fundamental. TinClank/TinPick/TinTick
+    //      all use 1 : 2.76 : 5.40, the classical circular-plate ratios, which is the whole
+    //      reason they read as metal rather than as a pitched beep. Cardboard and produce use no
+    //      partial stack at all: they are a single damped low sine, because a box and an apple
+    //      have no modes that survive long enough to hear.
+    //   2. DECAY. Tin rings (400 ms, and the upper partials decay FASTER than the fundamental,
+    //      which is what makes a ring sound like a ring rather than a chord). Cardboard and
+    //      produce do not ring at any length: 100-270 ms with a steep power curve.
+    //   3. NOISE CHARACTER. Cardboard's signature is band-passed noise with a slow amplitude
+    //      grain on it — contents shifting, paper against paper. Tin's noise is a 20 ms burst at
+    //      the very front only (the strike itself). Produce's is 30 ms of soft low noise, the
+    //      flesh giving.
+    //
+    // Every recipe seeds its own System.Random with a fixed literal, so the baked buffer is
+    // byte-identical on every machine and every run. That is what makes the offline .wav renders
+    // under docs/qa/ a stable artefact rather than churn, and it is why the xUnit suite can
+    // assert a peak amplitude rather than only a range.
+    //
+    // Peak amplitudes are all held below 1.0 BY CONSTRUCTION rather than by Render's clamp: the
+    // clamp is a safety net, and a recipe that relies on it is a recipe that is hard-clipping,
+    // which at this fidelity is audible as a buzz on the attack. The gate asserts peak < 0.999
+    // for exactly that reason -- a buffer that reaches 1.0 has been clamped.
+
+    private const float TinPickSeconds = 0.15f;
+    private const float TinClankSeconds = 0.40f;
+    private const float TinBuzzSeconds = 0.25f;
+    private const float TinTickSeconds = 0.04f;
+    private const float CardPickSeconds = 0.20f;
+    /// <summary>0.12 s of "bop" plus a 0.15 s rustle tail — the packet's two numbers, kept as two
+    /// numbers so the tail can be retuned without moving the strike.</summary>
+    private const float CardThudBopSeconds = 0.12f;
+    private const float CardThudTailSeconds = 0.15f;
+    private const float CardSettleSeconds = 0.08f;
+    private const float ProducePickSeconds = 0.06f;
+    private const float ProduceThumpSeconds = 0.10f;
+    private const float ProducePlopSeconds = 0.07f;
+    private const float WhooshSeconds = 0.12f;
+
+    /// <summary>The inharmonic partial ratios of a struck thin shell. Not integer multiples, and
+    /// that is the entire difference between "metal" and "beep".</summary>
+    private const float TinPartial2 = 2.76f;
+    private const float TinPartial3 = 5.40f;
+
+    /// <summary><b>Tin, picked up.</b> A short bright clink: three inharmonic partials off a
+    /// 1850 Hz fundamental, a near-instant attack, and 150 ms of ring. The upper two partials
+    /// carry their own extra decay so the clink thins as it fades instead of holding a chord.</summary>
+    public static float[] TinPickPcm()
+    {
+        const float F0 = 1850f;
+        return Render(TinPickSeconds, (t, u) =>
+        {
+            float s = Mathf.Sin(Mathf.Tau * F0 * t)
+                    + 0.55f * Mathf.Sin(Mathf.Tau * F0 * TinPartial2 * t) * Mathf.Pow(1f - u, 1.6f)
+                    + 0.28f * Mathf.Sin(Mathf.Tau * F0 * TinPartial3 * t) * Mathf.Pow(1f - u, 3.2f);
+            return s * Envelope(u, attack: 0.001f, curve: 2.4f) * 0.30f;
+        });
+    }
+
+    /// <summary><b>Tin, struck.</b> The same shell modes an octave and a half lower (620 Hz) so
+    /// the body of the can reads rather than its rim, ringing the full 400 ms, with a ~20 ms
+    /// band-limited noise burst welded to the front — the strike itself, before the shell starts
+    /// ringing. The buzz layer the packet asks for at high intensity is <see cref="Sfx.TinBuzz"/>,
+    /// a second response on the same event; see that member for why it is not baked in here.</summary>
+    public static float[] TinClankPcm()
+    {
+        const float F0 = 620f;
+        var rng = new Random(2601);
+        float lp = 0f;
+        return Render(TinClankSeconds, (t, u) =>
+        {
+            float shell = Mathf.Sin(Mathf.Tau * F0 * t)
+                        + 0.62f * Mathf.Sin(Mathf.Tau * F0 * TinPartial2 * t) * Mathf.Pow(1f - u, 2.0f)
+                        + 0.34f * Mathf.Sin(Mathf.Tau * F0 * TinPartial3 * t) * Mathf.Pow(1f - u, 3.6f);
+            float white = (float)(rng.NextDouble() * 2 - 1);
+            lp += 0.50f * (white - lp);            // filtered, so the front is a "tk" not a "ss"
+            float front = lp * Envelope(u, attack: 0.0005f, curve: 26f);
+            return shell * Envelope(u, attack: 0.0005f, curve: 1.4f) * 0.27f + front * 0.38f;
+        });
+    }
+
+    /// <summary><b>The high-intensity tin layer.</b> A 240 Hz two-harmonic tone hard amplitude-
+    /// modulated at 62 Hz — the rattle of a thin wall that has been hit harder than it can absorb.
+    /// Short (250 ms) and quiet relative to the clank, because it is a layer under a sound rather
+    /// than a sound.</summary>
+    public static float[] TinBuzzPcm()
+    {
+        const float F0 = 240f;
+        const float RattleHz = 62f;
+        return Render(TinBuzzSeconds, (t, u) =>
+        {
+            float carrier = Mathf.Sin(Mathf.Tau * F0 * t) + 0.5f * Mathf.Sin(Mathf.Tau * 2f * F0 * t);
+            float am = 0.5f + 0.5f * Mathf.Sin(Mathf.Tau * RattleHz * t);
+            return carrier * am * Envelope(u, attack: 0.003f, curve: 2.2f) * 0.32f;
+        });
+    }
+
+    /// <summary><b>Tin, set down.</b> 40 ms of rim: the same shell ratios at 3200 Hz with only two
+    /// partials and a steep decay, so it is a tick and not a chime.</summary>
+    public static float[] TinTickPcm()
+    {
+        const float F0 = 3200f;
+        return Render(TinTickSeconds, (t, u) =>
+        {
+            float s = Mathf.Sin(Mathf.Tau * F0 * t) + 0.40f * Mathf.Sin(Mathf.Tau * F0 * TinPartial2 * t);
+            return s * Envelope(u, attack: 0.0005f, curve: 3.5f) * 0.32f;
+        });
+    }
+
+    /// <summary><b>Cardboard, picked up.</b> 200 ms of band-passed noise and NOTHING else — no
+    /// tone anywhere, because the moment a tone appears the box stops being cardboard. The 20 ms
+    /// attack is what separates a rustle from a hiss: a noise burst with a fast attack reads as a
+    /// click. The slow double-sine grain on the amplitude is contents shifting.</summary>
+    public static float[] CardPickPcm()
+    {
+        var rng = new Random(4101);
+        float lp = 0f, dc = 0f;
+        return Render(CardPickSeconds, (t, u) =>
+        {
+            float white = (float)(rng.NextDouble() * 2 - 1);
+            lp += 0.30f * (white - lp);        // one-pole low-pass: takes the fizz off
+            dc += 0.06f * (lp - dc);           // ... and subtracting a slower copy of it
+            float band = lp - dc;              //     leaves a band, which is the paper region
+            float grain = 0.55f + 0.45f * Mathf.Sin(Mathf.Tau * 37f * t + Mathf.Sin(Mathf.Tau * 13f * t));
+            // 0.95, MEASURED not guessed: at 2.2 this rendered a peak of exactly 1.0, i.e. it
+            // was hitting Render's clamp and hard-clipping on the loudest grains. Band-passed
+            // noise has a high crest factor — RMS 0.15 against a peak of 1 — so a gain picked
+            // off the RMS is the trap here.
+            return band * grain * Envelope(u, attack: 0.020f, curve: 1.6f) * 0.95f;
+        });
+    }
+
+    /// <summary><b>Cardboard, struck.</b> A hollow "bop" — a 128 Hz sine sagging a third of its
+    /// pitch over 120 ms, plus a low noise puff — and then 150 ms of the same rustle as
+    /// <see cref="CardPickPcm"/>, decaying linearly. It never rings, at any intensity: the box is
+    /// a damped panel, and a ring here would make it tin.</summary>
+    public static float[] CardThudPcm()
+    {
+        var rng = new Random(4102);
+        float lp = 0f, dc = 0f;
+        return Render(CardThudBopSeconds + CardThudTailSeconds, (t, _) =>
+        {
+            // The filters advance on EVERY sample, inside and outside the bop window, so the
+            // noise is one continuous stream rather than two that restart at the seam.
+            float white = (float)(rng.NextDouble() * 2 - 1);
+            lp += 0.30f * (white - lp);
+            dc += 0.06f * (lp - dc);
+            float band = lp - dc;
+
+            float bop = 0f;
+            if (t < CardThudBopSeconds)
+            {
+                float bu = t / CardThudBopSeconds;
+                float tone = Mathf.Sin(Mathf.Tau * 128f * (1f - 0.30f * bu) * t);
+                bop = (tone * 0.62f + lp * 0.30f) * Envelope(bu, attack: 0.002f, curve: 2.6f);
+            }
+            float tail = 0f;
+            if (t >= CardThudBopSeconds)
+            {
+                float tu = (t - CardThudBopSeconds) / CardThudTailSeconds;
+                tail = band * (1f - tu) * 0.75f;   // see CardPickPcm: 1.6 clipped
+            }
+            return bop + tail;
+        });
+    }
+
+    /// <summary><b>Cardboard, set down.</b> 80 ms: the rustle again, steeper, with a barely-there
+    /// low bump under it so the box has weight without having a note.</summary>
+    public static float[] CardSettlePcm()
+    {
+        var rng = new Random(4103);
+        float lp = 0f, dc = 0f;
+        return Render(CardSettleSeconds, (t, u) =>
+        {
+            float white = (float)(rng.NextDouble() * 2 - 1);
+            lp += 0.32f * (white - lp);
+            dc += 0.07f * (lp - dc);
+            float band = lp - dc;
+            float bump = Mathf.Sin(Mathf.Tau * 110f * t) * 0.22f;
+            return (band * 1.0f + bump) * Envelope(u, attack: 0.006f, curve: 2.4f);
+        });
+    }
+
+    /// <summary><b>Produce, picked up.</b> 60 ms, one damped 180 Hz sine sagging slightly, and
+    /// nothing else — an apple leaving a shelf is almost a pat.</summary>
+    public static float[] ProducePickPcm()
+    {
+        return Render(ProducePickSeconds, (t, u) =>
+            Mathf.Sin(Mathf.Tau * 180f * (1f - 0.25f * u) * t) * Envelope(u, attack: 0.004f, curve: 3.0f) * 0.55f);
+    }
+
+    /// <summary><b>Produce, struck.</b> 100 ms: a 95 Hz damped sine with a 30 ms soft-noise front.
+    /// No ring at all — the flesh absorbs it, which is the whole difference from tin.</summary>
+    public static float[] ProduceThumpPcm()
+    {
+        var rng = new Random(3301);
+        float lp = 0f;
+        return Render(ProduceThumpSeconds, (t, u) =>
+        {
+            float white = (float)(rng.NextDouble() * 2 - 1);
+            lp += 0.09f * (white - lp);        // heavily filtered: a "pf", not a "ts"
+            float tone = Mathf.Sin(Mathf.Tau * 95f * (1f - 0.30f * u) * t);
+            float front = lp * Envelope(u, attack: 0.001f, curve: 9f);
+            return tone * Envelope(u, attack: 0.003f, curve: 2.8f) * 0.60f + front * 0.55f;
+        });
+    }
+
+    /// <summary><b>Produce, set down.</b> 70 ms: a soft plop, which is a sine whose pitch falls
+    /// fast (260 Hz to 120 Hz) rather than sags — the falling pitch IS the plop.</summary>
+    public static float[] ProducePlopPcm()
+    {
+        return Render(ProducePlopSeconds, (t, u) =>
+            Mathf.Sin(Mathf.Tau * Mathf.Lerp(260f, 120f, EaseOut(u)) * t)
+                * Envelope(u, attack: 0.003f, curve: 2.6f) * 0.50f);
+    }
+
+    /// <summary><b>Every material, thrown.</b> 120 ms of noise whose band sweeps up and back down,
+    /// swelling in and out rather than decaying from the first sample — it is air moving past
+    /// something, so it has no attack transient and no tail. Shared by all three materials: what
+    /// the object is made of becomes audible when it LANDS, not while it is in flight.</summary>
+    public static float[] WhooshPcm()
+    {
+        var rng = new Random(3501);
+        float lp = 0f, dc = 0f;
+        return Render(WhooshSeconds, (t, u) =>
+        {
+            float white = (float)(rng.NextDouble() * 2 - 1);
+            // The low-pass coefficient IS the sweep: a one-pole's corner rises with its
+            // coefficient, so moving it 0.08 -> 0.45 -> 0.08 over the clip opens and closes the
+            // band without a second filter.
+            float k = Mathf.Lerp(0.08f, 0.45f, Mathf.Sin(Mathf.Pi * Mathf.Clamp(u, 0f, 1f)));
+            lp += k * (white - lp);
+            dc += 0.05f * (lp - dc);
+            float band = lp - dc;
+            float swell = Mathf.Sin(Mathf.Pi * Mathf.Clamp(u, 0f, 1f));
+            return band * swell * 0.85f;   // see CardPickPcm: 2.0 clipped
+        });
+    }
+
+    // --- Offline render, for listening without launching the game (SFX-1) --------------------
+
+    /// <summary><b>A recipe as a complete .wav file, in bytes.</b> Pure managed code — no
+    /// <c>AudioStreamWav</c>, no <c>FileAccess</c>, no engine — so the Godot-free suite is what
+    /// writes the capture files under <c>docs/qa/</c>. A headless Godot run cannot record audio
+    /// (there is no device and the dummy driver renders nothing), so rendering the buffer offline
+    /// and writing the container by hand is the only way Talon hears these without launching the
+    /// game and standing next to a can.
+    ///
+    /// <para>16-bit PCM, one channel, at <paramref name="sampleRateHz"/>. Little-endian
+    /// throughout, which is what RIFF specifies and what every player expects.</para></summary>
+    public static byte[] WavFileBytes(float[] pcm, int sampleRateHz)
+    {
+        if (pcm == null)
+            throw new ArgumentNullException(nameof(pcm));
+        if (sampleRateHz <= 0)
+            throw new ArgumentOutOfRangeException(nameof(sampleRateHz));
+
+        const int HeaderBytes = 44;
+        const short Channels = 1;
+        const short BitsPerSample = 16;
+        int dataBytes = pcm.Length * 2;
+        var bytes = new byte[HeaderBytes + dataBytes];
+        int at = 0;
+
+        void Ascii(string s)
+        {
+            foreach (char c in s)
+                bytes[at++] = (byte)c;
+        }
+        void U32(uint v)
+        {
+            bytes[at++] = (byte)v; bytes[at++] = (byte)(v >> 8);
+            bytes[at++] = (byte)(v >> 16); bytes[at++] = (byte)(v >> 24);
+        }
+        void U16(ushort v) { bytes[at++] = (byte)v; bytes[at++] = (byte)(v >> 8); }
+
+        Ascii("RIFF");
+        U32((uint)(36 + dataBytes));     // everything after this field
+        Ascii("WAVE");
+        Ascii("fmt ");
+        U32(16);                         // PCM fmt chunk size
+        U16(1);                          // format 1 = uncompressed PCM
+        U16((ushort)Channels);
+        U32((uint)sampleRateHz);
+        U32((uint)(sampleRateHz * Channels * BitsPerSample / 8)); // byte rate
+        U16((ushort)(Channels * BitsPerSample / 8));              // block align
+        U16((ushort)BitsPerSample);
+        Ascii("data");
+        U32((uint)dataBytes);
+        for (int i = 0; i < pcm.Length; i++)
+        {
+            short s = (short)(Mathf.Clamp(pcm[i], -1f, 1f) * short.MaxValue);
+            bytes[at++] = (byte)s;
+            bytes[at++] = (byte)(s >> 8);
+        }
+        return bytes;
+    }
+
+    /// <summary>Linear resample, used only by the offline capture path to land the 48 kHz recipes
+    /// on the 44.1 kHz the capture files are asked for. Linear rather than windowed-sinc on
+    /// purpose: these are 40-400 ms percussive clips for a human to listen to, the ratio is 0.92,
+    /// and the alias energy a linear kernel leaves behind is tens of dB under material whose whole
+    /// character is already a noise band. Nothing in the GAME resamples — the engine plays the
+    /// 48 kHz buffer directly, at the project's own pinned mix rate.</summary>
+    public static float[] Resample(float[] pcm, int fromHz, int toHz)
+    {
+        if (pcm == null)
+            throw new ArgumentNullException(nameof(pcm));
+        if (fromHz <= 0 || toHz <= 0)
+            throw new ArgumentOutOfRangeException(nameof(toHz));
+        if (fromHz == toHz || pcm.Length == 0)
+            return (float[])pcm.Clone();
+
+        int count = (int)((long)pcm.Length * toHz / fromHz);
+        var outPcm = new float[count];
+        double step = (double)fromHz / toHz;
+        for (int i = 0; i < count; i++)
+        {
+            double at = i * step;
+            int i0 = (int)at;
+            int i1 = i0 + 1 < pcm.Length ? i0 + 1 : pcm.Length - 1;
+            float frac = (float)(at - i0);
+            outPcm[i] = pcm[i0] + (pcm[i1] - pcm[i0]) * frac;
+        }
+        return outPcm;
+    }
 
     // --- Plumbing --------------------------------------------------------------------
 

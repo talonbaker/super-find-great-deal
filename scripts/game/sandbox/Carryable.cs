@@ -26,7 +26,39 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
     /// from both enums together, so the mirror holds: <c>Crate</c> and <c>Ball</c> — the only
     /// two an authored .tscn serializes — keep ordinals 0 and 1, and no call site hardcodes an
     /// ordinal.</summary>
-    public enum Shape { Crate, Ball }
+    /// <remarks>SFX-1 (2026-09-19) appended <see cref="Can"/>, <see cref="Box"/> and
+    /// <see cref="Produce"/>, mirroring <c>PropKind</c> 1:1 as this enum always has. Appended,
+    /// never inserted, for the reason above.</remarks>
+    public enum Shape { Crate, Ball, Can, Box, Produce }
+
+    // --- The code-built product shapes (SFX-1) ----------------------------------------------
+    //
+    // These are the same dimensions the three authored prefabs in scenes/game/props/ carry, and
+    // they are here as well as there because a prop has TWO birth paths: an authored .tscn a
+    // level places, and PropManager.ServerSpawn building one in code (which is what
+    // --seed-test-props uses). The suite seeds forty props in a heap; nobody is going to author
+    // forty. Keeping the numbers in one place means the seeded fixture and the shelved product
+    // are the same object, which is the only way a voice-budget measurement on the fixture says
+    // anything about the game.
+
+    /// <summary>A 355 ml can: 35 mm radius, 120 mm tall.</summary>
+    public const float CanRadiusM = 0.035f;
+    public const float CanHeightM = 0.12f;
+    public const float CanMassKg = 0.35f;
+
+    /// <summary>A cereal box: 190 x 280 x 60 mm. Not a cube, and that is load-bearing — see
+    /// <see cref="ShapeFromCollider"/>.</summary>
+    public static readonly Vector3 BoxSizeM = new(0.19f, 0.28f, 0.06f);
+    public const float BoxMassKg = 0.4f;
+
+    /// <summary>A piece of produce: an 80 mm-radius sphere.</summary>
+    public const float ProduceRadiusM = 0.08f;
+    public const float ProduceMassKg = 0.25f;
+
+    /// <summary>Midpoint between <see cref="ProduceRadiusM"/> (0.08) and the ball's 0.26 — the
+    /// radius at which <see cref="ShapeFromCollider"/> stops calling a sphere produce and starts
+    /// calling it the foundation's ball.</summary>
+    private const float ProduceVsBallRadiusM = 0.17f;
 
     private const float FollowLerp = 22f;   // held-item chase; slightly laggy = alive
 
@@ -52,7 +84,17 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
     /// was already arm-carried behaves differently.</summary>
     public const float ArmfulLoadLiftFraction = 0.70f;
 
-    private const float ThunkSpeedThreshold = 2.0f;
+    /// <summary>Below this relative contact speed a collision makes no sound at all. Public since
+    /// SFX-1 because it is the LOW end of the intensity ramp — see
+    /// <see cref="ImpactIntensity"/> — and a test that restated it would be testing its own
+    /// copy.</summary>
+    public const float ThunkSpeedThreshold = 2.0f;
+
+    /// <summary>The relative contact speed at which a hit is as hard as it gets: intensity 1.
+    /// Eight metres per second is a prop thrown hard into a wall from arm's length; everything
+    /// above it clamps, because a scale with no top is a scale nobody can author against.</summary>
+    public const float ImpactSpeedCeiling = 8.0f;
+
     private const float ThunkCooldownSec = 0.4f;
     // Outline shell (INTERACTION-BIBLE §1 affordance, tide-polish-pass BUILD-SPEC §4): a
     // uniformly-scaled duplicate of the SAME mesh resource, rendered front-face-culled so only
@@ -77,11 +119,171 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
     [Export] public Shape Kind { get; set; } = Shape.Crate;
     [Export] public Color Tint { get; set; } = new(0.93f, 0.78f, 0.55f);
 
+    /// <summary><b>What this prop is made of</b> (SFX-1), and therefore which
+    /// <see cref="PresentationProfile"/> it resolves to when no explicit <see cref="Profile"/> is
+    /// authored. Default <see cref="PropMaterial.Wood"/>, which is the shared crate/ball profile,
+    /// so nothing that existed before this packet changes sound.
+    ///
+    /// <para><b>An export, and a fallback behind it, because of a measured Godot trap.</b>
+    /// <c>PropManager.AuthoredKindOf</c> records it: this project's Godot/Mono build does not
+    /// apply a NESTED PackedScene instance's own exported script properties, so
+    /// <c>Crate.tscn</c>'s authored <c>kind</c> and <c>tint</c> both read back as the C# field's
+    /// default for every authored prop. A level authors a prop as
+    /// <c>[node name="Body" parent="Prop_0" instance=ExtResource("Can.tscn")]</c>, which is
+    /// exactly that shape — so this export alone would be silently ignored on every prop a level
+    /// designer ever places, and the whole packet would work only for code-built fixtures.
+    /// <see cref="ResolveMaterial"/> therefore falls back to the prop's COLLIDER, which is a
+    /// native property and provably survives instancing.</para></summary>
+    [Export] public PropMaterial Material { get; set; } = PropMaterial.Wood;
+
     /// <summary>This item type's event→cosmetics mapping. Crate/Sphere ship on the
-    /// shared default; a future item type overrides it in its own scene, in data.</summary>
+    /// shared default; a future item type overrides it in its own scene, in data.
+    ///
+    /// <para>Left unset (the normal case), it is resolved in <see cref="_Ready"/> from
+    /// <see cref="ResolveMaterial"/>. Set explicitly in a .tscn or by spawning code, the explicit
+    /// value WINS and no material lookup happens at all — that is the escape hatch for a prop
+    /// that needs its own voice rather than its material's.</para></summary>
     [Export] public PresentationProfile? Profile { get; set; }
 
     private const string DefaultProfilePath = "res://assets/items/default/prop_presentation.tres";
+
+    /// <summary>Where each material's profile lives. One function rather than four constants so
+    /// the convention — <c>assets/items/&lt;material&gt;/prop_presentation.tres</c> — is stated
+    /// once and a new material is one enum member plus one folder.</summary>
+    public static string ProfilePathFor(PropMaterial material) => material switch
+    {
+        PropMaterial.Tin => "res://assets/items/tin/prop_presentation.tres",
+        PropMaterial.Cardboard => "res://assets/items/cardboard/prop_presentation.tres",
+        PropMaterial.Produce => "res://assets/items/produce/prop_presentation.tres",
+        _ => DefaultProfilePath,
+    };
+
+    /// <summary>The material each shape is made of, when nothing says otherwise. Pure, and public
+    /// so the Godot-free suite can pin the mapping — this is the table SHELF-1 will rely on when
+    /// it fills the aisles.</summary>
+    public static PropMaterial MaterialFor(Shape shape) => shape switch
+    {
+        Shape.Can => PropMaterial.Tin,
+        Shape.Box => PropMaterial.Cardboard,
+        Shape.Produce => PropMaterial.Produce,
+        _ => PropMaterial.Wood,
+    };
+
+    /// <summary><b>A prop's shape read off its physical collider</b>, which is the one thing about
+    /// an authored prop that survives nested-PackedScene instancing on this build (see
+    /// <see cref="Material"/> and <c>PropManager.AuthoredKindOf</c>, which now delegates here).
+    ///
+    /// <para>Two of the five discriminations are free — a cylinder is only ever a can, and there
+    /// is nothing else it could be. The other two are size, and they are written as MEANINGFUL
+    /// tests rather than thresholds wherever possible: the foundation's crate is a cube and a
+    /// cereal box is emphatically not, so "is this box a cube" separates them without a magic
+    /// number. Only the sphere split needs one, and <see cref="ProduceVsBallRadiusM"/> sits
+    /// halfway between the two authored radii (0.08 and 0.26) rather than next to either.</para>
+    ///
+    /// <para>Pure and static so the unit suite can pin every branch; it takes the shape resource
+    /// rather than the node so nothing about it needs a scene tree.</para></summary>
+    public static Shape ShapeFromCollider(Godot.Shape3D? collider) => collider switch
+    {
+        CylinderShape3D => Shape.Can,
+        SphereShape3D s => s.Radius <= ProduceVsBallRadiusM ? Shape.Produce : Shape.Ball,
+        BoxShape3D b => IsCube(b.Size) ? Shape.Crate : Shape.Box,
+        _ => Shape.Crate,
+    };
+
+    private static bool IsCube(Vector3 size) =>
+        Mathf.IsEqualApprox(size.X, size.Y) && Mathf.IsEqualApprox(size.Y, size.Z);
+
+    /// <summary>This prop's material, from the first source that has an opinion:
+    /// the <see cref="Material"/> export when it is not the <see cref="PropMaterial.Wood"/>
+    /// default (the code-built path, and the authored path on any build where Godot does apply
+    /// nested exports), then the collider (the authored path on THIS build), and finally Wood.
+    ///
+    /// <para>Ordering matters and it is this way round deliberately: the export is what an author
+    /// wrote down and the collider is an inference, so the explicit statement wins wherever it
+    /// actually arrives.</para></summary>
+    private PropMaterial ResolveMaterial()
+    {
+        if (Material != PropMaterial.Wood)
+            return Material;
+        return MaterialFor(ShapeFromCollider(GetNodeOrNull<CollisionShape3D>("CollisionShape3D")?.Shape));
+    }
+
+    /// <summary><b>How hard a contact at this relative speed reads</b>, on 0..1. Linear from
+    /// <see cref="ThunkSpeedThreshold"/> (the speed below which nothing sounds at all, so
+    /// intensity 0 is exactly the quietest audible hit) to <see cref="ImpactSpeedCeiling"/>,
+    /// clamped at both ends.
+    ///
+    /// <para>Pure and static because the gate asks for monotonic-and-clamped and that is a
+    /// property of arithmetic, not of a rigid body. MECHANICS-BIBLE: a feedback channel scaled
+    /// off a physical quantity has to be scaled off the RIGHT one — the relative speed at
+    /// contact, not this body's own speed, so that a can standing still and struck by a thrown
+    /// box is as loud as a thrown can striking a standing box.</para></summary>
+    public static float ImpactIntensity(float relativeSpeed) =>
+        Mathf.Clamp((relativeSpeed - ThunkSpeedThreshold) / (ImpactSpeedCeiling - ThunkSpeedThreshold), 0f, 1f);
+
+    /// <summary><b>Which of two colliding props plays the impact: whichever one asks first.</b>
+    /// The first call for a pair inside <paramref name="windowMsec"/> returns true and records
+    /// the claim; a second call for the same pair inside the window returns false. Pure, and it
+    /// takes its clock and its table as arguments, so the Godot-free suite can drive it.
+    ///
+    /// <para><b>Why a rule is needed at all.</b> Godot reports one prop-on-prop contact to BOTH
+    /// bodies, so an unguarded handler fires the impact twice: two sounds a millisecond apart at
+    /// almost the same position. That is not "louder", it is a flam, and with a shelf of cans
+    /// going over it also spends two voices out of fourteen per collision.</para>
+    ///
+    /// <para><b>Why FIRST-COME, and not "the lower instance id wins", which is what this was
+    /// until it was measured.</b> An id comparison is a total order and looks strictly better —
+    /// no ties, no state, no clock. It has one fatal property: it picks the winner before
+    /// knowing whether the winner will ever be asked. Measured on the stacked-can fixture in
+    /// <c>tests/Run-MaterialSfxTest.ps1</c> — a can dropped onto a can that had already settled
+    /// produced NO sound at all, run after run. Only the FALLING can got a <c>body_entered</c>
+    /// (the resting one is frozen kinematic, and Godot never asked it anything), and it happened
+    /// to hold the higher instance id because it was seeded second. The rule silenced the only
+    /// body in a position to speak.</para>
+    ///
+    /// <para><b>First-come cannot fail that way</b>: whoever is actually asked, fires. It costs a
+    /// small table and a clock, and it degrades in the right direction — the worst case is a
+    /// second callback arriving after the window, which plays one extra sound rather than
+    /// swallowing the only one.</para>
+    ///
+    /// <para>Process-local, and that is correct rather than merely tolerable: this is a
+    /// client-local cosmetic decision taken independently on every peer, and nothing requires two
+    /// peers to agree on WHICH body played it — only that each peer plays it once.</para></summary>
+    public static bool ClaimPropOnPropContact(
+        System.Collections.Generic.IDictionary<(ulong, ulong), ulong> claims,
+        ulong a, ulong b, ulong nowMsec, ulong windowMsec)
+    {
+        (ulong, ulong) key = a < b ? (a, b) : (b, a);
+        if (claims.TryGetValue(key, out ulong claimedAt) && nowMsec - claimedAt <= windowMsec)
+            return false;
+        claims[key] = nowMsec;
+        // Opportunistic prune, so a long session of collisions cannot grow this without bound.
+        // Only when the table is big enough to be worth walking, and only of entries too old to
+        // suppress anything.
+        if (claims.Count > PairClaimPruneAt)
+        {
+            var stale = new System.Collections.Generic.List<(ulong, ulong)>();
+            foreach (System.Collections.Generic.KeyValuePair<(ulong, ulong), ulong> kv in claims)
+            {
+                if (nowMsec - kv.Value > windowMsec)
+                    stale.Add(kv.Key);
+            }
+            foreach ((ulong, ulong) k in stale)
+                claims.Remove(k);
+        }
+        return true;
+    }
+
+    /// <summary>How long one prop-on-prop contact stays claimed. Comfortably longer than the few
+    /// physics ticks Godot can take to tell the second body, and far shorter than the 0.4 s
+    /// per-body cooldown, so it can never merge two genuinely separate collisions.</summary>
+    public const ulong PairClaimWindowMsec = 60;
+
+    /// <summary>Table size at which <see cref="ClaimPropOnPropContact"/> bothers to sweep — above
+    /// the number of distinct pairs one frame of a collapsing shelf can produce.</summary>
+    private const int PairClaimPruneAt = 64;
+
+    private static readonly System.Collections.Generic.Dictionary<(ulong, ulong), ulong> PairClaims = new();
 
     /// <summary>Set by NetworkedProp on a networked prop's body. When true, this class's own
     /// KillPlaneY safety net (below) stands down — the networked layer owns out-of-bounds
@@ -134,7 +336,9 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
 
     public override void _Ready()
     {
-        Profile ??= GD.Load<PresentationProfile>(DefaultProfilePath);
+        // An explicitly authored Profile wins outright; otherwise the material picks one, and
+        // PropMaterial.Wood picks the same shared default this line loaded before SFX-1.
+        Profile ??= GD.Load<PresentationProfile>(ProfilePathFor(ResolveMaterial()));
 
         AddToGroup(Group);
         ContactMonitor = true;
@@ -235,6 +439,37 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
             case Shape.Ball:
                 mesh = new SphereMesh { Radius = 0.26f, Height = 0.52f };
                 collider = new SphereShape3D { Radius = 0.26f };
+                break;
+            // SFX-1's three product shapes. The MASS is set here too, unlike Crate/Ball which
+            // leave the engine default: a can that weighs as much as a crate lags in the hand
+            // like a crate (CarrySpring reads HeftKg straight off Mass), and the whole point of
+            // three products is that they do not feel the same. An AUTHORED prefab sets mass in
+            // its own .tscn, where it is a native property and therefore actually applies.
+            case Shape.Can:
+                mesh = new CylinderMesh
+                {
+                    TopRadius = CanRadiusM, BottomRadius = CanRadiusM, Height = CanHeightM,
+                };
+                collider = new CylinderShape3D { Radius = CanRadiusM, Height = CanHeightM };
+                Mass = CanMassKg;
+                break;
+            case Shape.Box:
+                mesh = new BoxMesh { Size = BoxSizeM };
+                collider = new BoxShape3D { Size = BoxSizeM };
+                Mass = BoxMassKg;
+                break;
+            case Shape.Produce:
+                mesh = new SphereMesh { Radius = ProduceRadiusM, Height = ProduceRadiusM * 2f };
+                collider = new SphereShape3D { Radius = ProduceRadiusM };
+                Mass = ProduceMassKg;
+                // Damped, matching Produce.tscn, and for the reason that prefab records: an
+                // undamped sphere on a flat floor never stops. Measured — a code-built produce
+                // dropped 0.27 m rolled 1.9 m and the server logged "rest not good prop=3
+                // OutsideRoomBounds". The two birth paths have to agree or the seeded fixture
+                // stops being the same object as the shelved product, which is the whole reason
+                // the dimensions are shared constants.
+                LinearDamp = 2.0f;
+                AngularDamp = 3.0f;
                 break;
             default:
                 mesh = new BoxMesh { Size = new Vector3(0.44f, 0.44f, 0.44f) };
@@ -365,6 +600,12 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
         Release(-_lastAnchor.Basis.Z * 1.3f + Vector3.Up * 2.2f);
     }
 
+    /// <remarks><b>Deliberately does NOT fire <c>ActorEvent.Thrown</c></b>, and SFX-1 tried it
+    /// here first. This entry point is reached only from <c>NetworkedProp.BeginLooseServer</c>,
+    /// which is server-only — so a throw announced here is a throw only the host can hear, and
+    /// the remote player watches a can leave a hand in silence. The fire lives in
+    /// <c>NetworkedProp.BeginLoose</c> instead, which is the every-peer half of the same
+    /// transition.</remarks>
     public virtual void OnThrown(Vector3 impulse) => Release(impulse);
 
     /// <summary><b>Set down, not dropped</b> (CARRY-1's place verb): rejoin physics with no
@@ -374,7 +615,9 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
     /// exists to preserve.</summary>
     public virtual void OnPlaced()
     {
-        ActorFx.Fire(GetParent(), Profile, ActorEvent.Dropped, GlobalPosition);
+        // SFX-1: Placed, not Dropped. CARRY-1 split the verbs in the gameplay layer and left the
+        // presentation layer unable to tell them apart; see ActorEvent.Placed.
+        ActorFx.Fire(GetParent(), Profile, ActorEvent.Placed, GlobalPosition);
         Release(Vector3.Zero, Vector3.Zero);
     }
 
@@ -390,6 +633,20 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
         _holder = null;
         _springHeld = false;
     }
+
+    /// <summary><b>Server-only fixture release</b> (SFX-1): rejoin physics exactly where the body
+    /// already is, with no toss arc and NO TUMBLE, and announce nothing.
+    ///
+    /// <para>Both omissions are load-bearing. <see cref="Release(Vector3)"/> applies a random
+    /// spin of up to 2 rad/s on every axis, which is what makes a DISCARDED object look
+    /// discarded and is exactly wrong for a fixture: measured, a can released above another can
+    /// tumbled out from under itself and landed 9 cm to the side, so the collision the suite
+    /// existed to observe never happened. And the release is silent here because the
+    /// <c>ApplyPropState</c> broadcast that accompanies it already fires
+    /// <c>ActorEvent.Thrown</c> on every peer through <c>NetworkedProp.BeginLoose</c> — a second
+    /// fire would double every release. Distinct from <see cref="OnPlaced"/>, which is the
+    /// player's deliberate set-down and owns the <c>Placed</c> tick.</para></summary>
+    public void ReleaseAtRestServer() => Release(Vector3.Zero, Vector3.Zero);
 
     private void Release(Vector3 velocity) =>
         Release(velocity, new Vector3(GD.Randf() * 4 - 2, GD.Randf() * 4 - 2, GD.Randf() * 4 - 2));
@@ -410,6 +667,10 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
     public override void _PhysicsProcess(double delta)
     {
         float dt = (float)delta;
+
+        // Before the physics server integrates this step — see ApproachSpeedMps for why the
+        // velocity read inside body_entered is the wrong number for a landing.
+        ApproachSpeedMps = LinearVelocity.Length();
 
         if (!_homeSet)
         {
@@ -479,15 +740,113 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
         _thunkCooldown -= delta;
     }
 
+    /// <summary><b>How fast this body is observed to be moving on a peer that is not simulating
+    /// it</b> — written every physics tick by <c>NetworkedProp</c> while it follows the server's
+    /// loose-transform stream, and zero otherwise.
+    ///
+    /// <para><b>Without this, a prop impact was audible to the host and to nobody else</b>, and
+    /// SFX-1 is the packet that found it. A Loose prop on a non-authority peer is a FROZEN
+    /// KINEMATIC body lerped toward a streamed transform, so its <c>LinearVelocity</c> is
+    /// permanently 0 — which meant <see cref="OnBodyEntered"/>'s speed gate rejected every
+    /// contact before this existed. The bug predates this packet (<c>Thunk</c> had it too); what
+    /// is new is a packet whose entire point is that a can hitting a floor is a thing the other
+    /// player hears, and a seeker who cannot hear the hider knock something over in the next
+    /// aisle is the game not working.</para>
+    ///
+    /// <para><b>Observed rather than replicated, deliberately.</b> The alternative is putting an
+    /// impact event on the wire, which is a protocol change for a cosmetic fact that every peer
+    /// can already derive: the loose stream IS the prop's motion, and a distance over a delta is
+    /// its speed. It is slightly noisier than a real velocity — the lerp smooths the arrival, so
+    /// this under-reads a hard impact rather than over-reading it, which is the right direction
+    /// for a threshold.</para></summary>
+    public float ObservedSpeedMps { get; set; }
+
+    /// <summary><b>This body's speed as it entered the current physics step</b>, before the
+    /// solver touched it — sampled at the top of <see cref="_PhysicsProcess"/>, which Godot calls
+    /// before the physics server integrates.
+    ///
+    /// <para><b>Reading LinearVelocity inside body_entered does not give you the impact speed,
+    /// and the failure is one-sided, which is what makes it so easy to miss.</b> Measured here:
+    /// a can and a cereal box thrown into a WALL reported 4.0 and 6.3 m/s and sounded correctly,
+    /// while four props dropped 0.6-1.1 m onto the FLOOR reported under the 2 m/s audible floor
+    /// and were silent — every single time, run after run. A glancing contact leaves residual
+    /// velocity for the signal handler to read; a head-on landing has already had its normal
+    /// impulse applied by the time the signal is emitted, so the handler reads a body that has
+    /// stopped. Half the impacts in a game working is exactly the kind of bug that ships.</para></summary>
+    public float ApproachSpeedMps { get; private set; }
+
+    /// <summary><b>The speed that actually matters at a contact</b> (SFX-1): this body's velocity
+    /// relative to what it hit, when what it hit is another rigid body, and its own velocity
+    /// otherwise (static world geometry has no velocity to subtract).
+    ///
+    /// <para>Before SFX-1 the gate read this body's own <c>LinearVelocity</c> unconditionally,
+    /// which is correct for the only case that existed — a prop thrown at a wall — and silently
+    /// wrong for two cases this packet cares about. A can sitting on a shelf that a thrown box
+    /// slams into is stationary, so its own speed is zero and it would have made no sound at all
+    /// while being knocked across the room; and on any peer that is not simulating the prop, the
+    /// velocity is zero forever (see <see cref="ObservedSpeedMps"/>).</para></summary>
+    private float RelativeContactSpeed(Node body)
+    {
+        float ownSpeed = SpeedOf(this);
+        if (body is not RigidBody3D other)
+            return ownSpeed;
+        float otherSpeed = other is Carryable otherProp ? SpeedOf(otherProp) : other.LinearVelocity.Length();
+        // Both bodies genuinely simulating: the vector difference is the real relative speed and
+        // is what a head-on collision needs (two props closing at 3 m/s each meet at 6, not 0).
+        // Where either side is only OBSERVED, there is no direction to subtract — the stream
+        // gives a distance per tick, not a velocity — so fall back to the faster of the two,
+        // which is the quantity that decides whether a contact was hard.
+        // Where either side is a body this peer is not simulating, or where the solver has
+        // already eaten the velocity, there is no usable direction to subtract — every source
+        // below is a SPEED, not a velocity — so the relative figure is the faster of the two,
+        // which is the quantity that decides whether a contact was hard.
+        return Mathf.Max(ownSpeed, otherSpeed);
+    }
+
+    /// <summary>The best available speed for a body at the moment of contact: whichever of the
+    /// three sources is largest. Live velocity is right for a glancing hit; the pre-step approach
+    /// speed is right for a landing the solver has already stopped; the observed speed is the
+    /// only one a non-simulating peer has at all.</summary>
+    private static float SpeedOf(Carryable body) =>
+        Mathf.Max(body.LinearVelocity.Length(), Mathf.Max(body.ApproachSpeedMps, body.ObservedSpeedMps));
+
     private void OnBodyEntered(Node body)
     {
         if (IsHeld || _thunkCooldown > 0)
             return;
-        if (LinearVelocity.Length() < ThunkSpeedThreshold)
+        float relativeSpeed = RelativeContactSpeed(body);
+        if (relativeSpeed < ThunkSpeedThreshold)
             return;
+        // Prop on prop: Godot tells BOTH bodies about the one contact, so exactly one of them
+        // plays it. See WinsPropOnPropContact for the rule and why it is instance id. The loser
+        // still takes the cooldown: it participated in a contact, and without this a shelf going
+        // over would have every prop firing on the NEXT contact of the same pile-up 16 ms later.
+        if (body is Carryable otherProp)
+        {
+            bool claimed = ClaimPropOnPropContact(PairClaims, GetInstanceId(),
+                otherProp.GetInstanceId(), Time.GetTicksMsec(), PairClaimWindowMsec);
+            // The SUPPRESSION is logged, not just the sound. Without this line the
+            // once-per-contact rule can only be checked by inference — "exactly one Impact
+            // appeared near this position at this moment" — which cannot tell a rule that
+            // suppressed the duplicate from a contact that only ever reported one body, and
+            // those are very different states of the world. With it, the suite asserts the
+            // thing directly: a suppression happened, and its partner played.
+            if (!claimed)
+            {
+                if (ActorFx.LogSfx)
+                {
+                    GD.Print($"[sfx] pair-suppressed self={GetParent()?.Name} "
+                        + $"other={otherProp.GetParent()?.Name} speed={relativeSpeed:F2} "
+                        + $"t={Time.GetTicksMsec()}");
+                }
+                _thunkCooldown = ThunkCooldownSec;
+                return;
+            }
+        }
         _thunkCooldown = ThunkCooldownSec;
         PunchScale(new Vector3(1.2f, 0.78f, 1.2f));
-        ActorFx.Fire(GetParent(), Profile, ActorEvent.Impact, GlobalPosition);
+        ActorFx.Fire(GetParent(), Profile, ActorEvent.Impact, GlobalPosition,
+            ImpactIntensity(relativeSpeed));
     }
 
     protected void PunchScale(Vector3 to)

@@ -21,6 +21,14 @@ public partial class EventResponse : Resource
     [Export] public float PitchJitter { get; set; } = 0.08f;
     /// <summary>dB added at intensity 1 (linear in intensity: final = VolumeDb + boost × i).</summary>
     [Export] public float IntensityVolumeBoostDb { get; set; }
+    /// <summary><b>Pitch multiplier delta at intensity 1</b> (SFX-1): the played pitch scale is
+    /// <c>1 + IntensityPitchRange × i</c>, applied under the random <see cref="PitchJitter"/>.
+    /// Signed, and the sign is the point — tin goes UP when it is hit harder (a thin shell
+    /// struck hard excites its higher modes) while cardboard and produce go DOWN (more of the
+    /// panel or the flesh is moving, so the effective mass rises). Zero by default, so every
+    /// response authored before this field existed plays at exactly the pitch it always
+    /// did.</summary>
+    [Export] public float IntensityPitchRange { get; set; }
     /// <summary>Response is skipped entirely below this intensity (e.g. dust only on hard falls).</summary>
     [Export] public float MinIntensity { get; set; }
 

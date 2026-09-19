@@ -215,11 +215,25 @@ public class FootstepCullTests
             "footsteps at cap plus water at its own cap would exceed the one-shot pool");
 
         // POSITIVE CONTROL: the uncapped figure this change exists to prevent.
+        //
+        // RESTATED IN SFX-1 (2026-09-19), and the reason is this test's own doc. It used to read
+        // `uncapped > SfxLab.PoolSize - 6`, which was true at a pool of 14 (12 > 8) and is false
+        // at the 18 this packet measured its way to (12 > 12). A positive control that quietly
+        // stops being able to fire is precisely the failure the paragraph above warns about, and
+        // it would have been invisible: the test simply goes red on the control line with the
+        // safety assertions still green, which is the good outcome of a badly-written control.
+        //
+        // So it is stated against the CAP rather than against the pool: what the cull exists to
+        // do is make the worst case stop tracking the lobby, and that is true at any pool size.
+        // The absolute headroom bar above is still what defends the pool; this defends the cull.
         int uncapped = Players * ShotsPerFootfall;
         Assert.Equal(12, uncapped);
-        Assert.True(uncapped > SfxLab.PoolSize - 6,
-            $"POSITIVE CONTROL FAILED: {uncapped} of {SfxLab.PoolSize} slots was not recognised as "
-            + "eating the headroom, so the safety assertion above certifies nothing");
+        Assert.True(uncapped > culled,
+            $"POSITIVE CONTROL FAILED: uncapped {uncapped} is not more than the capped {culled}, "
+            + "so the cap is culling nothing and the safety assertions above certify nothing");
+        Assert.True(SfxLab.PoolSize - uncapped < headroom,
+            $"POSITIVE CONTROL FAILED: uncapped footsteps leave {SfxLab.PoolSize - uncapped} slots "
+            + $"against the cap's {headroom} — the cull is not buying headroom");
     }
 
     [Fact]

@@ -2,6 +2,7 @@ using Godot;
 using MpFoundation.Net;
 using MpFoundation.Game.Sandbox;
 using MpFoundation.Game.Sandbox.Feel;
+using MpFoundation.Game.Presentation;
 
 namespace MpFoundation.Game.Props;
 
@@ -115,11 +116,17 @@ public partial class NetworkedProp : Node3D
         // we get here. Reuse it; never `new` a Carryable over an authored one. Runtime-spawned
         // props (SpawnFromData -> Init, before this node is even in the tree) have no such child
         // yet, so this falls back to building one exactly as before.
-        Body = GetNodeOrNull<Carryable>("Body") ?? Kind switch
-        {
-            PropKind.Ball => new Carryable { Kind = Carryable.Shape.Ball },
-            _ => new Carryable { Kind = Carryable.Shape.Crate },
-        };
+        // Carryable.Shape mirrors PropKind 1:1 by construction — both enums say so, and SFX-1's
+        // three appended members kept the mirror — so this is one cast rather than a switch that
+        // has to be remembered on every append. The `Material` that rides with it is what makes
+        // a code-built (--seed-test-props) can sound like tin: an authored prefab resolves its
+        // material from its collider instead, because a nested PackedScene instance's exported
+        // script properties are not applied on this build (see Carryable.Material).
+        Carryable.Shape shape = System.Enum.IsDefined(typeof(Carryable.Shape), (int)Kind)
+            ? (Carryable.Shape)(int)Kind
+            : Carryable.Shape.Crate;
+        Body = GetNodeOrNull<Carryable>("Body")
+            ?? new Carryable { Kind = shape, Material = Carryable.MaterialFor(shape) };
         if (Body.GetParent() == null)
         {
             Body.Name = "Body";
@@ -303,6 +310,18 @@ public partial class NetworkedProp : Node3D
         Body.OnThrown(impulse);
     }
 
+    /// <summary>Server-only, test fixture (<c>--seed-props-drop</c>): let a seeded prop FALL from
+    /// where it was seeded, with no impulse and no spin. The <c>Loose</c> broadcast that goes with
+    /// it is the ordinary one, so every peer follows the stream exactly as it would for a throw;
+    /// what differs is only that nothing threw it. See <c>PropManager.StepSeededDrop</c>.</summary>
+    public void DropLooseServer()
+    {
+        HolderPeerId = 0;
+        _netHolder = null;
+        ClearSpring();
+        Body.ReleaseAtRestServer();
+    }
+
     /// <summary>
     /// Server-only: <b>the place verb's release</b> — put the prop exactly at
     /// <paramref name="at"/> and hand it to physics with no linear velocity and no spin, so it
@@ -339,6 +358,30 @@ public partial class NetworkedProp : Node3D
         _netHolder = null;
         ClearSpring();
         Body.ReleaseHoldForNetworkFollow();
+        // SFX-1: THE RELEASE, ANNOUNCED WHERE EVERY PEER CAN HEAR IT.
+        //
+        // This is the every-peer half of Held -> Loose (ApplyPropState is CallLocal), and it is
+        // the only place in that transition that runs everywhere. Carryable.OnThrown looks like
+        // the natural home and is not: it is reached only from BeginLooseServer, so a throw
+        // announced there is a throw only the host hears, and on the remote player's screen a
+        // can leaves a hand in silence. Measured, not assumed — the first run of
+        // tests/Run-MaterialSfxTest.ps1 logged the pickups on a client and none of the throws.
+        //
+        // A PLACE ALSO ARRIVES HERE, and a peer cannot tell it from a throw. That is a fact
+        // about the wire rather than a shortcut: CARRY-1's own handoff records that "at
+        // ApplyPropState a place and a drop are the same Held->Loose transition and are
+        // indistinguishable there". Separating them costs one bit on that RPC. Until somebody
+        // spends it, every release plays the same brief shared Whoosh, which is the one sound in
+        // this palette that is a fact about the ARM rather than about the object — so it is the
+        // least wrong thing to play when the object's own verb is unknown. The deliberate
+        // set-down tick (ActorEvent.Placed) stays on the server's PlaceLooseServer path, where
+        // the verb IS known, and is therefore host-only today. Written down rather than hidden.
+        // `this`, NOT GetParent(). Carryable's own fires pass ITS parent, which is this node —
+        // so passing this node's parent would anchor the sound one level too high, on the shared
+        // Props root. Measured: the first run logged every release as `src=Props` instead of
+        // `src=<propId>`, which is a real defect and not only a logging one, because ActorFx's
+        // context is also the particle anchor and every prop in the world would have shared it.
+        ActorFx.Fire(this, Body.Profile, ActorEvent.Thrown, Body.GlobalPosition);
         _looseFollowing = true;
         _netLooseTarget = t;
         if (!Body.Freeze)
@@ -385,10 +428,23 @@ public partial class NetworkedProp : Node3D
         // IS the simulation (RigidBody3D physics runs on it directly, no follow needed), and a
         // prop that isn't currently Loose has nothing to chase.
         if (!_looseFollowing || IsServer)
+        {
+            // Stale-speed guard: the field below is written only while a stream is being
+            // followed, so the last value of a finished episode would otherwise persist forever
+            // and make a prop that has been resting for a minute read as travelling at 4 m/s the
+            // next time anything touched it.
+            if (IsInstanceValid(Body) && Body.ObservedSpeedMps != 0f)
+                Body.ObservedSpeedMps = 0f;
             return;
+        }
         float w = 1f - Mathf.Exp(-25f * (float)delta);
-        Body.GlobalPosition = Body.GlobalPosition.Lerp(_netLooseTarget.Origin, w);
+        Vector3 before = Body.GlobalPosition;
+        Body.GlobalPosition = before.Lerp(_netLooseTarget.Origin, w);
         Body.GlobalBasis = Body.GlobalBasis.Orthonormalized().Slerp(_netLooseTarget.Basis.Orthonormalized(), w);
+        // SFX-1: hand the body the speed it is OBSERVED travelling at, because it has no
+        // LinearVelocity of its own here. See Carryable.ObservedSpeedMps for why an impact was
+        // otherwise inaudible to everyone except the host.
+        Body.ObservedSpeedMps = delta > 0 ? (Body.GlobalPosition - before).Length() / (float)delta : 0f;
     }
 
     /// <summary>One holder-side carry tick. The pose the spring trails is the holder's own carry

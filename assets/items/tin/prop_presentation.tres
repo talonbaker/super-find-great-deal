@@ -1,0 +1,64 @@
+[gd_resource type="Resource" load_steps=8 format=3]
+
+[ext_resource type="Script" path="res://scripts/game/presentation/PresentationProfile.cs" id="1"]
+[ext_resource type="Script" path="res://scripts/game/presentation/EventResponse.cs" id="2"]
+
+; TIN — the can (SFX-1, 2026-09-19).
+;
+; Sound ordinals: 25 TinPick, 26 TinClank, 27 TinBuzz, 28 TinTick, 35 Whoosh (shared).
+; Event ordinals: 6 PickedUp, 8 Thrown, 9 Impact, 14 Placed.
+; Both enums are append-only .tres contracts — see Sfx and ActorEvent. NEVER renumber.
+;
+; TIN IS THE ONE MATERIAL THAT GOES UP WITH INTENSITY. IntensityPitchRange is +0.18 here and
+; negative on the other two: a thin shell struck harder excites its higher modes, so the clank
+; brightens; a cardboard panel or an apple struck harder moves more mass, so it darkens. That
+; sign is the single most legible thing in this file and it is deliberate on both counts.
+;
+; Impact maps TWO responses, which is how "add a buzz layer at high intensity" is expressed
+; without a code path: a baked one-shot cannot vary its own timbre, so the rattle is a separate
+; response gated on MinIntensity 0.6 and ActorFx's existing intensity gate does the deciding.
+; Talon retunes the threshold here, in data.
+
+[sub_resource type="Resource" id="tin_pick"]
+script = ExtResource("2")
+Event = 6
+Sound = 25
+VolumeDb = -7.0
+PitchJitter = 0.08
+
+[sub_resource type="Resource" id="tin_clank"]
+script = ExtResource("2")
+Event = 9
+Sound = 26
+VolumeDb = -9.0
+PitchJitter = 0.06
+IntensityVolumeBoostDb = 8.0
+IntensityPitchRange = 0.18
+
+[sub_resource type="Resource" id="tin_buzz"]
+script = ExtResource("2")
+Event = 9
+Sound = 27
+VolumeDb = -14.0
+PitchJitter = 0.05
+IntensityVolumeBoostDb = 4.0
+IntensityPitchRange = 0.1
+MinIntensity = 0.6
+
+[sub_resource type="Resource" id="tin_tick"]
+script = ExtResource("2")
+Event = 14
+Sound = 28
+VolumeDb = -12.0
+PitchJitter = 0.1
+
+[sub_resource type="Resource" id="tin_whoosh"]
+script = ExtResource("2")
+Event = 8
+Sound = 35
+VolumeDb = -13.0
+PitchJitter = 0.1
+
+[resource]
+script = ExtResource("1")
+Responses = [SubResource("tin_pick"), SubResource("tin_clank"), SubResource("tin_buzz"), SubResource("tin_tick"), SubResource("tin_whoosh")]

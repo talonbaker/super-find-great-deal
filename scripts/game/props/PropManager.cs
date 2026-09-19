@@ -284,14 +284,20 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
         // portal, portals live only in bubbletest, and bubbletest is deliberately prop-free. Empty
         // on every launch that did not ask, so this loop does nothing in a real session.
         //
-        // Ordinary ServerSpawn, ordinary PropKind.Crate: a seeded crate is indistinguishable from
-        // a propsync crate the moment it is in someone's hands, which is the whole point — a
-        // fixture with its own carry path would prove nothing about carry.
+        // Ordinary ServerSpawn, ordinary PropKind: a seeded prop is indistinguishable from an
+        // authored one the moment it is in someone's hands, which is the whole point — a fixture
+        // with its own carry path would prove nothing about carry. SFX-1 added the per-entry
+        // kind so the material suite can seed a mixed heap; the default is still Crate, so every
+        // caller written before it is unchanged.
         if (NetworkManager.Instance?.Options.SeedTestProps is { Count: > 0 } seeded)
         {
-            foreach (Vector3 at in seeded)
-                ServerSpawn(PropKind.Crate, PlaceAt(at));
-            GD.Print($"[props] --seed-test-props: seeded {seeded.Count} test crate(s) in world '{world}'");
+            foreach ((Vector3 at, PropKind kind) in seeded)
+            {
+                NetworkedProp? spawned = ServerSpawn(kind, PlaceAt(at));
+                if (spawned != null)
+                    _seededIds.Add(spawned.PropId);
+            }
+            GD.Print($"[props] --seed-test-props: seeded {seeded.Count} test prop(s) in world '{world}'");
         }
 
         if (world != "propsync")
@@ -351,8 +357,12 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
     /// <i>"It names a POSE, never a rule about what may be carried"</i> — the pose layer simply
     /// had no predicate of its own to ask. Every shipped kind is an armful today; the predicate
     /// stays so a future handled kind is one line here rather than a scattered special case.</summary>
+    /// <remarks>SFX-1 appended the three product kinds. None of them has a handle either — a can
+    /// and an apple are small enough to palm, but the body's pose layer has exactly two poses and
+    /// "both hands, under it" is the less wrong of the two for a thing with no grip. A one-handed
+    /// pose is a pose-layer packet, not a sound packet.</remarks>
     public static bool IsArmfulPose(PropKind kind) =>
-        kind is PropKind.Crate or PropKind.Ball;
+        kind is PropKind.Crate or PropKind.Ball or PropKind.Can or PropKind.Box or PropKind.Produce;
 
     /// <summary>Which prop kinds ride slightly ABOVE the carry mount so the armful hands end up
     /// under the load instead of inside it — see <c>Carryable.ArmfulLoadLiftFraction</c> for the
@@ -360,6 +370,55 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
     /// <see cref="IsArmfulPose"/> rather than as a second literal list so it cannot drift out of
     /// step with the pose predicate.</summary>
     public static bool TakesLoadLift(PropKind kind) => IsArmfulPose(kind);
+
+    // --- --seed-props-drop: let the fixture FALL, once, on a clock (SFX-1, 2026-09-19) --------
+    //
+    // WHY THIS HAD TO EXIST. A prop from ServerSpawn is born Resting, and NetworkedProp._Ready
+    // freezes a Resting prop kinematic on every peer — so a --seed-test-props fixture hangs
+    // exactly where it was seeded, in mid-air, forever. That is correct for every suite before
+    // this one (they all walk a bot up to a prop and grab it) and it is fatal to SFX-1's
+    // voice-budget measurement, whose whole event is forty props landing at once. Measured, not
+    // reasoned: the first run of tests/Run-MaterialSfxTest.ps1 seeded forty props 0.5–2.5 m up
+    // and the windowed peer logged sixteen sounds, every one of them a footstep.
+    //
+    // ON A CLOCK rather than at spawn, because SpawnInitialProps runs before any client has
+    // connected: a drop there is a drop nobody is present to hear, and by the time a peer joins
+    // the late-join dump hands it forty resting props. The delay is what puts the event inside
+    // the session.
+    //
+    // Server-only, off unless asked, and it fires EXACTLY ONCE — a re-drop loop would be a
+    // permanent noise source rather than an event.
+    private readonly System.Collections.Generic.List<int> _seededIds = new();
+    private double _seededDropClock;
+    private bool _seededDropFired;
+
+    private void StepSeededDrop(double delta)
+    {
+        double at = NetworkManager.Instance?.Options.SeedPropsDropAtSec ?? -1;
+        if (_seededDropFired || at < 0 || _seededIds.Count == 0)
+            return;
+        _seededDropClock += delta;
+        if (_seededDropClock < at)
+            return;
+        _seededDropFired = true;
+        int dropped = 0;
+        foreach (int id in _seededIds)
+        {
+            NetworkedProp? node = NodeFor(id);
+            if (node == null || !_registry.TryGet(id, out PropState s) || s.Mode != PropMode.Resting)
+                continue;
+            // The ordinary release path, deliberately: the same registry transition, the same
+            // reliable broadcast and the same BeginLooseServer a thrown prop takes, so what the
+            // budget measures is the real Loose pipeline rather than a test-only shortcut.
+            Transform3D pose = node.Body.GlobalTransform;
+            _registry.SetHolder(id, 1);
+            _registry.Release(id, pose);
+            Rpc(MethodName.ApplyPropState, id, (int)PropMode.Loose, 0, pose);
+            node.DropLooseServer();
+            dropped++;
+        }
+        GD.Print($"[props] --seed-props-drop: released {dropped} seeded prop(s) into Loose at t={_seededDropClock:F2}s");
+    }
 
     /// <summary>Server-only: drives every Loose prop's physics tick. Streams its live transform
     /// to every peer (unreliable — the next tick supersedes a dropped one), latches it to Resting
@@ -371,6 +430,7 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
     {
         if (!_isServer)
             return;
+        StepSeededDrop(delta);
         _streamTick++;
         // Reuse a persistent scratch list instead of allocating a fresh List<PropState> every
         // physics tick (60 Hz) - this loop needs a snapshot because a Loose prop settling to
@@ -658,10 +718,15 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
     /// native engine properties like <c>mass</c>/<c>transform</c> on the same instanced nodes are
     /// unaffected). <see cref="CollisionShape3D.Shape"/> is itself a native property, so it
     /// reliably survives instancing and needs no scene-authoring workaround.</summary>
+    /// <remarks>SFX-1 (2026-09-19) moved the rule itself into
+    /// <see cref="Carryable.ShapeFromCollider"/> and extended it to the three product shapes,
+    /// so the sound layer and the authority layer read one table instead of two. This method
+    /// keeps its name, its doc above and its job — mapping the body's shape onto the wire enum —
+    /// and is now one cast, because <c>Carryable.Shape</c> mirrors <see cref="PropKind"/> 1:1 by
+    /// construction (the mirror is stated on both enums).</remarks>
     private static PropKind AuthoredKindOf(Carryable body) =>
-        body.GetNodeOrNull<CollisionShape3D>("CollisionShape3D")?.Shape is SphereShape3D
-            ? PropKind.Ball
-            : PropKind.Crate;
+        (PropKind)(int)Carryable.ShapeFromCollider(
+            body.GetNodeOrNull<CollisionShape3D>("CollisionShape3D")?.Shape);
 
     private static void CollectNetworkedProps(Node n, System.Collections.Generic.List<NetworkedProp> found)
     {
