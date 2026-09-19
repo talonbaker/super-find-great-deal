@@ -23,6 +23,13 @@
          round columns BotHarness samples -- phase, round index, both roles, the score map and the
          frozen card. That is the absolute-wire property in a live session: one message, and every
          peer that applied it holds the same view.
+      4. A MATCH IS TWO ROUNDS AND THEN SOMEBODY HAS WON (MATCH-1). The script runs TWO whole
+         rounds and then a third Start. Asserted from both bots' OWN logs rather than from the
+         server's: matchOver FALSE on round 1's card and TRUE on round 2's, the winner id equal
+         to whichever peer actually holds the higher total on the wire, the match tally armed
+         longer than the round tally, and every score row back at zero after the third Start.
+         The negative half is the point -- an implementation that ended a match every round
+         passes "round 2 ended one" on its own, and so does one that never reset a score.
 
     HOW IT IS DRIVEN. --round-script (a dev flag, server-side, additive-only -- see
     ScriptedRoundFactSource) feeds the facts BTN-1's buttons, CARRY-1's bin and TASK-1's towers
@@ -88,17 +95,48 @@ $VestibuleClearanceM = 2.0 * $ArrivalRadiusM
 
 # The schedule. Seconds from the FIRST PLAYER ARRIVING (see the driver's script-clock gate), so
 # these are margins over connection time, not guesses about it.
+#
+# ROUND 1 -- the round, and the named refusal in front of it
 #   4  a Start with empty hands -> refused, named, round does not begin
 #   8  Start properly            -> Hiding, hider to the search room
 #   14 Confirm                   -> Seeking, hider to the task room, seeker to the search room
+#   18 towers:3                  -> the hider's score for this round
 #   22 the object is in the bin  -> Together, seeker to the vestibule
-#   28 End                       -> Tally
-#   +6 s of Tally                -> the reset edge, everyone back to the holding room
-$Script = "noobject@3,start@4,object@6,start@8,confirm@14,towers:3@18,found@22,end@28"
+#   28 End                       -> Tally, card for round 1, matchOver=FALSE, 6 s of tally
+#   +6 s                         -> the reset edge, everyone home, ROLES SWAP
+#
+# ROUND 2 -- the other half of match 1 (MATCH-1)
+#   36 lost                      -> THE BIN IS EMPTIED. Mandatory, and it is the one thing the
+#                                   packet's own two-round script is missing: `found` is a LEVEL,
+#                                   not a pulse (a bin holding the target keeps holding it), so a
+#                                   second round started with it still set walks Hiding -> Seeking
+#                                   -> Together in one tick and never tests anything.
+#   40 Start                     -> Hiding, round 2
+#   44 towers:1                  -> a DIFFERENT tower count, so the two cards cannot be confused
+#                                   for each other and the two totals cannot come out equal
+#   46 Confirm                   -> Seeking
+#   58 the object is in the bin  -> Together
+#   63 End                       -> Tally, card for round 2, matchOver=TRUE, 10 s of MATCH tally
+#   +10 s                        -> the reset edge
+#
+# ROUND 3 -- the Start that begins match 2
+#   78 Start                     -> Hiding, round 3, AND THE SCORES GO BACK TO ZERO. This is the
+#                                   only observable difference between the Start that begins a
+#                                   match and the Start that begins a round, which is why the
+#                                   suite has to run a third one to see it at all.
+#
+# The expected arithmetic, at the shipping tuning (seek 180 s):
+#   round 1: hider +3, seeker +172 (180 - 8)   -> A=3,   B=172
+#   round 2: hider +1, seeker +168 (180 - 12)  -> B=173, A=171   (roles swapped)
+#   match 1: B WINS 173-171
+# Both totals stay under the wire's 255 byte clamp on purpose.
+$Script = ("noobject@3,start@4,object@6,start@8,confirm@14,towers:3@18,found@22,end@28," +
+           "lost@36,start@40,towers:1@44,confirm@46,found@58,end@63,start@78")
 
-# Bot lifetime: the schedule's last beat (28) plus the tally (6) plus a settle. A CEILING, not an
-# assumption about when anything lands -- every assertion below is anchored on a server log line.
-$BotDurationSec = 46
+# Bot lifetime: the schedule's last beat (78) plus a settle long enough to log a dozen samples of
+# round 3's Hiding with the scores already zeroed. A CEILING, not an assumption about when
+# anything lands -- every assertion below is anchored on a server log line or on a card.
+$BotDurationSec = 95
 
 Write-Host "=== ROUND-1: the hide-seek round, driven once end to end ===" -ForegroundColor White
 
@@ -378,64 +416,276 @@ try {
     }
 
     # ==========================================================================================
-    # 4. Both peers held the SAME round state at Tally
+    # 4. Both peers held the SAME round state at Tally, for EVERY round the match ran
+    #
+    # Keyed by the round each card is ABOUT (HideSeekTally carries its own RoundIndex, because the
+    # live index has already advanced by the time the card exists). A later sample of the same
+    # round replaces an earlier one, so the map holds the settled version of each card.
     # ==========================================================================================
-    $tallyViews = @()
+    #
+    # TWO maps, and the difference between them is a real distinction rather than bookkeeping.
+    # A card OUTLIVES the numbers it describes: it is still the peer's LastTally long after the
+    # Tally phase ended, and the Start that begins the next match zeroes the live score map while
+    # the card still reads 173-171. So:
+    #   Cards         -- the last sample carrying each card. Use it for the card's OWN frozen
+    #                    fields, and to prove they survived the reset.
+    #   CardsAtTally  -- the last sample carrying each card WHILE ITS TALLY WAS ON SCREEN
+    #                    (phase ordinal 4). The only instant at which the live score map and the
+    #                    card are describing the same moment, so every live-vs-card comparison
+    #                    belongs here.
+    # The first version of this suite used one map for both and failed with "the totals on the
+    # wire are level at 0 but the card names peer N the winner" -- the suite reading the live map
+    # one round too late, which is precisely the bug the frozen totals exist to prevent, caught
+    # against the suite instead of against the game.
+    function Get-CardsByRound($Samples, [int]$PhaseFilter = -1) {
+        $cards = @{}
+        foreach ($s in @($Samples)) {
+            if (-not [bool]$s.roundSynced) { continue }
+            if ($null -eq $s.roundTally) { continue }
+            if ($PhaseFilter -ge 0 -and [int]$s.roundPhase -ne $PhaseFilter) { continue }
+            $cards[[int]$s.roundTally.roundIndex] = $s
+        }
+        return ,$cards
+    }
     foreach ($b in $bots) {
-        # Phase ordinal 4 = Tally (HideSeekPhase). The LAST Tally sample this peer logged: by then
-        # every message of that phase has landed on both.
-        $t = $null
-        foreach ($s in @($b.Samples)) {
-            if ([bool]$s.roundSynced -and [int]$s.roundPhase -eq 4) { $t = $s }
-        }
-        if ($null -eq $t) {
-            Add-Failure "$($b.Name) never logged a synced sample in the Tally phase"
-        } else {
-            $tallyViews += ,@{ Name = $b.Name; S = $t }
-        }
+        $b.Cards = Get-CardsByRound $b.Samples
+        $b.CardsAtTally = Get-CardsByRound $b.Samples 4
     }
 
-    if ($tallyViews.Count -eq 2) {
-        $a = $tallyViews[0].S; $c = $tallyViews[1].S
-        foreach ($field in @("roundIndex", "roundHider", "roundSeeker")) {
-            if ([string]$a.$field -ne [string]$c.$field) {
-                Add-Failure ("at Tally the two peers disagree on $field " +
-                             "($($tallyViews[0].Name)=$($a.$field), $($tallyViews[1].Name)=$($c.$field))")
+    # Phase ordinal 4 = Tally (HideSeekPhase): every peer must have SEEN the phase, not merely
+    # folded a card at some point.
+    foreach ($b in $bots) {
+        $sawTally = $false
+        foreach ($s in @($b.Samples)) {
+            if ([bool]$s.roundSynced -and [int]$s.roundPhase -eq 4) { $sawTally = $true }
+        }
+        if (-not $sawTally) { Add-Failure "$($b.Name) never logged a synced sample in the Tally phase" }
+    }
+
+    # Every field of every card, compared between the two independent logs. This is the
+    # absolute-wire property applied to MATCH-1's five new fields as well as ROUND-1's five.
+    $cardFields = @("roundIndex", "hiderPeerId", "hiderGained", "seekerPeerId", "seekerGained",
+                    "endedByDisconnect", "matchOver", "matchIndex", "winnerPeerId",
+                    "hiderTotal", "seekerTotal")
+    foreach ($round in @(1, 2)) {
+        $rows = @()
+        foreach ($b in $bots) {
+            if (-not $b.CardsAtTally.ContainsKey($round)) {
+                Add-Failure "$($b.Name) never folded round $round's card during its own Tally -- that round never finished on this peer"
+            } else {
+                $rows += ,@{ Name = $b.Name; S = $b.CardsAtTally[$round] }
             }
         }
-        if ($null -eq $a.roundTally -or $null -eq $c.roundTally) {
-            Add-Failure "one or both peers reached Tally with no card folded at all"
-        } else {
-            foreach ($field in @("roundIndex", "hiderPeerId", "hiderGained", "seekerPeerId", "seekerGained")) {
-                if ([string]$a.roundTally.$field -ne [string]$c.roundTally.$field) {
-                    Add-Failure ("at Tally the two peers' cards disagree on $field " +
-                                 "($($a.roundTally.$field) vs $($c.roundTally.$field))")
-                }
+        if ($rows.Count -ne 2) { continue }
+        $a = $rows[0].S; $c = $rows[1].S
+        foreach ($field in $cardFields) {
+            if ([string]$a.roundTally.$field -ne [string]$c.roundTally.$field) {
+                Add-Failure ("round $round's card disagrees on $field between the two peers " +
+                             "($($rows[0].Name)=$($a.roundTally.$field), $($rows[1].Name)=$($c.roundTally.$field))")
             }
-            Write-Host ("        card: round $($a.roundTally.roundIndex), hider $($a.roundTally.hiderPeerId) " +
-                        "+$($a.roundTally.hiderGained), seeker $($a.roundTally.seekerPeerId) " +
-                        "+$($a.roundTally.seekerGained)") -ForegroundColor DarkGray
         }
-        # The score maps, compared key by key. This is the absolute-wire property: one message,
-        # every peer that applied it holding the same view.
+        Write-Host ("        card round $($a.roundTally.roundIndex) (match $($a.roundTally.matchIndex)): " +
+                    "hider $($a.roundTally.hiderPeerId) +$($a.roundTally.hiderGained), " +
+                    "seeker $($a.roundTally.seekerPeerId) +$($a.roundTally.seekerGained), " +
+                    "totals $($a.roundTally.hiderTotal)-$($a.roundTally.seekerTotal), " +
+                    "matchOver=$($a.roundTally.matchOver) winner=$($a.roundTally.winnerPeerId)") -ForegroundColor DarkGray
+
+        # The roles, and the score map key by key, at the sample that carries this card.
         $aKeys = @($a.roundScores.PSObject.Properties.Name | Sort-Object)
         $cKeys = @($c.roundScores.PSObject.Properties.Name | Sort-Object)
         if ([string]::Join(',', $aKeys) -ne [string]::Join(',', $cKeys)) {
-            Add-Failure "at Tally the two peers' score maps name different peers ($([string]::Join(',',$aKeys)) vs $([string]::Join(',',$cKeys)))"
+            Add-Failure "at round $round's card the two peers' score maps name different peers ($([string]::Join(',',$aKeys)) vs $([string]::Join(',',$cKeys)))"
         } else {
             foreach ($k in $aKeys) {
                 if ([int]$a.roundScores.$k -ne [int]$c.roundScores.$k) {
-                    Add-Failure "at Tally the two peers disagree on peer $k's score ($($a.roundScores.$k) vs $($c.roundScores.$k))"
+                    Add-Failure "at round $round's card the two peers disagree on peer $k's score ($($a.roundScores.$k) vs $($c.roundScores.$k))"
                 }
             }
-            Write-Host "        scores at Tally: $([string]::Join(', ', @($aKeys | ForEach-Object { "$_=$($a.roundScores.$_)" })))" -ForegroundColor DarkGray
+            Write-Host "        scores at round $round's card: $([string]::Join(', ', @($aKeys | ForEach-Object { "$_=$($a.roundScores.$_)" })))" -ForegroundColor DarkGray
         }
-        # The hider's score IS the frozen tower count the script set, which is what makes this a
-        # check on the round rather than on two peers agreeing about nothing.
-        if ($null -ne $a.roundTally -and [int]$a.roundTally.hiderGained -ne 3) {
-            Add-Failure ("the card credits the hider $($a.roundTally.hiderGained) tower(s); the script " +
-                         "set 3 before the find, so the freeze at the Found tick did not happen")
+    }
+
+    # The hider's score IS the frozen tower count the script set for THAT round, which is what
+    # makes this a check on the round rather than on two peers agreeing about nothing. Two
+    # different counts, so the two cards cannot be confused for each other.
+    foreach ($want in @(@{ Round = 1; Towers = 3 }, @{ Round = 2; Towers = 1 })) {
+        foreach ($b in $bots) {
+            if (-not $b.Cards.ContainsKey($want.Round)) { continue }
+            $got = [int]$b.Cards[$want.Round].roundTally.hiderGained
+            if ($got -ne $want.Towers) {
+                Add-Failure ("$($b.Name): round $($want.Round)'s card credits the hider $got tower(s); the " +
+                             "script set $($want.Towers) before the find, so the freeze at the Found tick did not happen")
+            }
         }
+    }
+
+    # And the roles really did swap between the two rounds -- without that, "each of them hides
+    # once" is not what the match measured.
+    foreach ($b in $bots) {
+        if (-not ($b.Cards.ContainsKey(1) -and $b.Cards.ContainsKey(2))) { continue }
+        $h1 = [string]$b.Cards[1].roundTally.hiderPeerId
+        $h2 = [string]$b.Cards[2].roundTally.hiderPeerId
+        $s1 = [string]$b.Cards[1].roundTally.seekerPeerId
+        if ($h1 -eq $h2) {
+            Add-Failure ("$($b.Name): peer $h1 hid in BOTH rounds of the match -- the roles did not swap, " +
+                         "so neither player got a turn at the other side")
+        } elseif ($h2 -ne $s1) {
+            Add-Failure "$($b.Name): round 2's hider ($h2) is neither round 1's hider nor its seeker ($s1)"
+        }
+    }
+
+    # ==========================================================================================
+    # 5. A MATCH IS TWO ROUNDS AND THEN SOMEBODY HAS WON (MATCH-1)
+    #
+    # All of it off the BOTS' own folded cards, never off the server's state: what this suite can
+    # prove that a unit test cannot is that the result crossed the wire intact and that both
+    # peers hold the same one.
+    # ==========================================================================================
+    $matchWinner = "?"
+    $matchTotals = "?"
+    foreach ($b in $bots) {
+        # FALSE then TRUE. The false half is what an implementation that ends a match every round
+        # fails, and it is the half a one-round script could never have asked about.
+        if ($b.Cards.ContainsKey(1) -and [bool]$b.Cards[1].roundTally.matchOver) {
+            Add-Failure ("$($b.Name) folded round 1's card with matchOver=true -- round 1 is the first " +
+                         "half of a two-round match, not the end of one")
+        }
+        if ($b.Cards.ContainsKey(2) -and -not [bool]$b.Cards[2].roundTally.matchOver) {
+            Add-Failure ("$($b.Name) folded round 2's card with matchOver=false -- two rounds is a whole " +
+                         "match and the game never said who won")
+        }
+        if (-not $b.CardsAtTally.ContainsKey(2)) { continue }
+
+        # The winner id equals whichever peer actually holds the higher total ON THE WIRE, read
+        # at the one instant the live map and the card describe the same moment: while the match
+        # card is on screen. The card decides the winner server-side; this asserts the two agree
+        # after a round trip, which is the failure a client-side recomputation would produce.
+        $s = $b.CardsAtTally[2]
+        $keys = @($s.roundScores.PSObject.Properties.Name)
+        $best = ""; $bestVal = -1; $tie = $false
+        foreach ($k in $keys) {
+            $v = [int]$s.roundScores.$k
+            if ($v -gt $bestVal) { $bestVal = $v; $best = $k; $tie = $false }
+            elseif ($v -eq $bestVal) { $tie = $true }
+        }
+        $winner = [string]$s.roundTally.winnerPeerId
+        if ($keys.Count -lt 2) {
+            Add-Failure "$($b.Name): the match card arrived with $($keys.Count) score row(s); a match is between two players"
+        } elseif ($tie) {
+            if ($winner -ne "0") {
+                Add-Failure "$($b.Name): the totals on the wire are level at $bestVal but the card names peer $winner the winner"
+            }
+        } elseif ($winner -ne $best) {
+            Add-Failure ("$($b.Name): the match card names peer $winner the winner, but peer $best holds the " +
+                         "higher total ($bestVal) on the wire")
+        }
+        # This schedule is built to produce a real winner (173-171). A draw here means the two
+        # rounds scored identically, which would make the assertion above vacuous.
+        if ($winner -eq "0") {
+            Add-Failure ("$($b.Name): the match ended in a draw; this schedule scores the two rounds " +
+                         "differently on purpose, so a draw means one of them did not score what it should")
+        }
+        # A positive control for the zero check below: the totals at the match card must NOT be
+        # zero, or "every score is zero after the third Start" is satisfied by a session in which
+        # nobody ever scored at all.
+        if ($bestVal -le 0) {
+            Add-Failure "$($b.Name): every total at the match card is zero -- nothing was ever scored, so the reset proves nothing"
+        }
+        $matchWinner = $winner
+        $matchTotals = [string]::Join(', ', @($keys | Sort-Object | ForEach-Object { "$_=$($s.roundScores.$_)" }))
+    }
+
+    # THE SCORES GO BACK TO ZERO ON THE START THAT BEGINS MATCH 2, and not before. Sampled in
+    # round 3's Hiding -- phase ordinal 1, live round index 3 -- rather than at a typed second.
+    foreach ($b in $bots) {
+        $afterStart = $null
+        foreach ($s in @($b.Samples)) {
+            if ([bool]$s.roundSynced -and [int]$s.roundPhase -eq 1 -and [int]$s.roundIndex -eq 3) { $afterStart = $s }
+        }
+        if ($null -eq $afterStart) {
+            Add-Failure ("$($b.Name) never logged round 3's Hiding -- the third Start never ran on this peer, " +
+                         "so the score reset that begins a new match was never observed")
+            continue
+        }
+        $rows = @($afterStart.roundScores.PSObject.Properties.Name)
+        if ($rows.Count -lt 2) {
+            Add-Failure ("$($b.Name): after the Start that begins match 2 the score map has $($rows.Count) row(s); " +
+                         "the reset is ZERO ROWS, not an empty map -- a board needs a row to show a zero")
+        }
+        $nonZero = @()
+        foreach ($k in $rows) { if ([int]$afterStart.roundScores.$k -ne 0) { $nonZero += "$k=$($afterStart.roundScores.$k)" } }
+        if ($nonZero.Count -gt 0) {
+            Add-Failure ("$($b.Name): after the Start that begins match 2 the scores still read " +
+                         "$([string]::Join(', ', $nonZero)) -- the new match inherited the old one's score")
+        }
+
+        # AND THE CARD STILL READS THE OLD RESULT. This is the other half, and it is the whole
+        # argument for freezing the totals onto the card instead of reading them off the live
+        # map: at this exact sample the map says 0-0 and the card must still say who won match 1.
+        # HOLD-1's board shows the last card during the next round, so a board built on the live
+        # map would print "X WON 0-0" from here on.
+        if ($null -eq $afterStart.roundTally) {
+            Add-Failure "$($b.Name): the card was cleared by the Start that began match 2 -- the last result is gone from the board"
+        } elseif ([int]$afterStart.roundTally.roundIndex -ne 2) {
+            Add-Failure ("$($b.Name): after the third Start the card is round $($afterStart.roundTally.roundIndex)'s, " +
+                         "not round 2's -- a new match should not produce a card")
+        } elseif (-not [bool]$afterStart.roundTally.matchOver) {
+            # Already reported above as "round 2's card with matchOver=false". Saying it a second
+            # time here as "the result is not frozen" would be a wrong diagnosis of the same
+            # fault -- there is no result to freeze on a card that is not a match end.
+            Write-Host "        $($b.Name) after the third Start: $($rows.Count) score row(s); card is not a match end (reported above)" -ForegroundColor DarkGray
+        } else {
+            $ht = [int]$afterStart.roundTally.hiderTotal
+            $st = [int]$afterStart.roundTally.seekerTotal
+            if ($ht -eq 0 -and $st -eq 0) {
+                Add-Failure ("$($b.Name): the match card's own totals went to 0-0 when the scores reset -- the " +
+                             "result is not frozen, so the board loses it the moment the next match begins")
+            }
+            if ([string]$afterStart.roundTally.winnerPeerId -eq "0") {
+                Add-Failure "$($b.Name): the match card's winner went to 0 when the scores reset -- the result is not frozen"
+            }
+            Write-Host ("        $($b.Name) after the third Start: $($rows.Count) score row(s), all zero; " +
+                        "match card still reads $ht-$st, winner $($afterStart.roundTally.winnerPeerId)") -ForegroundColor DarkGray
+        }
+    }
+
+    # The match card holds LONGER than the round card, read off the server's own two card lines.
+    $cardLines = @()
+    foreach ($line in $serverLines) {
+        if ($line -match '\[round\] card: round (\d+) match (\d+) .*matchOver=(\w+) winner=(-?\d+) tally=([0-9.]+)s') {
+            $cardLines += ,@{ Round = [int]$matches[1]; Match = [int]$matches[2]
+                              Over = ($matches[3] -eq "True"); Winner = [long]$matches[4]
+                              Tally = [double]$matches[5] }
+        }
+    }
+    $roundCard = @($cardLines | Where-Object { -not $_.Over } | Select-Object -First 1)
+    $matchCard = @($cardLines | Where-Object { $_.Over } | Select-Object -First 1)
+    if ($roundCard.Count -eq 0 -or $matchCard.Count -eq 0) {
+        Add-Failure ("the server logged $($cardLines.Count) card line(s) but not one of each kind " +
+                     "(a round card and a match card); the match never completed on the server")
+    } else {
+        $rt = $roundCard[0].Tally; $mt = $matchCard[0].Tally
+        Write-Host "        tally armed: round card $($rt)s, match card $($mt)s" -ForegroundColor DarkGray
+        if ($mt -le $rt) {
+            Add-Failure ("the match card was armed for $($mt)s against the round card's $($rt)s -- " +
+                         "MatchTallySec was not applied, so the only moment the game says who won is as " +
+                         "short as an ordinary round's")
+        }
+    }
+
+    # And the server said, in its own words, that a new match began at round 3.
+    $matchBegins = @()
+    foreach ($line in $serverLines) {
+        if ($line -match '\[round\] match (\d+) begins at round (\d+) -- scores zeroed: (.+)$') {
+            $matchBegins += ,@{ Match = [int]$matches[1]; Round = [int]$matches[2]; Scores = $matches[3] }
+        }
+    }
+    Write-Host "        match starts the server logged: $(@($matchBegins | ForEach-Object { "match $($_.Match) at round $($_.Round) [$($_.Scores)]" }) -join '; ')" -ForegroundColor DarkGray
+    if (@($matchBegins | Where-Object { $_.Match -eq 2 -and $_.Round -eq 3 }).Count -eq 0) {
+        Add-Failure "the server never logged match 2 beginning at round 3 -- the third Start did not start a new match"
+    }
+    if (@($matchBegins | Where-Object { $_.Round -eq 2 }).Count -gt 0) {
+        Add-Failure "the server logged a new match beginning at round 2 -- round 2 is the second half of match 1, not a new one"
     }
 
     # And the reset edge really did put everyone back in the holding room.
@@ -450,6 +700,8 @@ try {
     Write-Host "  worst closest-approach to a named destination:        $([math]::Round($worst,2)) m (bar $ArrivalRadiusM m)"
     Write-Host "  phase transitions the server made:                    $($phases.Count)"
     Write-Host "  named refusals the server logged:                     $($refusals.Count) [$([string]::Join(',', $refusals))]"
+    Write-Host "  cards the server committed:                           $($cardLines.Count) [$(@($cardLines | ForEach-Object { "r$($_.Round) matchOver=$($_.Over)" }) -join ', ')]"
+    Write-Host "  match 1's winner / totals on the wire:                peer $matchWinner / $matchTotals"
 }
 finally {
     Stop-Procs $procs
@@ -465,7 +717,7 @@ if ($script:Failures.Count -gt 0) {
     exit 1
 }
 
-Write-Host "PASS: the round ran Holding -> Hiding -> Seeking -> Together -> Tally -> Holding on a real server; a Start with empty hands was refused with a named reason and did not begin the round; every peer arrived in the room the server sent it to, and the rooms are genuinely separate places; both peers held the same phase, roles, scores and card at Tally." -ForegroundColor Green
+Write-Host "PASS: the round ran Holding -> Hiding -> Seeking -> Together -> Tally -> Holding on a real server; a Start with empty hands was refused with a named reason and did not begin the round; every peer arrived in the room the server sent it to, and the rooms are genuinely separate places; both peers held the same phase, roles, scores and card at Tally. A MATCH ran too: two rounds with the roles swapped between them, matchOver false on the first card and true on the second, the winner on the wire equal to the higher total, a longer card at the match end, and every score row back at zero on the Start that began match 2." -ForegroundColor Green
 Write-Host ""
 Write-Host "ROUNDLOOP-SMOKE OVERALL: PASS" -ForegroundColor Green
 exit 0

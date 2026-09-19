@@ -705,7 +705,14 @@ public class HideSeekLoopTests
         HideSeekWire back = HideSeekWire.Unpack(p.Phase, p.Round, p.RemainingTenths, p.Hider,
             p.Seeker, p.ScorePeers, p.ScoreValues, p.Refusal, p.Towers, p.FoundTick,
             p.TallyRound, p.TallyHider, p.TallyHiderGain, p.TallySeeker, p.TallySeekerGain,
-            p.TallyByDisconnect);
+            p.TallyByDisconnect,
+            // MATCH-1's five. They are passed EXPLICITLY here rather than left to the optional
+            // parameters that keep other call sites compiling: an optional argument is exactly
+            // how a new wire field gets silently dropped on the one path that marshals it, and
+            // this test is the only thing standing between that and a client whose card quietly
+            // disagrees with the server's.
+            p.TallyMatchOver, p.TallyMatchIndex, p.TallyWinner, p.TallyHiderTotal,
+            p.TallySeekerTotal);
 
         Assert.Equal(wire, back);
     }

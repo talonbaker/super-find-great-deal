@@ -130,7 +130,17 @@ public static class NetProfile
     /// SFX-1 resolves a prop's sound from its shape, would hear them as wooden crates too. That
     /// is a divergence, not a cosmetic gap. Nothing in <c>NetCodec</c> hashes or range-checks the
     /// enum, which was checked rather than assumed; the bump is on the meaning, as v6, v9, v10
-    /// and v13 were.</para></summary>
+    /// and v13 were.</para>
+    ///
+    /// <para><b>v16's second reason (2026-09-19, MATCH-1, folded in at INT-0B).</b> Five fields
+    /// appended to <c>HideSeekWireTally</c> — <c>MatchOver</c>, <c>MatchIndex</c>,
+    /// <c>WinnerPeerId</c>, <c>HiderTotal</c>, <c>SeekerTotal</c> — which widen the round
+    /// channel's tally message and change what <c>Unpack</c> must read. MATCH-1 deliberately did
+    /// not bump for them and said so in <c>HideSeekWire</c>'s class doc, on the reasoning that a
+    /// wave shipping as one build should spend exactly one bump; this is that bump, and it is
+    /// shared rather than doubled. <b>There is no v17 owed for this wave</b>: SFX-2 is already on
+    /// 16 and BTN-1 puts nothing new on any wire. A lane that widens a message after this one
+    /// takes 17 and writes its own paragraph here.</para></summary>
     public const int ProtocolVersion = 16;
 
     /// <summary>Steam lobby scope tag — keeps this title's room codes from colliding with any
