@@ -118,11 +118,32 @@ public partial class BurstDoor : Node3D
     /// a peer would re-burst on any message it folded twice.</summary>
     private long _stagedFoundTick = -1;
 
-    private double _sinceFound;
+    /// <summary>
+    /// When the staging started, on this process's monotonic clock
+    /// (<c>Time.GetTicksUsec</c>), and the same for the reset's close.
+    ///
+    /// <para><b>A clock read, not an accumulated delta, and that is a measured correction rather
+    /// than a preference.</b> The Found message arrives inside network polling, part-way through
+    /// a frame; the NEXT <c>_Process</c> then hands over the whole of that frame's delta, most of
+    /// which elapsed before the message existed. Summing deltas therefore runs the staging EARLY
+    /// by up to one frame time. Headless that is 1-9 ms and invisible (the smoke measured exactly
+    /// that). On the windowed capture client, whose first post-arm frame also took a viewport
+    /// screenshot, it measured <b>1.07 s against a configured 1.20 s tell</b> — 11 % of the beat,
+    /// on the one instant the whole round hangs on, and it would get worse on a slower machine.
+    /// Reading the clock at the burst is exact on any frame rate and needs no bookkeeping.</para>
+    /// </summary>
+    private ulong _stageStartUsec;
+    private ulong _closeStartUsec;
+
     private bool _burstFired;
     private bool _tellFired;
-    private double _sinceReset;
     private float _closeFromDeg;
+
+    /// <summary>Seconds since <see cref="_stageStartUsec"/>, or since
+    /// <see cref="_closeStartUsec"/>. <c>Time.GetTicksUsec</c> is monotonic within a process and
+    /// never goes backwards, so no guard is needed against a negative interval.</summary>
+    private static double SecondsSince(ulong startUsec) =>
+        (Time.GetTicksUsec() - startUsec) / 1_000_000.0;
 
     public override void _Ready()
     {
@@ -166,6 +187,7 @@ public partial class BurstDoor : Node3D
     /// </summary>
     public override void _Process(double delta)
     {
+        _ = delta;   // the staging reads a monotonic clock; see _stageStartUsec for why.
         if (!_subscribed)
             TrySubscribe();
 
@@ -175,10 +197,10 @@ public partial class BurstDoor : Node3D
                 CatchUpIfAlreadyOpen();
                 break;
             case DoorStage.Staging:
-                AdvanceStaging(delta);
+                AdvanceStaging();
                 break;
             case DoorStage.Closing:
-                AdvanceClosing(delta);
+                AdvanceClosing();
                 break;
         }
     }
@@ -232,7 +254,7 @@ public partial class BurstDoor : Node3D
         }
         _stagedFoundTick = StartleTimeline.FoundTickOf(foundTick);
         _stage = DoorStage.Staging;
-        _sinceFound = 0.0;
+        _stageStartUsec = Time.GetTicksUsec();
         _burstFired = false;
         _tellFired = false;
         StartleTuning t = StartleTuning.Current;
@@ -242,7 +264,7 @@ public partial class BurstDoor : Node3D
         // TellSec 0 means the door simply goes, so the burst is due on this very frame; run the
         // advance immediately rather than waiting a frame for _Process, or a "no tell" setting
         // would still cost one frame of tell.
-        AdvanceStaging(0.0);
+        AdvanceStaging();
     }
 
     /// <summary>
@@ -293,7 +315,7 @@ public partial class BurstDoor : Node3D
             return;
         _closeFromDeg = CurrentLeafAngleDeg();
         _stage = DoorStage.Closing;
-        _sinceReset = 0.0;
+        _closeStartUsec = Time.GetTicksUsec();
         _stagedFoundTick = -1;
         GD.Print($"[door] closing from {_closeFromDeg:F1} deg over "
                  + $"{StartleTuning.Current.LeafCloseSec:0.000}s peer={Multiplayer.GetUniqueId()} "
@@ -334,10 +356,10 @@ public partial class BurstDoor : Node3D
     // The staging
     // ---------------------------------------------------------------------------------------
 
-    private void AdvanceStaging(double delta)
+    private void AdvanceStaging()
     {
         StartleTuning t = StartleTuning.Current;
-        _sinceFound += delta;
+        double sinceFound = SecondsSince(_stageStartUsec);
 
         if (!_tellFired && t.TellSec > 0f)
         {
@@ -345,27 +367,27 @@ public partial class BurstDoor : Node3D
             FireTell(t);
         }
 
-        if (!_burstFired && _sinceFound >= StartleTimeline.BurstAtSec(t))
+        if (!_burstFired && sinceFound >= StartleTimeline.BurstAtSec(t))
         {
             _burstFired = true;
             FireBurst(t);
         }
 
-        SetLeafAngle(StartleTimeline.LeafAngleDegAt(_sinceFound, t));
+        SetLeafAngle(StartleTimeline.LeafAngleDegAt(sinceFound, t));
 
-        if (_sinceFound >= StartleTimeline.EndsAtSec(t))
+        if (sinceFound >= StartleTimeline.EndsAtSec(t))
         {
             _stage = DoorStage.Open;
             SetLeafAngle(t.LeafOpenDeg);
         }
     }
 
-    private void AdvanceClosing(double delta)
+    private void AdvanceClosing()
     {
         StartleTuning t = StartleTuning.Current;
-        _sinceReset += delta;
-        SetLeafAngle(StartleTimeline.ClosingAngleDegAt(_sinceReset, _closeFromDeg, t));
-        if (_sinceReset < t.LeafCloseSec)
+        double sinceReset = SecondsSince(_closeStartUsec);
+        SetLeafAngle(StartleTimeline.ClosingAngleDegAt(sinceReset, _closeFromDeg, t));
+        if (sinceReset < t.LeafCloseSec)
             return;
         SetLeafAngle(0f);
         // Solid again at the END of the close, not at the start. The blocker is a static body in
