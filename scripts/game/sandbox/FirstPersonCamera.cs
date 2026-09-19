@@ -92,9 +92,42 @@ public partial class FirstPersonCamera : Node3D, ILookAngles
     /// <summary>The avatar this is the head of, or null before <see cref="Attach"/>.</summary>
     public SandboxAvatar? Target => _target;
 
+    /// <summary><b>The one lens this process is looking through</b>, or null if this process
+    /// built none (every headless suite bot, and a <c>--spectate-cam</c> run). Written by
+    /// <see cref="Attach"/> and cleared in <see cref="_ExitTree"/>, exactly the
+    /// <c>HideSeekDriver.Instance</c> / <c>RunDriver.Instance</c> / <c>CycleDriver.Instance</c>
+    /// idiom this repo already uses three times.
+    ///
+    /// <para><b>Why a static rather than a lookup</b> (DOOR-1, 2026-09-19). The burst's camera
+    /// kick is raised by a node in the LEVEL — the door — which has no route to the player's
+    /// avatar that is not "walk the whole tree looking for the one body whose
+    /// <c>IsLocalFirstPersonBody</c> is set", once per burst, on a path that also runs on a
+    /// headless server where the answer is always null. Exactly one of these can exist by
+    /// construction (<c>SandboxAvatar.ConfigureNetworkedInstance</c> builds it on the one body
+    /// this machine drives), which is what makes a static honest here rather than a shortcut.</para></summary>
+    public static FirstPersonCamera? Local { get; private set; }
+
     private Camera3D _camera = null!;
     private SandboxAvatar? _target;
     private float _pitch;
+
+    // --- The transient kick (DOOR-1) --------------------------------------------------------
+    //
+    // A kick is an OFFSET applied when the basis is written, and it is never folded back into
+    // Yaw/_pitch. That is the whole safety property: Yaw and Pitch are what FirstPersonIntentSource
+    // puts in MoveIntent.AimYaw/AimPitch, which is what rides the wire and what the server rebuilds
+    // its aim ray from -- so a kick that wrote them would move the player's actual aim, desync the
+    // prediction replay against the authority, and change what E resolves against, all to shake a
+    // camera. It would also be a frame of input the player did not ask for and did not give, which
+    // program §5 forbids in as many words ("nobody ever loses input").
+    private float _kickDeg;
+    private float _kickSec;
+    private double _kickElapsed;
+
+    /// <summary>The kick's live pitch offset in degrees, 0 when nothing is kicking. Read by the
+    /// first-person self-test and by DOOR-1's smoke through the log; exposed rather than inferred
+    /// because "the kick did nothing" and "the kick is over" are the same picture.</summary>
+    public float KickPitchOffsetDeg { get; private set; }
 
     /// <summary>
     /// Mount on <paramref name="target"/>'s eyeline and become the current camera.
@@ -123,9 +156,36 @@ public partial class FirstPersonCamera : Node3D, ILookAngles
         // draws this body and its nameplate normally.
         _camera.SetCullMaskValue(AvatarVisual.FirstPersonHiddenLayer, false);
         target.HideOwnBodyFromFirstPerson();
+        Local = this;
         ApplyLookBasis();
         if (captureMouse)
             Input.MouseMode = Input.MouseModeEnum.Captured;
+    }
+
+    public override void _ExitTree()
+    {
+        if (Local == this)
+            Local = null;
+    }
+
+    /// <summary>
+    /// <b>Throw the view</b> (DOOR-1): a transient rotational offset of
+    /// <paramref name="degrees"/> decaying over <paramref name="seconds"/>, on the shape
+    /// <see cref="MpFoundation.Game.Round.StartleTimeline.KickPitchDegAt"/> defines. Restarts
+    /// rather than accumulating — two kicks inside one window is one event with a double
+    /// amplitude, not two flinches, and a player who was kicked twice should be no harder to aim
+    /// than one who was kicked once.
+    ///
+    /// <para><b>It does not touch <see cref="Yaw"/> or <see cref="Pitch"/>.</b> See the fields it
+    /// writes for why that is load-bearing rather than tidy.</para>
+    /// </summary>
+    public void Kick(float degrees, float seconds)
+    {
+        if (!(seconds > 0f) || degrees == 0f)
+            return;
+        _kickDeg = degrees;
+        _kickSec = seconds;
+        _kickElapsed = 0.0;
     }
 
     /// <summary>Test/replay hook: set the look angles directly (pitch still clamped). Mirrors
@@ -162,6 +222,11 @@ public partial class FirstPersonCamera : Node3D, ILookAngles
     /// player's screen moves, and the position comes free from parentage.</summary>
     public override void _Process(double delta)
     {
+        // The kick advances on the RENDER clock, like the look itself: it is a thing the screen
+        // does, and a 0.3 s shake sampled at the 60 Hz physics rate on a 144 Hz display would
+        // step rather than sweep. Advanced before the early-out so a kick still expires on a
+        // frame where the target has gone.
+        AdvanceKick(delta);
         if (_target == null || !GodotObject.IsInstanceValid(_target))
             return;
         // Read the eyeline live rather than caching it at Attach: an avatar re-measures its own
@@ -178,5 +243,29 @@ public partial class FirstPersonCamera : Node3D, ILookAngles
     /// so the rendered view, the replicated aim angles and the server's aim ray are one
     /// construction, not three that agree.</summary>
     private void ApplyLookBasis() =>
-        GlobalBasis = Basis.FromEuler(new Vector3(_pitch, Yaw, 0f));
+        GlobalBasis = Basis.FromEuler(
+            new Vector3(_pitch + Mathf.DegToRad(KickPitchOffsetDeg), Yaw, 0f));
+
+    /// <summary>Steps the kick and recomputes its offset. Deliberately NOT clamped into the
+    /// pitch limits: the limits exist so a legitimate LOOK can never be an illegal aim, and this
+    /// offset is not a look — it never reaches <c>MoveIntent</c>, so there is nothing for the
+    /// motor's <c>SanitizeAimPitch</c> to disagree with. Clamping it would also silently swallow
+    /// the kick exactly when the player happens to be looking straight up, which is the one case
+    /// where "the door went off behind me" most needs to read.</summary>
+    private void AdvanceKick(double delta)
+    {
+        if (_kickSec <= 0f)
+            return;
+        _kickElapsed += delta;
+        if (_kickElapsed >= _kickSec)
+        {
+            _kickSec = 0f;
+            _kickDeg = 0f;
+            KickPitchOffsetDeg = 0f;
+            return;
+        }
+        KickPitchOffsetDeg = MpFoundation.Game.Round.StartleTimeline.KickPitchDegAt(
+            _kickElapsed,
+            MpFoundation.Game.Round.StartleTuning.Current with { KickDegrees = _kickDeg, KickSec = _kickSec });
+    }
 }

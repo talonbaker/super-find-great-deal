@@ -154,6 +154,16 @@ public partial class Gameplay : Node3D
             : (ulong)Time.GetTicksUsec() ^ 0xD1B54A32D192ED03UL;
         GD.Print($"[avatar] palette seed {_colorSeed}"
             + (seedOverride.Length > 0 ? " (SAIL_COLOR_SEED)" : ""));
+        // The startle overlay (DOOR-1), applied BEFORE the world is built, because the burst door
+        // is authored inside TaskRoom.tscn and its _Ready runs the moment the world is added. It
+        // reads StartleTuning.Current live at every stage rather than caching, so a late load
+        // would not actually be wrong — but a tuning that is only correct because nothing read it
+        // early is the shape of a bug waiting for the next lane, and this line costs nothing on
+        // the launches (all of them but DOOR-1's smoke and Talon's own tuning runs) that pass no
+        // file. Every warning is printed rather than swallowed: an overlay that silently did
+        // nothing is indistinguishable from a knob that does not work.
+        LoadStartleTuning(NetworkManager.Instance.Options.StartleFile);
+
         _world = BuildWorld(worldId);
         var worldNode = (Node3D)_world;
         worldNode.Name = "World";
@@ -575,6 +585,38 @@ public partial class Gameplay : Node3D
     ///
     /// <para>Both slices are idempotent by their own contract, so a duplicate edge is harmless.</para>
     /// </summary>
+    /// <summary>
+    /// Applies <c>--startle-file</c> to <c>StartleTuning.Current</c> (DOOR-1). An empty path is
+    /// the ordinary launch and touches no disk.
+    ///
+    /// <para><b>Every peer loads its own.</b> The staging is played from each peer's own copy of
+    /// the timeline, so a server with a 0.8 s tell and a client with the shipped 0.4 s would
+    /// burst 400 ms apart — visible, and exactly the class of disagreement the absolute wire
+    /// exists to prevent everywhere else. That is stated rather than defended: making the tuning
+    /// authoritative would mean putting fifteen floats on the round wire for a feel pass, and the
+    /// honest answer during tuning is to pass the same file to both processes. It is in the
+    /// handoff as an open item for the day a knob turns out to matter to fairness rather than to
+    /// taste.</para>
+    /// </summary>
+    private static void LoadStartleTuning(string path)
+    {
+        if (path.Length == 0)
+            return;
+        Round.StartleTuningLoad load = Round.StartleTuningFile.LoadFrom(path);
+        Round.StartleTuning.Current = load.Tuning;
+        foreach (string warning in load.Warnings)
+            GD.PushWarning($"[startle] {warning}");
+        GD.Print($"[startle] overlay '{path}' existed={load.FileExisted} "
+                 + $"discarded={load.Discarded} warnings={load.Warnings.Count} — "
+                 + $"tell {Round.StartleTuning.Current.TellSec:0.000}s, "
+                 + $"leaf {Round.StartleTuning.Current.LeafOpenDeg:0}deg "
+                 + $"(overshoot {Round.StartleTuning.Current.LeafOvershootDeg:0}deg), "
+                 + $"burst {Round.StartleTuning.Current.BurstImpulseNs:0.0} Ns / "
+                 + $"{Round.StartleTuning.Current.BurstRadiusM:0.0} m, "
+                 + $"kick {Round.StartleTuning.Current.KickDegrees:0.0}deg, "
+                 + $"forceDrop={Round.StartleTuning.Current.ForceDropOnBurst}");
+    }
+
     private void OnRoundResetRequested()
     {
         if (!_isServer)

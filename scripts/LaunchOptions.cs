@@ -649,6 +649,29 @@ public sealed class LaunchOptions
     private readonly List<(string Verb, string Value, double AtSec)> _roundScript = new();
     // --- end ROUND-1 ------------------------------------------------------------------------------
 
+    // --- the startle (DOOR-1, 2026-09-19) ---------------------------------------------------------
+    /// <summary>
+    /// <c>--startle-file &lt;path&gt;</c>: a JSON overlay on <c>StartleTuning</c>, so the burst
+    /// door can be retuned <b>without a rebuild</b> — the packet's requirement, and the reason it
+    /// is a file rather than fifteen more launch flags.
+    ///
+    /// <para>Empty (every ordinary launch, and every suite but DOOR-1's own) means the shipped
+    /// defaults and no file access at all. A path that does not exist is also silent: that is a
+    /// first run, not an error. Everything else the document can get wrong — bad JSON, a wrong
+    /// version, a knob this build does not have, a value out of range — is reported as a
+    /// <c>[startle]</c> warning line and the affected knob falls back, exactly as
+    /// <c>MotorTuningFile</c> does with its own file.</para>
+    ///
+    /// <para><b>A path, not a fixed <c>user://</c> location</b>, which is the one place this
+    /// deliberately diverges from <c>MotorTuningFile</c>. That file is written BY the game and
+    /// read back, so a fixed private location is right for it; this one is written by a person in
+    /// a text editor next to their notes, and burying it in AppData would make the "without a
+    /// rebuild" promise cost a folder hunt instead. <c>StartleTuningFile.DefaultUserPath</c> is
+    /// still there for anyone who wants the old shape.</para>
+    /// </summary>
+    public string StartleFile { get; private set; } = "";
+    // --- end DOOR-1 -------------------------------------------------------------------------------
+
     // --- Voice proximity gate + bandwidth instrumentation (perf followups, 2026-08-07) --------
     /// <summary>--net-stats &lt;path&gt;: the dedicated server appends one JSON line per second of
     /// ENet's own transport byte/packet counters plus the voice relay's relayed/gated counts.
@@ -1311,6 +1334,11 @@ public sealed class LaunchOptions
                     break;
                 }
                 // --- end L1 ------------------------------------------------------------------
+                // --- the startle (DOOR-1, 2026-09-19) ----------------------------------------
+                case "--startle-file":
+                    options.StartleFile = Next(args, ref i);
+                    break;
+                // --- end DOOR-1 --------------------------------------------------------------
                 // --- perf followups (2026-08-07) -------------------------------------------
                 case "--net-stats":
                     options.NetStatsLog = Next(args, ref i);

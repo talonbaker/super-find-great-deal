@@ -66,6 +66,22 @@ public enum Sfx
     /// can retune it by editing the named constants beside
     /// <see cref="SfxLab.TriumphPcm"/>.</para></summary>
     Triumph = 23,
+
+    /// <summary><b>The burst door</b> (DOOR-1, 2026-09-19): the one instant the whole round hangs
+    /// on. A slam, not an explosion — a heavy leaf thrown into its stop, so the recipe is a hard
+    /// broadband crack over a low body thud with a short room tail, and it is over in about a
+    /// third of a second.
+    ///
+    /// <para>Played twice on the burst: once POSITIONAL at the doorway on every peer, and once
+    /// FLAT on the hiders' intercom bus at <c>StartleTuning.BangFlatDb</c> — program §5's reason,
+    /// which is that a positional-only bang is too quiet if the hider happens to be facing
+    /// away.</para>
+    ///
+    /// <para>Appended at 24 because the ordinals above are pinned — see the note at the top of
+    /// this enum. Synthesised like every other member here: this foundation ships no audio assets
+    /// at all, so there was never a file to reach for, and Talon retunes it by editing the named
+    /// constants beside <see cref="SfxLab.BangPcm"/>.</para></summary>
+    Bang = 24,
 }
 
 /// <summary>
@@ -168,8 +184,18 @@ public static class SfxLab
 
     /// <summary>Fire-and-forget non-positional one-shot for UI/front-door beats (menus,
     /// splash) — outside the 3D pool entirely, since there's no world position to attach
-    /// to. A plain AudioStreamPlayer frees itself when done.</summary>
-    public static void PlayUi(Sfx kind, float volumeDb = -6f, float pitchJitter = 0f)
+    /// to. A plain AudioStreamPlayer frees itself when done.
+    ///
+    /// <para><paramref name="bus"/> is null by default and the shot then goes to this class's own
+    /// "Sfx" bus, exactly as it always has. It exists for DOOR-1: program §5 wants the burst's
+    /// bang a SECOND time, flat, on the hiders' intercom bus, because a positional-only bang is
+    /// too quiet if the hider happens to be facing away — and a flat shot that has to arrive
+    /// through the PA chain needs to name that bus. An unknown bus name falls back to "Sfx"
+    /// rather than being assigned, for the same reason <see cref="PlayStream3D"/> falls back: a
+    /// bus that has not been created yet would make Godot spam an error per shot and drop the
+    /// sound entirely, which is a worse failure than playing it dry.</para></summary>
+    public static void PlayUi(Sfx kind, float volumeDb = -6f, float pitchJitter = 0f,
+        string? bus = null)
     {
         SceneTree? tree = Engine.GetMainLoop() as SceneTree;
         Node? root = tree?.Root;
@@ -179,7 +205,7 @@ public static class SfxLab
         var player = new AudioStreamPlayer
         {
             Stream = Get(kind),
-            Bus = Bus,
+            Bus = bus != null && AudioServer.GetBusIndex(bus) >= 0 ? bus : Bus,
             VolumeDb = volumeDb,
             PitchScale = 1f + (float)(Rng.NextDouble() * 2 - 1) * pitchJitter,
         };
@@ -561,6 +587,7 @@ public static class SfxLab
             Sfx.Buzz => Buzz(0.45f),
             Sfx.GooseHonk => GooseHonkPcm(),
             Sfx.Triumph => TriumphPcm(),
+            Sfx.Bang => BangPcm(),
             _ => Sweep(0.05f, 400f, 400f),
         };
 
@@ -1034,6 +1061,94 @@ public static class SfxLab
                 sum += voice * attack * Mathf.Pow(1f - u, TriumphDecayCurve);
             }
             return sum * TriumphGain;
+        });
+    }
+
+    // --- The burst door's bang (DOOR-1, 2026-09-19) ---------------------------------------------
+    //
+    // EVERY NUMBER BELOW IS A KNOB, for the same reason the goose's and the triumph's are: Talon
+    // asked for a door that "has to feel physical and sudden" and picked no numbers, and retuning
+    // by hand is his. The startle's TIMING knobs live in StartleTuning; these are the sound's own
+    // and stay beside the recipe, which is where every other member of this palette keeps them.
+    //
+    // WHAT MAKES IT A SLAM AND NOT THE TWO THINGS IT COULD EASILY BE:
+    //   - Not an EXPLOSION. An explosion is a long noise decay with no pitched content and a tail
+    //     you can hear over a second later. This is a leaf hitting a stop: the energy is in the
+    //     first 20 ms and the whole thing is gone in a third of a second.
+    //   - Not a KNOCK. A knock is the crack alone. A slam has a BODY under it — the mass of the
+    //     leaf and the frame taking the load — which is what makes it feel like something heavy
+    //     rather than something sharp.
+    // Three layers, summed: a hard broadband crack (the impact), a low sagging thud (the mass),
+    // and a short filtered tail (the room answering). The layer plan's ordinary construction.
+
+    /// <summary>Total length, including the tail.</summary>
+    private const float BangSeconds = 0.34f;
+
+    /// <summary>The crack's own decay, seconds. Very short — this is the transient, and a long
+    /// one turns a slam into a burst of static.</summary>
+    private const float BangCrackSec = 0.045f;
+
+    /// <summary>One-pole coefficient on the crack's noise. Higher = brighter. 0.55 keeps real
+    /// high-frequency content (an impact IS bright) while taking off the digital fizz that raw
+    /// white noise has at 48 kHz.</summary>
+    private const float BangCrackBrightness = 0.55f;
+
+    /// <summary>The body's starting frequency, Hz. Low enough to be felt on a desktop speaker
+    /// rather than only heard.</summary>
+    private const float BangBodyHz = 62f;
+
+    /// <summary>How far the body sags over its life, as a fraction. A struck mass falls in pitch;
+    /// a constant tone reads as a beep.</summary>
+    private const float BangBodySag = 0.45f;
+
+    /// <summary>The body's decay curve. Above 1 it falls away faster at the start.</summary>
+    private const float BangBodyCurve = 2.4f;
+
+    /// <summary>The tail's one-pole coefficient — much darker than the crack's, because what a
+    /// small concrete room returns is the low half of what hit it.</summary>
+    private const float BangTailDarkness = 0.10f;
+
+    /// <summary>How loud the tail is against the crack.</summary>
+    private const float BangTailMix = 0.32f;
+
+    /// <summary>Output trim. Set so the summed buffer peaks under full scale — <see cref="Render"/>
+    /// clamps, and a clipped slam is a crunch rather than a bang. <c>BangPeak</c> in the unit
+    /// suite pins it.</summary>
+    private const float BangGain = 0.88f;
+
+    /// <summary>Renders the slam. <b>Public and returning raw PCM</b> for the same reason
+    /// <see cref="GooseHonkPcm"/> and <see cref="TriumphPcm"/> are: the Godot-free unit suite
+    /// asserts the arc and the headroom without an audio device.
+    ///
+    /// <para>A fixed seed, like the goose: the door must be the same door every time it goes.
+    /// Per-shot variation is the pitch jitter the playback path already applies, which is the
+    /// right layer for it — a bang that was a different bang each round would make the one
+    /// instant the game is about feel unreliable.</para></summary>
+    public static float[] BangPcm()
+    {
+        var rng = new Random(20260919); // fixed seed: the same door, every round
+        float crackLp = 0;
+        float tailLp = 0;
+        return Render(BangSeconds, (t, u) =>
+        {
+            float white = (float)(rng.NextDouble() * 2 - 1);
+
+            // 1. The crack. Its own short envelope in absolute seconds, not in u, so shortening
+            // the tail below never shortens the impact.
+            crackLp += BangCrackBrightness * (white - crackLp);
+            float crackAge = t / BangCrackSec;
+            float crack = crackAge < 1f ? crackLp * (1f - crackAge) * (1f - crackAge) : 0f;
+
+            // 2. The body: the mass of the leaf and the frame.
+            float freq = BangBodyHz * (1f - BangBodySag * u);
+            float body = Mathf.Sin(Mathf.Tau * freq * t)
+                         * Envelope(u, attack: 0.002f, curve: BangBodyCurve);
+
+            // 3. The tail: the room answering, dark and brief.
+            tailLp += BangTailDarkness * (white - tailLp);
+            float tail = tailLp * BangTailMix * Mathf.Pow(1f - u, 3f);
+
+            return (crack + body * 0.85f + tail) * BangGain;
         });
     }
 
