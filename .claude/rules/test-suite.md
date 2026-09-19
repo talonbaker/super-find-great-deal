@@ -490,3 +490,33 @@ file under `scripts/net/**`, no `CycleDriver`, and no part of the reconnect path
 a rate worth knowing, and an illegal-instruction crash is a different animal from a scheduling
 flake. Whoever picks it up: capture the Windows fault log alongside the bot's stdout, and check
 whether it only ever happens to a bot that has already printed `done`.
+
+## One suite in the registry is not headless, and two capture traps that go with it (FP-1, 2026-09-19)
+
+**`Run-FirstPersonTest.ps1` launches a WINDOWED client and every other suite does not.** It cannot
+be headless: what it tests is what a camera renders and what a camera culls, and a headless process
+has neither — the same law as the two editor-only `RenderingServer` read-backs above, one system
+over. It opens a small window, runs twelve seconds and closes itself, so the marathon is still zero
+human interaction, but **`Run-AllTests.ps1` now needs a desktop session**. Driven from a detached or
+headless shell it will report that one suite red; its own failure message names a missing
+display/GPU as the first suspect. CI is unaffected — the workflow runs only `dotnet test`.
+
+**A `--first-person-cam` bot does NOT need `--capture-cam`.** The CELEBRATE-1 entry above says a
+`--bot` client builds no camera of its own and so writes a flat grey frame under `--capture-dir`.
+`--first-person-cam` (FP-1) builds the real `FirstPersonCamera` on the bot's own avatar and makes it
+current, so the world renders. The rule that entry states is unchanged in substance: **a capture bot
+must be given a camera**; there are now two flags that give it one, and `--capture-cam` still wins
+when it is also present (`BotHarness` calls `MakeCurrent` after the avatar has attached).
+
+**A capture bot that was given a camera can still photograph nothing, and it is not the camera's
+fault.** Measured: the first green run of `Run-FirstPersonTest.ps1` produced a 14 KB frame of flat
+dark grey with a correct HUD chip over it — indistinguishable at a glance from the flat-grey failure
+above, and the suite passed on it. The cause was the BRAIN, not the lens:
+`DeterministicWalkIntentSource` walks radially OUTWARD from the world origin, so in a 10 × 10 m room
+it spends the entire run with its face 30 cm from a corner. `--goto-script 0,0` (walk to the middle
+and stand there) turned the same run into a 69 KB frame of floor, wall, ceiling and light.
+**Before believing a capture, compare its file size to a frame you know is good** — two orders of
+magnitude of PNG is what "this is a photograph of a wall" looks like — and give a capture bot
+somewhere to stand, not just something to look through. `--fp-look <yawDeg>[,<pitchDeg>]` (FP-1)
+aims the lens, which a first-person capture needs because the brain no longer decides where the
+camera points.
