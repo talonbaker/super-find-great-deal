@@ -207,10 +207,18 @@ public readonly record struct StartleKnob
 /// row.</summary>
 public static class StartleKnobs
 {
-    private static StartleKnob Bool(string name, Func<StartleTuning, bool> get,
+    /// <summary><paramref name="shipped"/> is not decoration. <see cref="StartleTuningFile.ToJson"/>
+    /// decides what to omit by comparing the live value against <see cref="StartleKnob.Default"/>,
+    /// so a bool row that claimed a default of 0 while the struct shipped <c>true</c> would write
+    /// <c>"ForceDropOnBurst": 1</c> into every "nothing moved" file — which then pins the flinch
+    /// on against a future change to the shipped constant, silently. Caught by
+    /// <c>StartleTimelineTests.Overlay_EveryKnobsTableDefault_IsTheLiteralOnTheShippedTuning</c>,
+    /// which is a property over the table rather than a row-by-row transcription for exactly this
+    /// reason.</summary>
+    private static StartleKnob Bool(string name, bool shipped, Func<StartleTuning, bool> get,
         Func<StartleTuning, bool, StartleTuning> set) => new()
     {
-        Name = name, Default = 0f, Min = 0f, Max = 1f,
+        Name = name, Default = shipped ? 1f : 0f, Min = 0f, Max = 1f,
         Get = t => get(t) ? 1f : 0f,
         Set = (t, v) => set(t, v != 0f),
     };
@@ -243,9 +251,11 @@ public static class StartleKnobs
                 Get = t => t.BangFlatDb, Set = (t, v) => t with { BangFlatDb = v } },
         new() { Name = "FakeKnockRatePerMin", Default = 0f, Min = 0f, Max = 30f,
                 Get = t => t.FakeKnockRatePerMin, Set = (t, v) => t with { FakeKnockRatePerMin = v } },
-        Bool("ForceDropOnBurst", t => t.ForceDropOnBurst, (t, v) => t with { ForceDropOnBurst = v }),
-        Bool("SeekerKnockKey", t => t.SeekerKnockKey, (t, v) => t with { SeekerKnockKey = v }),
-        Bool("SeekerHeatOnIntercom", t => t.SeekerHeatOnIntercom,
+        Bool("ForceDropOnBurst", true, t => t.ForceDropOnBurst,
+             (t, v) => t with { ForceDropOnBurst = v }),
+        Bool("SeekerKnockKey", false, t => t.SeekerKnockKey,
+             (t, v) => t with { SeekerKnockKey = v }),
+        Bool("SeekerHeatOnIntercom", false, t => t.SeekerHeatOnIntercom,
              (t, v) => t with { SeekerHeatOnIntercom = v }),
     };
 
