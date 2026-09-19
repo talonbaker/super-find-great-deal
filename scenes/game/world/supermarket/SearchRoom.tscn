@@ -1,4 +1,4 @@
-[gd_scene load_steps=9 format=3]
+[gd_scene load_steps=14 format=3]
 
 ; BASE-1 (2026-09-19) — THE SEARCH ROOM. 14 x 10 x 3.5 m interior box, same construction as
 ; HoldingRoom.tscn (read that file's header for the convention and for why nothing here may be
@@ -8,6 +8,9 @@
 ; EMPTY ON PURPOSE. BASE-1 authors the shell and nothing else: the shelves, the bins, the rack of
 ; near-miss objects and the drop-off bin are SHELF-1's and BTN-1's, and an empty box is a cheaper
 ; thing for them to fill than a box full of guesses.
+
+[ext_resource type="PackedScene" path="res://scenes/game/props/Crate.tscn" id="1_crate"]
+[ext_resource type="Script" path="res://scripts/game/props/NetworkedProp.cs" id="2_netprop"]
 
 [sub_resource type="StandardMaterial3D" id="Mat_floor"]
 resource_name = "search room floor (cool green-grey)"
@@ -36,6 +39,15 @@ size = Vector3(14.8, 3.5, 0.4)
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_wall_z"]
 size = Vector3(14.8, 3.5, 0.4)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_bounds"]
+size = Vector3(14.0, 3.5, 10.0)
+
+[sub_resource type="BoxMesh" id="BoxMesh_pillar"]
+size = Vector3(1, 2, 1)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_pillar"]
+size = Vector3(1, 2, 1)
 
 [node name="SearchRoom" type="Node3D"]
 
@@ -110,3 +122,99 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4.5, 1.1, 0)
 
 [node name="SearchSpawn_1" type="Marker3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4.5, 1.1, 0)
+
+; CARRY-1 (2026-09-19) — SearchSpawn_2/_3 exist so a FOUR-bot scene suite gets four distinct
+; standing spots in this room. Two bots spawning on one marker interpenetrate, and a bot that
+; starts its run wedged inside another body is a flake nobody can reproduce. They are teleport
+; destinations like the first two, never part of SupermarketWorld.SpawnPoints, and the numbering
+; contract (0..n-1, enforced by SupermarketWorldSelfTest) is why they are _2 and _3 rather than
+; any other pair of numbers.
+
+[node name="SearchSpawn_2" type="Marker3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4.5, 1.1, 3)
+
+[node name="SearchSpawn_3" type="Marker3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4.5, 1.1, 3)
+
+; CARRY-1 (2026-09-19) — ROOM BOUNDS. The authored volume placement integrity layer 1 tests
+; against (program doc §5b, a ruling from Talon): a prop may only be SET DOWN somewhere whose
+; collision shape lies wholly inside one of these. It is the room's INTERIOR — floor top to
+; ceiling underside, wall inner face to wall inner face — not the room's footprint, so a crate
+; pushed half into a wall is outside it by construction.
+;
+; The GROUP is what PlacementIntegrity queries; the name is for whoever opens this scene looking
+; for it. Groups go in the [node] header (.claude/rules/godot-scenes.md) — wired anywhere else
+; they fail silently and look exactly like a feature that does nothing.
+;
+; It monitors nothing and is on no layer. It is a shape and a transform that the server reads
+; directly; pairing it with every body that walks through it would be per-frame broadphase work
+; for an answer nobody asks for.
+
+[node name="RoomBounds" type="Area3D" parent="." groups=["room_bounds"]]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.75, 0)
+monitoring = false
+monitorable = false
+collision_layer = 0
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape3D" parent="RoomBounds"]
+shape = SubResource("BoxShape3D_bounds")
+
+; CARRY-1 (2026-09-19) — THE PILLAR. A freestanding interior block, and the only reason it is
+; here: placement integrity's "inside a wall" case needs a transform that is INSIDE the room's
+; bounds and INSIDE static geometry at the same time. Every actual wall is the boundary, so a
+; crate pushed into one fails the bounds test first and the suite could never prove the overlap
+; test fires at all. It stands a metre clear of the +X wall so a bot can walk up to it and still
+; have the wall itself in reach for the out-of-bounds case.
+;
+; SHELF-1 may delete it the moment a real shelf back does the same job; leave a replacement that
+; is static, interior, and at least as deep as a crate.
+
+[node name="SearchPillar" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 6, 1, 2.5)
+
+[node name="Collision" type="CollisionShape3D" parent="SearchPillar"]
+shape = SubResource("BoxShape3D_pillar")
+
+[node name="Mesh" type="MeshInstance3D" parent="SearchPillar"]
+mesh = SubResource("BoxMesh_pillar")
+surface_material_override/0 = SubResource("Mat_wall")
+
+; CARRY-1 (2026-09-19) — AUTHORED PROPS, four of them, and they are a FIXTURE rather than
+; dressing. The aisles of red cubes this room is meant to be full of are SHELF-1's, and so is the
+; authored-prop adoption proof suite BASE-1 owed back; these four exist because the place smoke
+; has to grab something real, in a room with real bounds and real static geometry, and a prop
+; seeded by --seed-test-props would prove the verb works on a prop no level author ever placed.
+;
+; STRUCTURE, and it is not optional: a NetworkedProp (Node3D + script) whose child is literally
+; named "Body" and instances Crate.tscn. NetworkedProp._Ready binds that child rather than
+; building one, and PropManager.AdoptAuthoredProps assigns ids by sorting on NODE PATH — so the
+; numbering below IS the id order (1000, 1001, 1002, 1003), identically on every peer, and
+; renaming one renumbers the rest.
+;
+; y = 0.22 is the crate's own half-height: they start resting on the floor, which is also the
+; height a placement has to land at to count as "set down" rather than "dropped from 8 cm up".
+
+[node name="Prop_0" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, 0.22, 0)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Prop_0" instance=ExtResource("1_crate")]
+
+[node name="Prop_1" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, 0.22, 2)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Prop_1" instance=ExtResource("1_crate")]
+
+[node name="Prop_2" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, 0.22, -2)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Prop_2" instance=ExtResource("1_crate")]
+
+[node name="Prop_3" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2, 0.22, 0)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Prop_3" instance=ExtResource("1_crate")]

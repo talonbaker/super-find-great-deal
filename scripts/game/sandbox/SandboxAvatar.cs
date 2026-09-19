@@ -393,14 +393,39 @@ public partial class SandboxAvatar : CharacterBody3D, IServerConfirmedBody
         set
         {
             if (_props != null)
+            {
                 _props.GrabDenied -= OnGrabDenied;
+                _props.PlaceDenied -= OnPlaceDenied;
+            }
             _props = value;
             if (_props != null)
+            {
                 _props.GrabDenied += OnGrabDenied;
+                _props.PlaceDenied += OnPlaceDenied;
+            }
         }
     }
 
     private PropManager? _props;
+
+    /// <summary>
+    /// <b>How far the player has turned the thing in their hands</b>, in the holder's own frame —
+    /// the rotate-held verb (CARRY-1 packet item 2). Identity until they touch it.
+    ///
+    /// <para><b>Local, unreplicated, and deliberately so.</b> There is no new
+    /// <c>MoveIntent</c> field for this and there must not be: a continuous orientation streamed
+    /// every tick so that other peers can watch a crate turn in somebody's hands is a lot of wire
+    /// for a detail nobody is looking at, and the moment it MATTERS — the object is set down at
+    /// that orientation — the place RPC carries the whole transform anyway. So the rotation exists
+    /// on the holder's machine, drives the holder's spring, and becomes everyone's business
+    /// exactly once, at the release that keeps it.</para>
+    ///
+    /// <para>Written by <see cref="HeldPropRotator"/> (the only thing in this game that reads a
+    /// mouse for a non-camera purpose) and read by <c>NetworkedProp.StepSpring</c>. Reset to
+    /// identity whenever what is in the hand changes, by the same node — a crate that came out of
+    /// the hand upside-down must not hand its angle to the next thing picked up.</para>
+    /// </summary>
+    public Basis HeldPropLocalRotation { get; set; } = Basis.Identity;
 
     /// <summary>A refused grab has to be perceivable (INTERACTION-BIBLE 2) — pressing
     /// interact and getting silence reads as a broken game, not a refused action.
@@ -417,6 +442,25 @@ public partial class SandboxAvatar : CharacterBody3D, IServerConfirmedBody
             return; // only the player who pressed the key gets told
         _visual?.TriggerBumpSquish();
         ActorFx.Fire(GetParent(), Profile, ActorEvent.Bump, GlobalPosition);
+        // ...AND SAY WHICH OF THE FIVE THINGS IT WAS (CARRY-1, 2026-09-19). The bump above has
+        // always been the whole cue, and the comment on this method has always conceded that it
+        // "deliberately does not say WHY". That was defensible while there were five reasons; the
+        // place verb adds seven more, and INTERACTION-BIBLE §3/§7's scar tissue is specifically a
+        // warning that did not say which key. See Ui.RefusalNotice.
+        Ui.RefusalNotice.Say(CarryRefusalText.GrabHeading, CarryRefusalText.For(reason));
+    }
+
+    /// <summary>A refused PLACE, told the same way a refused grab is: the bump the body already
+    /// has, the bonk the profile already has, and the reason in words. The prop stays in the
+    /// hand — nothing about a refusal costs the player what they were carrying (the general rule
+    /// <see cref="FindNearestUnavailableCarryable"/> was built to enforce).</summary>
+    private void OnPlaceDenied(PropManager.PlaceDenial reason)
+    {
+        if (_role != NetRole.PredictedOwner && _role != NetRole.Offline)
+            return;
+        _visual?.TriggerBumpSquish();
+        ActorFx.Fire(GetParent(), Profile, ActorEvent.Bump, GlobalPosition);
+        Ui.RefusalNotice.Say(CarryRefusalText.PlaceHeading, CarryRefusalText.For(reason));
     }
 
     /// <summary>Networked world-interact hook (the escape world's tiny door): set by
@@ -1198,6 +1242,10 @@ public partial class SandboxAvatar : CharacterBody3D, IServerConfirmedBody
             camera.Attach(this);      // registers itself as _followCamera (MOVE-4f)
             AimCamera = camera.CameraNode;
             source = new LocalInputIntentSource(camera);
+            // Rotate-held (CARRY-1): the only mouse reader in the game that is not a camera, and
+            // the only one that takes the mouse away from one. Local human players only — a bot
+            // has no mouse and a remote proxy has no business turning anything.
+            HeldPropRotator.Attach(this);
         }
         ConfigureAsNetworked(true, source);
     }
@@ -2516,7 +2564,24 @@ public partial class SandboxAvatar : CharacterBody3D, IServerConfirmedBody
                 // Genuinely nothing to act on: E means "put down what is in my hand".
                 // "Am I holding?" reads live server-derived state rather than duplicating it in a
                 // local field.
-                if (Props.FindHeldBy(_ownerPeerId) != null)
+                NetworkedProp? held = Props.FindHeldBy(_ownerPeerId);
+                if (held == null)
+                    return;
+                // PLACE vs DROP, and the difference is where you are looking.
+                //
+                //   aiming at a surface within reach -> PLACE: the object is set down exactly
+                //                                       where the spring is holding it, at the
+                //                                       orientation you turned it to, with no
+                //                                       velocity. This is the verb the hiding
+                //                                       game is built on.
+                //   nothing in front of you          -> DROP: the existing light toss off your
+                //                                       facing. "Get this out of my hands."
+                //
+                // One key, and which meaning you get is legible before you press it, because it
+                // is the same thing your eyes are already doing.
+                if (AimedSurfaceWithinPlaceReach(held))
+                    Props.ClientRequestPlace(held.PropId, held.Body.GlobalTransform);
+                else
                     Props.ClientRequestDrop();
             }
             else if (intent.Throw && Props.FindHeldBy(_ownerPeerId) != null)
@@ -2533,6 +2598,56 @@ public partial class SandboxAvatar : CharacterBody3D, IServerConfirmedBody
             InteractPickDrop();
         else if (intent.Throw && Carry.Held != null)
             ThrowHeld();
+    }
+
+    /// <summary>How far ahead the aim ray looks for something to set a held object down ON. Past
+    /// this, E means drop rather than place.
+    ///
+    /// <para>Comfortably beyond <c>PropManager.PlaceReachM</c> (0.9 m, how far the OBJECT may end
+    /// up from the hand), because the two measure different things: this is "is there a world in
+    /// front of me", the other is "am I putting it within arm's length". A shelf you are about to
+    /// set a crate on is a metre or two away even though the crate ends up right in front of your
+    /// chest.</para></summary>
+    public const float PlaceAimProbeM = 3.0f;
+
+    /// <summary>
+    /// Is the player looking at something solid close enough to be setting an object down on?
+    ///
+    /// <para><b>The ray is built from the intent's aim, never from a camera node</b>
+    /// (<c>MoveIntent.AimYaw</c>/<c>AimPitch</c> through
+    /// <see cref="MpFoundation.Game.Aim.AimQuery.DirectionFromYawPitch"/>). That is what lets this
+    /// answer stay correct while FP-1 replaces the camera underneath it, and it is the same ray
+    /// the SERVER would rebuild if it ever needed to second-guess this decision — which it does
+    /// not, because the decision only chooses which of two requests to send and the server
+    /// adjudicates both.</para>
+    ///
+    /// <para>The held prop cannot occlude its own placement: while held its collision layer is 0,
+    /// so the ray passes through it.</para>
+    ///
+    /// <para><b>No player's body counts as a surface</b>, this avatar's included. Its own is
+    /// obvious — at a steep downward pitch the first thing the ray meets is its own shoulder. A
+    /// TEAMMATE's is the one that cost a suite (CARRY-1, 2026-09-19): two bots stood at the same
+    /// crate, the holder's eye-height ray met the other bot's capsule, E therefore resolved to
+    /// PLACE, and the placement was refused. The result was that pressing "put this down" next to
+    /// a friend did nothing at all. A person is not a shelf; they are not somewhere you set a
+    /// thing down, and they will not be standing there in a second.</para>
+    /// </summary>
+    private bool AimedSurfaceWithinPlaceReach(NetworkedProp held)
+    {
+        if (!IsInsideTree())
+            return false;
+        Vector3 origin = AimOriginGlobalPosition;
+        Vector3 dir = MpFoundation.Game.Aim.AimQuery.DirectionFromYawPitch(AimYaw, AimPitch);
+        if (!dir.IsFinite() || dir.LengthSquared() < 1e-6f)
+            return false;
+        var query = PhysicsRayQueryParameters3D.Create(origin, origin + dir.Normalized() * PlaceAimProbeM);
+        query.CollisionMask = MpFoundation.Game.Props.PlacementIntegrity.QueryMask;
+        var exclude = new Godot.Collections.Array<Rid> { GetRid(), held.Body.GetRid() };
+        foreach (SandboxAvatar other in Live)
+            if (IsInstanceValid(other) && other.IsInsideTree())
+                exclude.Add(other.GetRid());
+        query.Exclude = exclude;
+        return GetWorld3D().DirectSpaceState.IntersectRay(query).Count > 0;
     }
 
     /// <summary>What the fire button does when a <c>PropKind</c> key is the item in this avatar's

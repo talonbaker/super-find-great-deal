@@ -1,4 +1,4 @@
-[gd_scene load_steps=15 format=3]
+[gd_scene load_steps=16 format=3]
 
 ; BASE-1 (2026-09-19) — THE TASK ROOM. 10 x 10 x 3.5 m interior box, same construction as
 ; HoldingRoom.tscn (read that file's header for the convention and for why nothing here may be
@@ -60,6 +60,9 @@ size = Vector3(3.8, 3.5, 0.4)
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_vest_wall_z"]
 size = Vector3(3.8, 3.5, 0.4)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_bounds"]
+size = Vector3(10.0, 3.5, 10.0)
 
 [node name="TaskRoom" type="Node3D"]
 
@@ -199,3 +202,27 @@ shadow_enabled = false
 
 [node name="Vestibule_0" type="Marker3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.1, 6.9)
+
+; CARRY-1 (2026-09-19) — ROOM BOUNDS. The authored volume placement integrity layer 1 tests
+; against (program doc §5b, a ruling from Talon): a prop may only be SET DOWN somewhere whose
+; collision shape lies wholly inside one of these. It is the room's INTERIOR — floor top to
+; ceiling underside, wall inner face to wall inner face — not the room's footprint, so a crate
+; pushed half into a wall is outside it by construction.
+;
+; The GROUP is what PlacementIntegrity queries; the name is for whoever opens this scene looking
+; for it. Groups go in the [node] header (.claude/rules/godot-scenes.md) — wired anywhere else
+; they fail silently and look exactly like a feature that does nothing.
+;
+; It monitors nothing and is on no layer. It is a shape and a transform that the server reads
+; directly; pairing it with every body that walks through it would be per-frame broadphase work
+; for an answer nobody asks for.
+
+[node name="RoomBounds" type="Area3D" parent="." groups=["room_bounds"]]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.75, 0)
+monitoring = false
+monitorable = false
+collision_layer = 0
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape3D" parent="RoomBounds"]
+shape = SubResource("BoxShape3D_bounds")

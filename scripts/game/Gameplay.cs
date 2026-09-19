@@ -179,6 +179,12 @@ public partial class Gameplay : Node3D
         if (!NetworkManager.Instance.IsHeadless)
         {
             Ui.InteractPrompt.Attach(this);
+            // The refusal plate (CARRY-1, 2026-09-19). Beside the interact chip deliberately: the
+            // chip says "here is the key for this thing" and this says "that key was refused, and
+            // here is why". A refused action the player cannot perceive a REASON for is the defect
+            // class INTERACTION-BIBLE §2/§3/§7 were written about; without this attach, every
+            // RefusalNotice.Say in the game is a silent no-op.
+            Ui.RefusalNotice.Attach(this);
             // The corner HUD (2026-08-08): the per-world corner widgets, HudProfile deciding which.
             // Replaces SessionHud and its rotating sun/moon disc, which Talon pulled ("this timer
             // is not working completely remove it"). Lambda-fed so the HUD never goes looking for
@@ -699,6 +705,17 @@ public partial class Gameplay : Node3D
     // if it declares none; index wraps for late joiners.
     private Vector3 SpawnPositionFor(int index)
     {
+        // --spawn-room (CARRY-1): spawn everyone at a NAMED room's markers instead of the world's
+        // default array. The rooms are sealed boxes 40 m apart, so this is the only way a headless
+        // suite can put a bot in front of the props authored in a room that is not the holding
+        // room. Empty by default, so an ordinary session is byte-for-byte unchanged, and it is a
+        // SERVER-side flag because the spawn position is computed here and replicated.
+        // ROUND-1 owns the real thing (RoomTeleport on a phase change); this never moves anybody
+        // after they spawn.
+        if (NetworkManager.Instance?.Options.SpawnRoom is { Length: > 0 } room
+            && _world is World.SupermarketWorld supermarket
+            && supermarket.SpawnPointsFor(room) is { Count: > 0 } roomPoints)
+            return roomPoints[index % roomPoints.Count];
         if (_world != null && _world.SpawnPoints.Count > 0)
             return _world.SpawnPoints[index % _world.SpawnPoints.Count];
         float angle = Mathf.DegToRad(137.5f * index);

@@ -200,11 +200,36 @@ public sealed partial class SupermarketWorldSelfTest : Node3D
         return true;
     }
 
+    /// <summary>
+    /// Live nodes in a section, with <b>one deliberate stop</b>: a prop's body counts as one node
+    /// and its insides are not walked.
+    ///
+    /// <para><b>Why the exception exists</b> (CARRY-1, 2026-09-19). The rule this check enforces is
+    /// "every part of a LEVEL is authored in its scene file". A prop is not a part of the level in
+    /// that sense — it is an instanced prefab (<c>Crate.tscn</c>) whose own script has always
+    /// built its own cosmetic children at runtime: the inverted-hull outline shell and the blob
+    /// shadow, neither of which a level author places, neither of which appears in the packed
+    /// state of the room that instances it. Counting into a prop therefore compares the room's
+    /// authored node list against the room's nodes PLUS a prop's private furniture, and reports a
+    /// level defect that is not one.</para>
+    ///
+    /// <para><b>What it deliberately does NOT weaken.</b> The prop node and its body still count,
+    /// so a room that SPAWNS a prop in <c>_Ready</c> still turns this red — which is the case the
+    /// rule is actually about. Everything that is scenery (walls, floors, lights, markers,
+    /// bounds volumes, the pillar) is still walked to the leaf.</para>
+    /// </summary>
     private static int CountNodes(Node from)
     {
         int n = 1;
         foreach (Node child in from.GetChildren())
+        {
+            if (child is MpFoundation.Game.Sandbox.Carryable)
+            {
+                n += 1;          // the prop's body; its insides are the prop's business
+                continue;
+            }
             n += CountNodes(child);
+        }
         return n;
     }
 

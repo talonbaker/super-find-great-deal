@@ -230,6 +230,45 @@ public sealed class LaunchOptions
     /// (the contention phase, Run-CarryTest) the constant is correct and this flag is not passed.</summary>
     public int CarryTargetPropId { get; private set; } = -1;
 
+    /// <summary>--carry-place x,y,z,yawDeg,afterSec: a scripted PLACE (CARRY-1's
+    /// <c>tests/Run-PlaceTest.ps1</c>). Off unless asked.</summary>
+    public bool CarryPlace { get; private set; }
+
+    /// <summary>
+    /// The exact transform a <c>--carry-place</c> bot asks the server to put its held prop at.
+    ///
+    /// <para><b>A scripted transform rather than "press E and see where it lands", deliberately.</b>
+    /// The suite has to prove the observing peer sees the prop within 5 cm and 5° of a KNOWN pose;
+    /// a placement taken from wherever the bot's own spring happened to be holding the crate is
+    /// its own measurement, so the test could only ever compare the run against itself. Fixing the
+    /// transform is also the only way to stage the three refusals — inside a pillar, outside the
+    /// room, past arm's reach — since a bot cannot be asked to "aim at the wall".</para>
+    ///
+    /// <para>It drives <c>BotHarness</c>, not the avatar: the place decision in
+    /// <c>SandboxAvatar.HandleCarryIntent</c> stays exactly the rule a human gets, with no test
+    /// branch in it. The bot simply calls the same public client entry point
+    /// (<c>PropManager.ClientRequestPlace</c>) that rule calls.</para></summary>
+    public Transform3D CarryPlaceAt { get; private set; } = Transform3D.Identity;
+
+    /// <summary>Seconds after this bot is first seen HOLDING something before the scripted place
+    /// fires. Anchored on the observed hold rather than on the clock, for the reason
+    /// <c>--exit-when-holding</c> exists: a wall-clock guess about when a bot has walked somewhere
+    /// is a guess about machine speed, and it is the guess this suite family keeps losing.</summary>
+    public double CarryPlaceAfterSec { get; private set; }
+
+    /// <summary>
+    /// --spawn-room &lt;holding|search|task&gt;: SERVER-side, which room's markers every player
+    /// spawns at. Empty (the default) keeps the world's own declared spawn points, which for the
+    /// supermarket is the holding room.
+    ///
+    /// <para><b>A test and dev hook, not a game rule.</b> The three rooms are sealed boxes 40 m
+    /// apart and nobody walks between them — ROUND-1 teleports players on a phase change. A scene
+    /// suite that needs to exercise a verb against the props authored in the SEARCH room therefore
+    /// has no way to get a bot there at all, and seeding fixture props into the holding room
+    /// instead would test the verb against content no lane owns. One flag, read in one place
+    /// (<c>Gameplay.SpawnPositionFor</c>), is the smaller of the two costs.</para></summary>
+    public string SpawnRoom { get; private set; } = "";
+
     /// <summary>--carry-grab-retry &lt;sec&gt;: re-fire a scripted bot's FIRST grab on this cadence
     /// until it is actually holding something. Negative (the default) = the original one-shot
     /// press, so every existing carry suite's pacing is byte-for-byte unchanged.
@@ -1013,6 +1052,29 @@ public sealed class LaunchOptions
                 case "--carry-target-prop":
                     if (int.TryParse(Next(args, ref i).Trim(), out int targetProp))
                         options.CarryTargetPropId = targetProp;
+                    break;
+                case "--carry-place":
+                {
+                    // x,y,z,yawDeg,afterSec: once this bot is holding anything, wait afterSec and
+                    // then ask the server to PLACE it at that transform. See CarryPlaceAt.
+                    string[] parts = Next(args, ref i).Split(',');
+                    if (parts.Length >= 5
+                        && double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out double plx)
+                        && double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out double ply)
+                        && double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out double plz)
+                        && double.TryParse(parts[3], NumberStyles.Float, CultureInfo.InvariantCulture, out double plyaw)
+                        && double.TryParse(parts[4], NumberStyles.Float, CultureInfo.InvariantCulture, out double plafter))
+                    {
+                        options.CarryPlace = true;
+                        options.CarryPlaceAt = new Transform3D(
+                            new Basis(Vector3.Up, Mathf.DegToRad((float)plyaw)),
+                            new Vector3((float)plx, (float)ply, (float)plz));
+                        options.CarryPlaceAfterSec = plafter;
+                    }
+                    break;
+                }
+                case "--spawn-room":
+                    options.SpawnRoom = Next(args, ref i).Trim().ToLowerInvariant();
                     break;
                 case "--carry-grab-retry":
                     if (double.TryParse(Next(args, ref i), NumberStyles.Float, CultureInfo.InvariantCulture, out double grabRetry))

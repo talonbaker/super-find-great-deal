@@ -82,7 +82,10 @@ public partial class SupermarketWorld : Node3D, IGameWorld
     public static readonly (string Room, string Prefix, int Count)[] Contract =
     {
         (HoldingRoom, "HoldingSpawn", 4),
-        (SearchRoom, "SearchSpawn", 2),
+        // Search grew from 2 to 4 (CARRY-1, 2026-09-19): the place smoke runs four bots in this
+        // room at once, and two bots spawning on one marker start their run wedged inside each
+        // other. Still teleport destinations rather than spawns — see SpawnPointsFor.
+        (SearchRoom, "SearchSpawn", 4),
         (TaskRoom, "TaskSpawn", 4),
         (Vestibule, "Vestibule", 1),
     };

@@ -91,13 +91,28 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
     /// fallback exactly as before.</summary>
     public bool OwnedByNetwork { get; set; }
 
-    public bool IsHeld => _holder != null;
+    /// <summary>In someone's hands, by either of the two mechanisms: the anchor chase
+    /// (<see cref="_holder"/>) or the holder-side feel spring (<see cref="_springHeld"/>, CARRY-1).
+    ///
+    /// <para><b>Both arms matter and the second one is easy to forget.</b> A spring-carried prop
+    /// has no <see cref="CarryController"/> at all — the spring drives the body directly — so a
+    /// bare <c>_holder != null</c> would read FALSE for the thing in the local player's hands, and
+    /// every consumer of this flag would then be wrong in a different way: the prop would show its
+    /// hover outline while held, <c>SandboxAvatar.FindNearestCarryable</c> would offer it back as
+    /// a free grab, and the guard that stops E from discarding what you are carrying when
+    /// somebody else wins a race would stop seeing it.</para></summary>
+    public bool IsHeld => _holder != null || _springHeld;
+
     public float MassKg => (float)Mass;
 
     /// <summary>Pulsed by the world script on the current pickup candidate.</summary>
     public bool Highlighted { get; set; }
 
     private CarryController? _holder;
+
+    // CARRY-1: held by the holder-side feel spring rather than by an anchor chase. See IsHeld.
+    private bool _springHeld;
+
     private Node3D _visual = null!;
     private StandardMaterial3D _material = null!;
     private MeshInstance3D? _outlineMesh;
@@ -314,6 +329,34 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
         ActorFx.Fire(GetParent(), Profile, ActorEvent.PickedUp, GlobalPosition);
     }
 
+    /// <summary>
+    /// <b>Picked up by the holder-side feel spring</b> (CARRY-1) — everything
+    /// <see cref="OnPickedUp"/> does EXCEPT move the prop, and without a
+    /// <see cref="CarryController"/> to chase.
+    ///
+    /// <para>The omission is the whole method. <see cref="OnPickedUp"/> snaps the prop to the
+    /// anchor on the grab frame because its chase would otherwise slide it visibly up off the
+    /// floor; a spring seeded at the item and allowed to travel is the better answer to the same
+    /// problem (<c>CarrySpring.Seed</c>), and snapping first would throw away the one frame in
+    /// which the grab reads. Freeze, collision-off, the pickup pop and the pickup cue are
+    /// identical, because none of them is about where the prop is.</para>
+    /// </summary>
+    public virtual void OnPickedUpBySpring()
+    {
+        _springHeld = true;
+        _everHeld = true;
+        // Same order and same reasoning as OnPickedUp: collision dies FIRST, so a prop the holder
+        // is standing on can never push them as it detaches.
+        CollisionLayer = 0;
+        CollisionMask = 0;
+        FreezeMode = FreezeModeEnum.Kinematic;
+        Freeze = true;
+        LinearVelocity = Vector3.Zero;
+        AngularVelocity = Vector3.Zero;
+        PunchScale(new Vector3(1.25f, 1.25f, 1.25f));
+        ActorFx.Fire(GetParent(), Profile, ActorEvent.PickedUp, GlobalPosition);
+    }
+
     /// <summary>Deliberate drops get a light toss arc off the holder's facing —
     /// props leave the hands with a little life instead of dead-falling.</summary>
     public virtual void OnDropped()
@@ -324,6 +367,17 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
 
     public virtual void OnThrown(Vector3 impulse) => Release(impulse);
 
+    /// <summary><b>Set down, not dropped</b> (CARRY-1's place verb): rejoin physics with no
+    /// velocity and NO SPIN. The random tumble <see cref="Release(Vector3)"/> applies is what
+    /// makes a discarded prop look discarded; applying it to a placement would spin away the
+    /// orientation the player just lined the object up in, which is the one thing the verb
+    /// exists to preserve.</summary>
+    public virtual void OnPlaced()
+    {
+        ActorFx.Fire(GetParent(), Profile, ActorEvent.Dropped, GlobalPosition);
+        Release(Vector3.Zero, Vector3.Zero);
+    }
+
     /// <summary>Networked-follow only: on a peer that does NOT simulate this prop's physics
     /// (every client, once it's Loose), stop chasing the holder's anchor without touching
     /// freeze/collision/velocity — NetworkedProp itself owns those for a frozen-kinematic
@@ -331,16 +385,24 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
     /// peer (only the server's own Release, via OnThrown/OnDropped, ever clears it), so this
     /// class's own anchor-chase in <see cref="_PhysicsProcess"/> keeps fighting the stream
     /// follow every tick — the bug this method closes.</summary>
-    public void ReleaseHoldForNetworkFollow() => _holder = null;
-
-    private void Release(Vector3 velocity)
+    public void ReleaseHoldForNetworkFollow()
     {
         _holder = null;
+        _springHeld = false;
+    }
+
+    private void Release(Vector3 velocity) =>
+        Release(velocity, new Vector3(GD.Randf() * 4 - 2, GD.Randf() * 4 - 2, GD.Randf() * 4 - 2));
+
+    private void Release(Vector3 velocity, Vector3 angular)
+    {
+        _holder = null;
+        _springHeld = false;
         Freeze = false;
         CollisionLayer = 1;
         CollisionMask = 1;
         LinearVelocity = velocity;
-        AngularVelocity = new Vector3(GD.Randf() * 4 - 2, GD.Randf() * 4 - 2, GD.Randf() * 4 - 2);
+        AngularVelocity = angular;
     }
 
     // --- Behaviour ---------------------------------------------------------------------
