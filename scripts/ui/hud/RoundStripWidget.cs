@@ -126,9 +126,15 @@ public partial class RoundStripWidget : PanelContainer
             }
         }
 
+        // MATCH-1: one call, and the CHOICE of sentence is the text function's. During Tally the
+        // strip carries the card ("ROUND 1 OF 2 · ADA hid · 3 sorted · found at 1:12 · BEN +48")
+        // and at a match end the result ("MATCH 1 · ADA WINS 7–5"); in the holding room after a
+        // match it says what the Start button will now do. Everywhere else it is the phase line
+        // this widget has always drawn. Nothing about the LAYOUT changed — same one label, same
+        // rung, same width policy — which is why the packet's "the change is in the text
+        // function, not the widget" holds here literally.
         int self = (int)Multiplayer.GetUniqueId();
-        string text = HideSeekText.StripLine(view.Phase, view.RemainingSec,
-            view.RoleTextFor(self), view.Round);
+        string text = HideSeekText.StripLine(view, self, driver.NameOf, driver.Tuning);
 
         if (_painted && text == _lastLine)
             return;
