@@ -1,0 +1,77 @@
+[gd_scene load_steps=8 format=3]
+
+; REACH-1 (2026-09-19) — AN OVERTURNED BIN, as a movable prop with a HOLLOW collider.
+;
+; §5b's fourth planted case is "under an overturned bin (allowed)": the object is covered by
+; something the seeker can pick up and throw aside, which is legal and is the game. Proving that
+; needs a prop the eye ray HITS and the crate underneath does NOT overlap — so a single box
+; collider is wrong twice over (it would swallow the crate, and the rest audit would then
+; correctly report a prop overlap that the fixture never meant to create).
+;
+; So: five box shapes — a lid and four sides, 0.08 m thick, open at the bottom. Outer 1.0 x 0.70 x
+; 1.0, interior 0.84 x 0.62 x 0.84, which clears a 0.44 m crate by 0.20 m on every side.
+;
+; THE FIRST CollisionShape3D CHILD IS THE LID, AND THAT IS DELIBERATE. PlacementIntegrity measures
+; a prop by its first collider (CARRY-1's choice: the props in this game are single-shape boxes and
+; spheres, and walking every shape would cost a query per shape on a path that runs once per settle
+; for every prop in the room). A multi-shape fixture is therefore audited by its lid alone. That is
+; fine HERE — the bin is scenery for the case, never its subject — and it is written down because
+; the day a real multi-shape prop ships, this is the line that has to change.
+;
+; Named "CollisionShape3D" for the same mundane reason Crate.tscn's is: PropManager.AuthoredKindOf
+; looks that name up to infer PropKind from the shape, and a box means Crate.
+
+[ext_resource type="Script" path="res://scripts/game/sandbox/Carryable.cs" id="1_carryable"]
+[ext_resource type="Script" path="res://scripts/game/sandbox/feel/Interactable.cs" id="2_interactable"]
+
+[sub_resource type="BoxMesh" id="BoxMesh_shell"]
+size = Vector3(1, 0.7, 1)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_lid"]
+size = Vector3(1, 0.08, 1)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_side_x"]
+size = Vector3(0.08, 0.62, 1)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_side_z"]
+size = Vector3(0.84, 0.62, 0.08)
+
+[sub_resource type="StandardMaterial3D" id="Mat_shell"]
+albedo_color = Color(0.72, 0.24, 0.2, 1)
+roughness = 0.8
+
+[node name="HollowShell" type="RigidBody3D"]
+mass = 3.0
+script = ExtResource("1_carryable")
+kind = 0
+tint = Color(0.72, 0.24, 0.2, 1)
+
+[node name="Visual" type="Node3D" parent="."]
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Visual"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.35, 0)
+mesh = SubResource("BoxMesh_shell")
+material_override = SubResource("Mat_shell")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.66, 0)
+shape = SubResource("BoxShape3D_lid")
+
+[node name="SideXPos" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.46, 0.31, 0)
+shape = SubResource("BoxShape3D_side_x")
+
+[node name="SideXNeg" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.46, 0.31, 0)
+shape = SubResource("BoxShape3D_side_x")
+
+[node name="SideZPos" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.31, 0.46)
+shape = SubResource("BoxShape3D_side_z")
+
+[node name="SideZNeg" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.31, -0.46)
+shape = SubResource("BoxShape3D_side_z")
+
+[node name="Interactable" type="Node" parent="."]
+script = ExtResource("2_interactable")
