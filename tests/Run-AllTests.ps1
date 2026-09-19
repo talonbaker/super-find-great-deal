@@ -114,10 +114,12 @@ try {
         # base each appended "last" and the merge had to pick an order anyway (INT-0 §1), so the
         # honest convention is join order, newest at the bottom.
         #
-        # A server and two bots on its own port, udp/7899 -- headless. Every port in tests/ was
+        # A server and two bots on its own port, udp/7900 -- headless. Every port in tests/ was
         # re-audited when this one was claimed, because a "next free port" computed from a
-        # snapshot of tests/ is exactly what produced INT-0's triple 7896 collision; 7893-7898 and
-        # 7901 were taken, so 7899 is the next one that is actually free.
+        # snapshot of tests/ is exactly what produced INT-0's triple 7896 collision. It happened
+        # a second time anyway, inside this wave: this suite was written on 7899 and VOICE-1's
+        # Run-VoiceRoomTest landed there first from its own worktree. 7893-7899 and 7901 are
+        # taken and SFX-1 claims upward from 7902, so 7900 is the one gap left.
         @{ Name = "Door: burst + startle (DOOR-1)";      Script = "Run-BurstDoorTest.ps1" }
 
         # WHAT WAS REMOVED HERE AT THE FORK (BASE-1, 2026-09-19), so a reader of an old handoff

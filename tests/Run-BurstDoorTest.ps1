@@ -54,14 +54,21 @@
 [CmdletBinding()]
 param(
     # Unique across tests/. The ladder as of this lane: Run-CarryNetTest 7893/7894/7895,
-    # Run-RoundLoopSmoke 7896, Run-FirstPersonTest 7897, Run-PlaceTest 7898, and 7901 is claimed
-    # by a sibling lane of this same wave. 7899 is the next one that is free on both counts.
+    # Run-RoundLoopSmoke 7896, Run-FirstPersonTest 7897, Run-PlaceTest 7898,
+    # Run-VoiceRoomTest 7899 (VOICE-1), 7901 claimed by another lane of this wave, and SFX-1
+    # claiming upward from 7902. 7900 is the one gap left.
     #
     # THE REASON THIS COMMENT NAMES THE WHOLE LADDER (INT-0, 2026-09-19): three lanes off one base
     # each computed "the next free port" from the same snapshot of tests/ and all three picked
     # 7896, which is a red that looks exactly like ordinary port contention and is not. A port
     # claimed in a comment is a port the next lane can see.
-    [int]$Port = 7899,
+    #
+    # AND IT HAPPENED AGAIN INSIDE THIS WAVE, which is worth the extra line. This suite was
+    # written on 7899 against a ladder that was correct when it was read; VOICE-1 landed
+    # Run-VoiceRoomTest on 7899 first, from its own worktree, and neither lane could see the
+    # other. The orchestrator settled it. **A port is not claimed until it is on origin**, and
+    # two concurrent lanes reading the same tests/ will pick the same "next free" one every time.
+    [int]$Port = 7900,
     [int]$MutexTimeoutMinutes = 30,
     [switch]$SkipBuild
 )
