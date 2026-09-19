@@ -132,10 +132,17 @@ public static class HideSeekText
 ///
 /// <para><b>Why character count and not font metrics.</b> <c>Font.GetStringSize</c> would be
 /// exact and would also drag a font resource, a theme lookup and a rendering server into a
-/// number that has to be identical on a headless bot and on Talon's machine. Counting characters
-/// against a reference width is approximate in the direction that is safe — a proportional font
-/// makes every real line NARROWER than the estimate, never wider — and it is a pure function of
-/// an int.</para>
+/// number that has to be identical on a headless bot and on Talon's machine. This is a pure
+/// function of an int, and it is the only reason the clock's legibility is a unit test.</para>
+///
+/// <para><b>What that costs, said plainly, because the first draft got it wrong.</b> A character
+/// count is an AVERAGE, so it is not conservative in either direction: a line of wide glyphs is
+/// wider than the estimate and a line of digits and colons is much narrower. The first cut
+/// assumed the textbook 0.55-of-height advance, and the capture of the <c>Together</c> line
+/// showed <c>3 SORTED</c> hanging off both ends of the panel. <see cref="ReferenceChars"/> now
+/// carries the ratio measured off that render. <b>The render is the instrument here</b> — this
+/// class can hold the arithmetic honest but it cannot tell you the constant is wrong, so a
+/// change to the panel or the label size owes a new capture, not just a green suite.</para>
 /// </summary>
 public static class RoundClockLayout
 {
@@ -143,22 +150,39 @@ public static class RoundClockLayout
     /// How many characters fit across the panel at the authored size — the width everything here
     /// is measured against.
     ///
-    /// <para><b>Derived from the panel, not chosen.</b> <c>RoundClock.tscn</c>'s panel is 2.4 m
-    /// wide and the timer's glyphs are 0.48 m tall (font_size 96 at pixel_size 0.005). A
-    /// proportional sans averages roughly 0.55 of its height per advance, so the panel holds
-    /// 2.4 / (0.48 × 0.55) ≈ 9 characters; eight is that with a margin. Change the panel's width
-    /// or the label's size and this number moves with them.</para>
+    /// <para><b>Derived from the panel, and the advance ratio in it was MEASURED off a render
+    /// rather than assumed.</b> <c>RoundClock.tscn</c>'s panel is 2.4 m wide and the timer's
+    /// glyphs are 0.48 m tall (font_size 96 at pixel_size 0.005). The first cut of this number
+    /// assumed the usual "a proportional sans averages 0.55 of its height per advance" and got
+    /// 8 — and the capture of the <c>Together</c> line showed <c>3 SORTED</c> hanging off both
+    /// ends of the panel. Measured on that frame (the panel spans 275 px, the eight-character
+    /// line spans 283), this font's average advance is <b>0.64</b> of the glyph height, so the
+    /// panel holds 2.4 / (0.48 × 0.64) ≈ 7.8 characters. Seven is that with a margin.</para>
+    ///
+    /// <para>Change the panel's width or the label's size and this number moves with them — and
+    /// re-take the capture, because that is the only instrument that can see it. The unit test
+    /// below bounds the copy against this number, but it cannot tell you the number is
+    /// wrong.</para>
     ///
     /// <para><b>The two lines that matter are well inside it</b> — <c>0:30</c> is four and
     /// <c>10:00</c> is five — which is the point: the clock is at full size for the whole round
     /// and only the six-second tally card is ever shrunk.</para>
     /// </summary>
-    public const int ReferenceChars = 8;
+    public const int ReferenceChars = 7;
 
-    /// <summary>Never shrink past this fraction of the authored size — below it the line is
-    /// present but unreadable, which is a worse failure than an overhang because nothing looks
-    /// broken. A line long enough to hit this floor is a copy defect, not a layout one.</summary>
-    public const float MinScale = 0.40f;
+    /// <summary>
+    /// Never shrink past this fraction of the authored size — below it the line is present but
+    /// unreadable, which is a worse failure than an overhang because nothing looks broken. A line
+    /// long enough to hit this floor is a copy defect, not a layout one.
+    ///
+    /// <para><b>0.35 is set by the longest line the wire can produce</b>, not by taste:
+    /// <c>HID 255 · SEEK 255</c>, eighteen characters, both gains clamped at the byte ceiling
+    /// <see cref="HideSeekWire.ClampByte"/> imposes. <see cref="ReferenceChars"/> / 18 = 0.389,
+    /// so anything above that leaves a line the fit cannot rescue, and 0.35 is that with room.
+    /// At this floor the glyphs are 0.17 m and subtend about 16 px of a 1152-line frame at 8 m —
+    /// legible for the six seconds a tally card is up, and a good deal smaller than anything the
+    /// clock shows for the rest of the round.</para></summary>
+    public const float MinScale = 0.35f;
 
     /// <summary>
     /// The pixel size to draw a line of <paramref name="lineLength"/> characters at, given the
