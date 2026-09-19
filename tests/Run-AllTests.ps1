@@ -108,6 +108,18 @@ try {
         # in the join-index spawn dealing -- which is the other reason it goes at the end.
         @{ Name = "First person: rig + cull (FP-1)";     Script = "Run-FirstPersonTest.ps1" }
 
+        # --- DOOR-1 (2026-09-19): the burst door ---
+        # Last, per the standing rule -- and appended AFTER FP-1's entry rather than before it,
+        # which is a deliberate re-reading of that rule rather than a guess: three lanes off one
+        # base each appended "last" and the merge had to pick an order anyway (INT-0 §1), so the
+        # honest convention is join order, newest at the bottom.
+        #
+        # A server and two bots on its own port, udp/7899 -- headless. Every port in tests/ was
+        # re-audited when this one was claimed, because a "next free port" computed from a
+        # snapshot of tests/ is exactly what produced INT-0's triple 7896 collision; 7893-7898 and
+        # 7901 were taken, so 7899 is the next one that is actually free.
+        @{ Name = "Door: burst + startle (DOOR-1)";      Script = "Run-BurstDoorTest.ps1" }
+
         # WHAT WAS REMOVED HERE AT THE FORK (BASE-1, 2026-09-19), so a reader of an old handoff
         # can tell "deleted" from "lost": the bubble-test world, the shared bubble counter and the
         # last-bubble celebration, the TV portal, the Puffin Lab, the watcher's night gate, the

@@ -1329,8 +1329,13 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
 
             if (p.Mode == PropMode.Resting)
             {
+                // _registry.WAKE, not Release. Release is guarded to Held -> Loose and returns
+                // false here, which is exactly the defect Run-BurstDoorTest caught on its first
+                // run: the store stayed Resting, the per-tick loop above streams only Loose
+                // props, and the shove moved the SERVER's rigid body while every client's copy
+                // stood still. See PropRegistry.Wake's own doc comment.
                 Transform3D wokeAt = node.Body.GlobalTransform;
-                _registry.Release(p.Id, wokeAt);
+                _registry.Wake(p.Id, wokeAt);
                 Rpc(MethodName.ApplyPropState, p.Id, (int)PropMode.Loose, 0, wokeAt);
                 node.BeginLooseServer(deltaV);
             }

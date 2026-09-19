@@ -296,7 +296,8 @@ public partial class BurstDoor : Node3D
         _sinceReset = 0.0;
         _stagedFoundTick = -1;
         GD.Print($"[door] closing from {_closeFromDeg:F1} deg over "
-                 + $"{StartleTuning.Current.LeafCloseSec:0.000}s peer={Multiplayer.GetUniqueId()}");
+                 + $"{StartleTuning.Current.LeafCloseSec:0.000}s peer={Multiplayer.GetUniqueId()} "
+                 + $"wall={System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}");
     }
 
     /// <summary>
@@ -454,8 +455,14 @@ public partial class BurstDoor : Node3D
         // to Resting, which is right for a disconnect and wrong here: a dropped object has to
         // fall and tumble where everyone can see it). Nothing new about the prop lifecycle is
         // introduced by the door.
+        //
+        // Counted BEFORE the release, and reported as a count rather than as a sentence, because
+        // the release empties the hand: "force-dropped what the hider was holding" printed
+        // unconditionally would read identically whether there was anything in it or not, and a
+        // suite reading this log could not tell the flinch firing from the flinch being a no-op.
+        int held = props.HeldPropIdsFor(hiderPeer).Length;
         props.ScatterHeldBy(hiderPeer);
-        GD.Print($"[door] burst force-dropped whatever hider {hiderPeer} was holding");
+        GD.Print($"[door] burst force-drop: released {held} prop(s) from hider {hiderPeer}");
     }
 
     // ---------------------------------------------------------------------------------------
