@@ -825,3 +825,23 @@ identically to *the limiter is not wired up* — the same absence-without-a-cont
 records for headless probes and for `FootstepAudioTests`' positive control. `PropManager` now
 logs its running peak offer (`[sfx] impact-peak offered=N budget=4`), the suite prints the
 measured headroom, and a peak of **zero** is a hard failure rather than a quiet pass.
+
+### `Run-RoundLoopSmoke.ps1` takes the machine mutex ITSELF, and that only works from the marathon
+
+Every other registered suite leaves the lock to `Run-AllTests.ps1`. This one calls
+`Enter-SuiteMutex` at its own line 105. Inside a marathon that is harmless and invisible: the
+marathon runs each suite with `&` in **one PowerShell process on one thread**, and a Windows
+named `Mutex` is re-entrant per thread, so the inner acquire succeeds instantly on a recursion
+count of 2.
+
+**It deadlocks the moment a parent holds the lock and invokes it as a CHILD PROCESS.** Measured
+2026-09-19 (SFX-2): a wrapper that took the mutex and then ran each suite with
+`powershell -File` sat at `waiting for machine-wide full-suite lock (900s so far) - held by: pid
+30864 ... (C:\repos\sfgd-sfx2)` — **waiting for itself**, and the holder description said so in
+as many words, which is the tell. Every suite before it had passed.
+
+So: **run `Run-RoundLoopSmoke.ps1` standalone directly, never from inside a lock-holding
+wrapper**, and if you write a one-suite or subset wrapper, either invoke the suites in-process
+(`&` in the same thread, as the marathon does) or do not take the lock in the wrapper at all.
+The two Godot lanes this machine runs make subset wrappers common enough that this will be hit
+again.
