@@ -1238,6 +1238,16 @@ public partial class SandboxAvatar : CharacterBody3D, IServerConfirmedBody
             if (net.Options.FirstPersonCam || net.Options.FirstPersonSelfTest)
             {
                 FirstPersonCamera probeCam = AttachFirstPersonCamera(captureMouse: false);
+                // --fp-look: aim the lens. A bot brain decides where it WALKS; in first person
+                // that no longer decides where it LOOKS, so a capture harness has to be able to
+                // point the camera itself. The intent source is untouched.
+                if (net.Options.HasFirstPersonLook)
+                {
+                    probeCam.SetLook(net.Options.FirstPersonLookYaw, net.Options.FirstPersonLookPitch);
+                    GD.Print($"[fp] look set by --fp-look to yaw " +
+                             $"{Mathf.RadToDeg(probeCam.Yaw):F1} deg, pitch " +
+                             $"{Mathf.RadToDeg(probeCam.Pitch):F1} deg");
+                }
                 if (net.Options.FirstPersonSelfTest)
                 {
                     var probe = new FirstPersonSelfTest { Name = "FirstPersonSelfTest" };
