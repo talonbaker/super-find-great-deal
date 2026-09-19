@@ -159,6 +159,34 @@ public partial class HideSeekDriver : Node
         }
     }
 
+    /// <summary>
+    /// <b>Which room is this peer in</b> (VOICE-1), from the round rather than from a position
+    /// sample — see <see cref="RoundRooms"/> for the table and for why "unknown" is a real
+    /// answer. Returns <see cref="RoundRooms.Unknown"/> on a client that has not synced yet.
+    ///
+    /// <para><b>Server and client resolve it from different sources and must agree.</b> The
+    /// server reads its authoritative state, a client reads the folded view of the last message
+    /// it applied — and the view is built from that same state by the absolute wire, so the two
+    /// answer identically for every phase and both roles. That equality is the whole reason the
+    /// intercom can be decided per listener on the client AND per pair on the relay without the
+    /// two ever disagreeing about who is on the PA.</para>
+    ///
+    /// <para><b>It needs no late-join plumbing of its own.</b> <c>Gameplay.OnPeerConnected</c>
+    /// notes that VOICE-1's room membership belongs on those lines; it does not, and that is the
+    /// better outcome: the one round message a joiner already receives carries the phase and both
+    /// roles, which is everything this function reads. There is no second table to send and
+    /// nothing to get out of step with the first.</para>
+    /// </summary>
+    public string RoomOf(int peerId)
+    {
+        if (_isServer)
+            return RoundRooms.RoomOf(_state.Phase, _state.HiderPeerId, _state.SeekerPeerId, peerId);
+        if (!Synced)
+            return RoundRooms.Unknown;
+        HideSeekView v = View;
+        return RoundRooms.RoomOf(v.Phase, v.HiderPeerId, v.SeekerPeerId, peerId);
+    }
+
     /// <summary>Another lane's fact provider. Registration order is the order
     /// <see cref="IRoundFactSource.TargetRetrievable"/>'s first-non-null rule walks, so REACH-1
     /// registering after a placeholder wins.</summary>
