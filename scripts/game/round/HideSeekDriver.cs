@@ -292,7 +292,7 @@ public partial class HideSeekDriver : Node
                 // the same rows in every log this session writes.
                 if (_tuning.IsFirstRoundOfMatch(_state.RoundIndex))
                     GD.Print($"[round] match {_tuning.MatchIndexOf(_state.RoundIndex)} begins at "
-                             + $"round {_state.RoundIndex} — scores zeroed: {ScoreLine()}");
+                             + $"round {_state.RoundIndex} -- scores zeroed: {ScoreLine()}");
                 MoveTo(_state.HiderPeerId, SupermarketWorld.SearchRoom, 0);
                 break;
 
