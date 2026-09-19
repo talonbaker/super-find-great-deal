@@ -656,3 +656,65 @@ the same distance as the body to three decimals.** Proved able to fail with `Top
 planted on `FirstPersonCamera.Attach`: spread 73.999 m, `lens moved 0.00 m` against body jumps of
 40.63 / 42.09 / 80.16 m — while the epoch-bump half stayed green, which is what shows the two
 halves are independent.
+
+## `Run-RoundLoopSmoke` now runs a whole MATCH, and its first red was in the SUITE (MATCH-1, measured 2026-09-19)
+
+**New baseline for this suite.** It drives two rounds and a third Start (~95 s, was 46), still on
+port 7896, and it is now the longest single entry in the registry. The ROUND-1 numbers above are
+unchanged by the longer schedule, which is the useful half of that: **worst closest-approach
+1.10 m, room separations 38.08 / 42.07 / 80 / 9.73 m, one named refusal** — identical to ROUND-1's
+and INT-0's runs across 13 server-decided moves instead of 6. New quantities to compare across
+runs: **12 phase transitions, 3 cards** (`r1 matchOver=False, r2 matchOver=True, r3 matchOver=False`),
+match tally armed **10 s** against the round card's **6 s**, totals **173–171**.
+
+The third card is round 3 ending by disconnect when the bots exit on their own duration. That is
+correct and free: it exercises the disconnect path every run.
+
+### A card outlives the numbers it describes, and a suite can read the wrong instant
+
+**The first run failed with `the totals on the wire are level at 0 but the card names peer N the
+winner`, and the game was right.** `HideSeekTally` is still a peer's `LastTally` long after its
+Tally phase ended, and the Start that begins the next match zeroes the live score map while the
+card still reads 173–171. The suite had keyed its "the winner equals the higher total" check off
+the *last* sample carrying the card, which is one round too late.
+
+**So: when a suite compares a FROZEN value against a LIVE one, the sample has to be taken at the
+instant they describe the same moment**, and that instant is worth naming in the code. This suite
+now builds two maps — `Cards` (the last sample carrying each card, for the card's own frozen
+fields and to prove they survived a reset) and `CardsAtTally` (the last sample carrying each card
+while phase == Tally, for every live-vs-card comparison). It generalises to any "last N" the
+absolute wire keeps around: the round card, the last refusal, anything a board shows after the
+thing it describes is over.
+
+It also turned into the strongest assertion in the suite, because the same sample proves both
+halves at once:
+
+```
+RoundA after the third Start: 2 score row(s), all zero; match card still reads 173-171, winner 1196225384
+```
+
+### Proved able to fail: `MatchRounds = 3`
+
+11 failures, **every one a MATCH-1 assertion** — matchOver false on round 2 on both peers, the
+winner against the higher total, the draw, the scores surviving the third Start, and the server
+never logging match 2 beginning. The phases, rooms, teleports (13 moves, 1.10 m), the refusal and
+both cards' field-by-field equality between the two peers **all stayed green**, which is what
+shows the new checks are independent rather than one check wearing eleven hats.
+
+Two of those eleven were a wrong diagnosis of a real fault ("the match card's winner went to 0 when
+the scores reset — the result is not frozen", fired on a card that was never a match end and so had
+no result to freeze). Fixed by guarding that branch on `matchOver`. **A planted fault is also a
+test of the failure MESSAGES**, and this one found two that would have sent the next reader at the
+wrong file.
+
+### `dotnet test` after MATCH-1: Failed: 0, Passed: 1357, Skipped: 0, Total: 1357
+
+INT-0's baseline was 1317; `HideSeekMatchTests.cs` adds 40 and nothing was changed to make an
+existing test pass.
+
+### Three lanes, and the mutex did its job
+
+This run queued **~390 s** behind `C:\repos\sfgd-reach1`'s suite and then `C:\repos\sfgd-clock1`'s,
+which the lock's own waiting lines name by pid and worktree. No process this lane did not start was
+investigated or killed. Worth recording as the ordinary case: the wait is not a mutex timeout and
+it is not a red — read the waiting lines, which say who holds it and for how long.
