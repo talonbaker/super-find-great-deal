@@ -38,6 +38,24 @@ public sealed class LaunchOptions
     /// for the measurement of a rig it forgot to build.</summary>
     public bool FirstPersonSelfTest { get; private set; }
 
+    /// <summary>--rotate-look-selftest: the FP-1 x CARRY-1 input-routing probe (INT-0, 2026-09-19).
+    /// Attaches a real <see cref="Sandbox.HeldPropRotator"/> to a <c>--bot</c> avatar beside its
+    /// real <see cref="Sandbox.FirstPersonCamera"/>, injects synthetic mouse motion with the
+    /// rotate modifier held and again with it released, and prints
+    /// <c>[rotlook-selftest] SUMMARY failures=&lt;n&gt; result=PASS|FAIL</c>.
+    ///
+    /// <para><b>Why a flag rather than a bot script.</b> The two behaviours under test are a
+    /// property of Godot's input ORDER — the rotator consumes mouse motion in <c>_Input</c>, the
+    /// camera reads it in <c>_UnhandledInput</c> — and nothing that steers a bot through
+    /// <c>IIntentSource</c> can produce a mouse event at all. The rotator also only attaches on the
+    /// human branch, so a bot has none; this builds one through the SAME public
+    /// <c>HeldPropRotator.Attach</c> the human branch calls, which is the pattern
+    /// <see cref="FirstPersonCam"/> already established for the camera.</para>
+    ///
+    /// <para>Implies <see cref="FirstPersonCam"/>: the whole question is which of the two rigs gets
+    /// the motion, so measuring it without the camera would be measuring nothing.</para></summary>
+    public bool RotateLookSelfTest { get; private set; }
+
     /// <summary>--fp-look &lt;yawDeg&gt;[,&lt;pitchDeg&gt;]: the initial look angles for a
     /// <see cref="FirstPersonCam"/> run, degrees, same convention as <c>SandboxCamera.Yaw</c>
     /// (0 = facing −Z, positive = turning left). Pitch is clamped by the rig.
@@ -845,6 +863,10 @@ public sealed class LaunchOptions
                     break;
                 case "--first-person-selftest":
                     options.FirstPersonSelfTest = true;
+                    break;
+                case "--rotate-look-selftest":
+                    options.RotateLookSelfTest = true;
+                    options.FirstPersonCam = true;
                     break;
                 case "--fp-look":
                 {

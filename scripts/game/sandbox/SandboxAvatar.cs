@@ -1301,6 +1301,15 @@ public partial class SandboxAvatar : CharacterBody3D, IServerConfirmedBody
                     probe.Setup(probeCam, this);
                     AddChild(probe);
                 }
+                // --rotate-look-selftest (INT-0): the FP-1 x CARRY-1 input-routing probe. It
+                // builds its own HeldPropRotator through the shipped Attach, because the rotator
+                // is a human-branch node and this is a bot.
+                if (net.Options.RotateLookSelfTest)
+                {
+                    var rotProbe = new RotateLookSelfTest { Name = "RotateLookSelfTest" };
+                    rotProbe.Setup(probeCam, this);
+                    AddChild(rotProbe);
+                }
             }
         }
         else
