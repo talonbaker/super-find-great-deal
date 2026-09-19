@@ -490,3 +490,52 @@ file under `scripts/net/**`, no `CycleDriver`, and no part of the reconnect path
 a rate worth knowing, and an illegal-instruction crash is a different animal from a scheduling
 flake. Whoever picks it up: capture the Windows fault log alongside the bot's stdout, and check
 whether it only ever happens to a bot that has already printed `done`.
+
+## A red written in the flake list's own vocabulary was a real regression (CARRY-1, measured 2026-09-19)
+
+**The most useful thing measured in this packet, and it nearly went the other way.** CARRY-1's
+first marathon went 30 PASS / 2 FAIL with `Carry: server-authoritative` printing:
+
+```
+bot A: observed A grab prop 1 at 1.00s but never observed the drop before the log ended
+```
+
+That is the staging half, in this file's own phrasing, on a suite this file already names as
+load-flaky. The load-flaky entry would have explained it away. **It was a real defect in that
+packet's diff**, and one line of the server log said so:
+
+```
+[server] place refused peer=979401151 prop=1 Overlapping (penetration 0.294 m)
+         penetrates /root/Gameplay/Players/545392650 by 0.294 m (tolerance 0.020 m)
+[server] place denied peer=979401151 reason=DoesNotFitThere
+```
+
+Two bots stood at the same crate; the holder's new place-vs-drop rule resolved E to PLACE because
+its aim ray met the other bot's capsule, and the placement was then refused because the held crate
+penetrated that capsule. Pressing "put this down" next to another player did nothing at all.
+
+**So: read the failing check, then read the SERVER LOG, before reaching for this list.** A flake
+list is a hypothesis about a red, not a verdict on it, and it is at its most dangerous when a real
+regression happens to produce the same sentence. The discriminator that settled it cost one grep.
+
+### Two measured numbers from the same packet
+
+- **The holder-side carry spring's steady-state lag is 0.372 m mean / 0.403 m peak** at a
+  sustained 3.6 m/s walk with a 1 kg crate (n = 83, off `tests/logs/carrydrift.jsonl`, samples
+  from 3 s in). It matches the closed form `2v/omega` (0.386 m at omega = 18.65) to within 4%.
+- **`Carry: drift (hold+walk)`'s caps were NOT touched by that, by luck rather than by design.**
+  Its `MeanMax` is 1.15 m and `PeakMax` 1.45 m on `bd`, the prop's distance from the rendered
+  BODY, against BASE-1's measured 1.010 / 1.063. A 0.37 m lag looked certain to blow through them
+  and did not, because the lag points backwards along travel while the carry anchor sits in FRONT
+  of the body — so the lag moves the prop toward the body and `bd` went DOWN, 1.010 -> 0.997.
+  **That cancellation is a fact about where the carry anchor sits, not a property of the suite.**
+  Anyone who moves the carry anchor behind or beside the body puts the whole lag straight into
+  `bd` and should expect to re-measure these caps.
+
+### `Carry: regrab-while-loose`, third confirmation
+
+Failed once standalone with the documented staging string (`bot A never completed held -> loose ->
+held-again for prop 2 (reached phase 2)`), then **3/3 PASS** immediately after on the same tip.
+Worst hold distance 1.06 m on the holder's view and 1.06-1.11 m on the witness across the three
+passes — inside the 0.89-1.09 m band already recorded. It also passed in both full marathons of
+that packet.
