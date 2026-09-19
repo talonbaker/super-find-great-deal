@@ -64,6 +64,7 @@ try {
         @{ Name = "Carry: drift (hold+walk)";            Script = "Run-CarryDriftTest.ps1" }
         @{ Name = "Carry: regrab-while-loose";           Script = "Run-RegrabTest.ps1" }
         @{ Name = "Carry: throw + loose";                Script = "Run-ThrowTest.ps1" }
+        @{ Name = "Carry: place + integrity";            Script = "Run-PlaceTest.ps1" }
         @{ Name = "Carry: networked proof";              Script = "Run-CarryNetTest.ps1" }
         @{ Name = "Netcode: step determinism";           Script = "Run-NetStepTest.ps1" }
         @{ Name = "Netcode: net-sim";                    Script = "Run-NetSimTest.ps1" }
