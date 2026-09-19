@@ -724,7 +724,7 @@ than chasing it**: forty simultaneous impacts want forty voices. It reports the 
 gates on a 60 % regression bar. The fix is source-side limiting — the same answer
 `FootstepAudioDirector` already gives for six sprinting players — and it is a design call.
 
-### `Voice: proximity gate` is load-flaky too, and `Carry: drift`'s red is a STAGING red (SFX-1, measured 2026-09-19)
+### `Carry: drift`'s red is a STAGING red, and a second red was an EXTERNAL KILL (SFX-1 2026-09-19; corrected by SFX-2 2026-09-19)
 
 SFX-1's marathon on `feat/2026-09-19-sfx-1`: **35 suites, 33 PASS / 2 FAIL.** Both reds
 discriminated the documented way, and the machine was **not** idle for either the marathon or the
@@ -735,7 +735,7 @@ per the SHADER-2 entry above makes the clearing stronger rather than weaker.
 | Suite | Marathon | Standalone, `-SkipBuild`, machine busy | The quantity |
 |---|---|---|---|
 | `Carry: drift (hold+walk)` | FAIL | **3/3 PASS** | mean **0.997–0.998 m**, peak **1.067–1.071 m**, growth 0.001–0.002 m, n=83 |
-| `Voice: proximity gate` | FAIL | **3/3 PASS** | vgate-pa: far **1066–1101** packets at 45.7 m, ~2195 relays taken by the PA exemption, 0 gated |
+| `Voice: proximity gate` | FAIL (**external kill — not a flake**) | **3/3 PASS** | vgate-pa: far **1066–1101** packets at 45.7 m, ~2195 relays taken by the PA exemption, 0 gated |
 
 **`Carry: drift` is not on the flake list above and its red belongs to the family that is.** The
 failing lines are `prop 1 not held by bot ... during walk window` and `too few
@@ -755,9 +755,30 @@ And **the measured quantity did not move**: INT-0 recorded mean 0.997 / peak 1.0
 merged base, against 0.997–0.998 / 1.067–1.071 / n=83 here. A `Carry: drift` red whose
 `body-distance` numbers have moved is the real thing; one whose grab never landed is not.
 
-**`Voice: proximity gate` is new to this list.** Its red is `FAIL: vgate-pa: a bot exited 1`, and
-the speaker bot's own JSONL stops at **t=9227 ms of a 22 s run** — it died mid-run rather than
-after finishing, so it is NOT the `-1073741795`-after-`[bot] done` teardown artifact BASE-1
-recorded, and its `.err.log` is empty. Read the failing PHASE first: phases 1 and 2 both printed
-`ok` in the same failing run, so a red here that names `vgate-on` or `vgate-off` is a different
-animal from one that names a bot exit code.
+**`Voice: proximity gate` is NOT on the flake list, and SFX-1's entry saying it was has been
+withdrawn.** SFX-1 read its red as load flakiness with a discriminator of its own (`FAIL:
+vgate-pa: a bot exited 1`, the speaker bot's JSONL stopping at **t=9227 ms of a 22 s run**,
+mid-run rather than after `[bot] done`, with an empty `.err.log`). That reading was wrong, and
+the cause is recorded in somebody else's handoff rather than in any log SFX-1 could reach:
+REACH-1 ran
+
+```
+taskkill /F /IM Godot_v4.7-stable_mono_win64_console.exe
+```
+
+**at 2026-09-19T21:58Z, killing every Godot process on the machine** — see REACH-1's handoff
+§8, which reports the incident itself and says in as many words that if SFX-1 saw a suite die
+around that minute, that is why, and the result *"should be re-run rather than discriminated"*.
+SFX-1's marathon was running at that time. A bot that stops mid-run with an empty `.err.log` is
+exactly what `taskkill /F` on its process looks like from the outside, which is why it was
+indistinguishable from a flake to the lane that hit it.
+
+**So the entry is a correction, not a discriminator, and the generalisation is worth more than
+the suite it happened to.** An externally killed process is not evidence about the suite, the
+diff or the load — it is evidence about nothing, and adding it to the flake list makes the
+list worse: the next lane to see a genuine `Voice: proximity gate` regression would have found a
+documented excuse waiting for it. **Before writing a suite into this file, check the other live
+lanes' handoffs for the same clock minute.** SFX-2 re-ran the suite standalone under the mutex on
+a quiet machine on `feat/2026-09-19-sfx-2` and quotes the result in its own handoff; that is the
+clean datum INT-1 should use. The `Carry: drift` half of SFX-1's entry above stands — it was
+discriminated from the server log, not from timing.
