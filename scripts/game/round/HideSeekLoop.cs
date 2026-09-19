@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.Immutable;
 
 namespace MpFoundation.Game.Round;
@@ -266,22 +267,54 @@ public static class HideSeekLoop
     // The transitions. One method each, so what happens on entry is readable.
     // ---------------------------------------------------------------------------------------
 
-    /// <summary>Holding -&gt; Hiding. The round's accumulators are cleared HERE, at the start of
+    /// <summary>
+    /// Holding -&gt; Hiding. The round's accumulators are cleared HERE, at the start of
     /// the round, rather than at the reset edge: the holding-room board is supposed to still show
     /// the last card while everyone stands around, and a reset that wiped it would take that
-    /// away.</summary>
-    private static HideSeekState EnterHiding(in HideSeekState s, in HideSeekTuning t) =>
-        s with
+    /// away.
+    ///
+    /// <para><b>And this is where a new MATCH begins</b> (MATCH-1). The same Start button that
+    /// runs the next round runs the next match — no menu, no lobby — so the one place that can
+    /// tell the two apart is the round index it is about to play: if that round is the FIRST of
+    /// its match, the cumulative scores go back to zero here. Keyed off the arithmetic rather
+    /// than off <c>LastTally.MatchOver</c> so it cannot be confused by a session whose first card
+    /// does not exist yet, and so a match boundary means the same thing whether the previous
+    /// round ended at the bin, at the buzzer or on a disconnect.</para>
+    ///
+    /// <para>Deliberately NOT at the reset edge, for the reason the paragraph above gives: the
+    /// holding room is where the result is read. The scores stand, on the board and on the strip,
+    /// right up until somebody presses Start on the next match.</para>
+    /// </summary>
+    private static HideSeekState EnterHiding(in HideSeekState s, in HideSeekTuning t)
+    {
+        ImmutableDictionary<int, int> scores = s.Scores ?? ImmutableDictionary<int, int>.Empty;
+        if (t.IsFirstRoundOfMatch(s.RoundIndex))
+        {
+            // Zero rows, not an empty map: every player present already owns a row (FoldFacts put
+            // it there this very tick), and a board that showed a player only once they had
+            // scored would look broken for the whole first round of every match. A row belonging
+            // to a peer who has since left is zeroed with the rest and never reaches the wire —
+            // Encode walks the live roster, not this map.
+            ImmutableDictionary<int, int>.Builder zeroed =
+                ImmutableDictionary.CreateBuilder<int, int>();
+            foreach (KeyValuePair<int, int> row in scores)
+                zeroed.Add(row.Key, 0);
+            scores = zeroed.ToImmutable();
+        }
+
+        return s with
         {
             Phase = HideSeekPhase.Hiding,
             RemainingSec = Math.Max(t.HidingSec, HideSeekTuning.MinTimerSec),
             HidingExtended = false,
+            Scores = scores,
             TowersCompleted = 0,
             TowersAtFound = 0,
             RemainingAtFoundSec = 0,
             FoundTick = null,
             Refusal = HideSeekRefusal.None,
         };
+    }
 
     private static HideSeekState EnterSeeking(in HideSeekState s, in HideSeekTuning t) =>
         s with
@@ -314,6 +347,21 @@ public static class HideSeekLoop
     /// <para><see cref="HideSeekState.RoundIndex"/> advances at this commit (packet ROUND-1 §1),
     /// which is why <see cref="HideSeekTally.RoundIndex"/> exists — the card records the round it
     /// is about, so it can never label round 1's result "ROUND 2".</para>
+    ///
+    /// <para><b>And this is where a MATCH ends</b> (MATCH-1). A match is
+    /// <see cref="HideSeekTuning.MatchRounds"/> rounds — two by default, so each player hides
+    /// once and seeks once — and the round that just ended is its last when
+    /// <c>RoundIndex % MatchRounds == 0</c>. The card then also carries the winner, both totals
+    /// and the match number, and the Tally phase runs
+    /// <see cref="HideSeekTuning.MatchTallySec"/> instead of
+    /// <see cref="HideSeekTuning.TallySec"/> so the result can actually be read. <b>The winner is
+    /// decided AFTER the gains are added</b>, from the same map the totals are copied out of, so
+    /// the name and the numbers beside it can never disagree.</para>
+    ///
+    /// <para><b>A round ended by a disconnect still counts toward the match</b>, and a match
+    /// whose last round ended that way is over with the totals as they stand. Both gains are zero
+    /// on such a round, so "as they stand" is exactly what the arithmetic already produces —
+    /// there is no special case here, which is the point.</para>
     /// </summary>
     private static HideSeekState CommitTally(HideSeekState s, in HideSeekTuning t,
         int hiderGain, int seekerGain, bool byDisconnect, HideSeekRefusal refusal)
@@ -329,16 +377,33 @@ public static class HideSeekLoop
             scores = scores.SetItem(s.SeekerPeerId,
                 (scores.TryGetValue(s.SeekerPeerId, out int k) ? k : 0) + seekerGain);
 
+        bool matchOver = t.IsLastRoundOfMatch(s.RoundIndex);
+        int hiderTotal = s.HiderPeerId != 0 && scores.TryGetValue(s.HiderPeerId, out int ht) ? ht : 0;
+        int seekerTotal = s.SeekerPeerId != 0 && scores.TryGetValue(s.SeekerPeerId, out int st) ? st : 0;
+
+        // 0 is a DRAW, and it is also what a card that is not a match end carries — there is no
+        // winner to name in the middle of a match, and inventing "whoever is ahead" would make
+        // the field mean two different things depending on a flag beside it.
+        int winner = 0;
+        if (matchOver && hiderTotal != seekerTotal)
+            winner = hiderTotal > seekerTotal ? s.HiderPeerId : s.SeekerPeerId;
+
         return s with
         {
             Phase = HideSeekPhase.Tally,
             RoundIndex = s.RoundIndex + 1,
-            RemainingSec = Math.Max(t.TallySec, HideSeekTuning.MinTimerSec),
+            RemainingSec = Math.Max(matchOver ? t.MatchTallySec : t.TallySec,
+                HideSeekTuning.MinTimerSec),
             Scores = scores,
             TowersAtFound = hiderGain,
             RemainingAtFoundSec = seekerGain,
             LastTally = new HideSeekTally(s.RoundIndex, s.HiderPeerId, hiderGain,
-                s.SeekerPeerId, seekerGain, byDisconnect),
+                s.SeekerPeerId, seekerGain, byDisconnect,
+                MatchOver: matchOver,
+                MatchIndex: t.MatchIndexOf(s.RoundIndex),
+                WinnerPeerId: winner,
+                HiderTotal: hiderTotal,
+                SeekerTotal: seekerTotal),
             Refusal = refusal,
         };
     }

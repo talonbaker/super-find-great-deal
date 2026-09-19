@@ -21,13 +21,40 @@ namespace MpFoundation.Game.Round;
 /// <param name="EndedByDisconnect">A role holder left mid-round. Both gains are 0 and the other
 /// player's cumulative score is untouched; the card says so rather than reporting a 0-0 round that
 /// looks like two people who tried.</param>
+/// <param name="MatchOver">This round was the LAST of its match (MATCH-1): the session has a
+/// winner to announce, the Tally phase runs long
+/// (<see cref="HideSeekTuning.MatchTallySec"/>), and the next Start begins a new match with the
+/// scores back at zero.</param>
+/// <param name="MatchIndex">Which match this round belonged to, 1-based. Set on EVERY card, not
+/// only the last of a match, because "MATCH 2 · ROUND 1 OF 2" is a thing the board wants to say
+/// in the middle of a match too. The packet defines it as <c>RoundIndex / MatchRounds</c>, which
+/// is what <c>(RoundIndex - 1) / MatchRounds + 1</c> evaluates to on the last round of a match;
+/// off that round the packet's form gives 0 and this one keeps counting.</param>
+/// <param name="WinnerPeerId">Who won the MATCH, <b>0 for a draw and 0 on any card that is not a
+/// match end</b>. Decided from the two totals below, so a winner can never disagree with the
+/// numbers printed beside it.</param>
+/// <param name="HiderTotal">This round's hider's CUMULATIVE score as it stands after this
+/// commit.</param>
+/// <param name="SeekerTotal">This round's seeker's cumulative score after this commit.
+///
+/// <para><b>Why the totals are frozen onto the card instead of read live off
+/// <c>Scores</c>.</b> Exactly the argument <see cref="RoundIndex"/> is already here for. The card
+/// outlives the numbers it describes: the next Start of a new match zeroes <c>Scores</c> while
+/// this card is still the last one anyone saw, so a board rendering "X WON 7–5" off the live map
+/// would quietly become "X WON 0–0" the moment the next round began. A frozen result reads its
+/// own values.</para></param>
 public readonly record struct HideSeekTally(
     int RoundIndex,
     int HiderPeerId,
     int HiderGained,
     int SeekerPeerId,
     int SeekerGained,
-    bool EndedByDisconnect);
+    bool EndedByDisconnect,
+    bool MatchOver = false,
+    int MatchIndex = 0,
+    int WinnerPeerId = 0,
+    int HiderTotal = 0,
+    int SeekerTotal = 0);
 
 /// <summary>
 /// <b>The whole round, as one value.</b> A <c>readonly record struct</c> with no engine types, no
