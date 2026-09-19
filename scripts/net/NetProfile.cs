@@ -189,15 +189,21 @@ public static class NetProfile
     // renumbered on 2026-08-11).
     //
     //   2 Voice · 3 Move · 4 Prop · 5 Cycle · 6 Run · 10 Water · 11 Incapacity · 13 Sight
-    //   16 Flashlight · 17 Honk
+    //   16 Flashlight · 17 Honk · 21 Round
     //
     // The gaps (7-9, 12, 14, 15) belonged to systems that were cut from this build; they are left
-    // unassigned rather than compacted so the surviving numbers keep their history. NEXT FREE
-    // CHANNEL IS 18. Two systems written on different branches will both reach for the next number
-    // they can see, so check this ladder against the tip you are merging into, not against the tip
-    // you branched from. ENet is created with maxChannels = 0 (see NetworkManager.StartServer),
-    // which means ENet's own maximum, so there is no ceiling to be near here — the constraint is
-    // uniqueness, not supply.
+    // unassigned rather than compacted so the surviving numbers keep their history. 18-20 are
+    // likewise unclaimed: 21 was RESERVED for the round loop in the design this game's round came
+    // from and the packet that landed it here names 21 explicitly, so the reservation was honoured
+    // rather than compacted down to 18 — a channel number that moved between a design doc and the
+    // code is exactly the kind of drift this ladder exists to stop. NEXT FREE CHANNEL IS 22 (18-20
+    // are available to a lane that wants a low number and does not mind the gap).
+    //
+    // Two systems written on different branches will both reach for the next number they can see,
+    // so check this ladder against the tip you are merging into, not against the tip you branched
+    // from. ENet is created with maxChannels = 0 (see NetworkManager.StartServer), which means
+    // ENet's own maximum, so there is no ceiling to be near here — the constraint is uniqueness,
+    // not supply.
     public const int VoiceChannel = 2;
     public const int MoveChannel = 3;
     public const int PropChannel = 4;
@@ -282,6 +288,29 @@ public static class NetProfile
     /// is deliberately UNTOUCHED here — the bump for this wave belongs to NET-1's crew-state wire
     /// change and must not be spent on a system that structurally does not need one.</para></summary>
     public const int HonkChannel = 17;
+
+    /// <summary>The hide-seek round's replicated state (ROUND-1, 2026-09-19): one absolute
+    /// message carrying the phase, the clock, both roles, every score and the card, broadcast when
+    /// it changes and sent once to every joining peer. <c>HideSeekDriver</c> is the only sender.
+    ///
+    /// <para><b>Its own channel for the reason every channel above got one</b>, sharpened by what
+    /// this one carries: this is the stream that says WHICH ROOM YOU ARE ABOUT TO BE IN. A phase
+    /// message arriving behind somebody else's burst is a player who is teleported before their
+    /// HUD knows why, which reads exactly like the desync this game is built not to have. It is
+    /// reliable, ordered, and low-volume — the wire quantises its clock to tenths, so "broadcast
+    /// on change" is about ten messages a second at its very busiest and nothing at all while the
+    /// players stand in the holding room.</para>
+    ///
+    /// <para><b>21, not 18</b>, and deliberately: see the ladder comment above. The number was
+    /// reserved for this system in the design it came from.</para>
+    ///
+    /// <para><b>No protocol bump</b>, on <see cref="SightChannel"/>'s and
+    /// <see cref="HonkChannel"/>'s reasoning: a new node with new methods and no change to the
+    /// shape of any existing message. The mismatched-build case cannot arise anyway — nothing has
+    /// ever shipped from this repo, and <see cref="ProtocolVersion"/> was already bumped to 15 at
+    /// the fork for the one refusal that matters (a Watis World client reaching this
+    /// server).</para></summary>
+    public const int RoundChannel = 21;
 
     // --- Input codec bounds ------------------------------------------------------
     /// <summary>How many recent inputs each packet re-sends for loss tolerance (client) and the

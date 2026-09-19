@@ -628,6 +628,24 @@ public class HideSeekLoopTests
         Assert.InRange(changes, 8, 12);
     }
 
+    /// <summary><b>The find's instant rides the wire</b>, so DOOR-1's burst can align to the
+    /// SERVER's tick rather than to whenever each peer applied the message. -1 before the find,
+    /// because tick 0 is a real tick and there is no zero sentinel to be had.</summary>
+    [Fact]
+    public void TheFoundTickRidesTheWire()
+    {
+        HideSeekState s = StartedRound();
+        Assert.Equal(HideSeekWire.NoFoundTick,
+            HideSeekWire.Encode(s, new[] { Host }).FoundTick);
+
+        s = Tick(s, Idle with { HiderPressedConfirm = true });
+        s = Tick(s, Idle with { TargetInDropOff = true });
+
+        HideSeekView view = HideSeekWire.Fold(null, HideSeekWire.Encode(s, new[] { Host, Joiner }));
+        Assert.Equal((int)s.FoundTick!.Value, view.FoundTick);
+        Assert.True(view.FoundTick > 0);
+    }
+
     [Fact]
     public void Fold_IsIdempotent()
     {
@@ -685,8 +703,9 @@ public class HideSeekLoopTests
         HideSeekWire wire = HideSeekWire.Encode(s, new[] { Host, Joiner });
         var p = wire.Pack();
         HideSeekWire back = HideSeekWire.Unpack(p.Phase, p.Round, p.RemainingTenths, p.Hider,
-            p.Seeker, p.ScorePeers, p.ScoreValues, p.Refusal, p.Towers, p.TallyRound, p.TallyHider,
-            p.TallyHiderGain, p.TallySeeker, p.TallySeekerGain, p.TallyByDisconnect);
+            p.Seeker, p.ScorePeers, p.ScoreValues, p.Refusal, p.Towers, p.FoundTick,
+            p.TallyRound, p.TallyHider, p.TallyHiderGain, p.TallySeeker, p.TallySeekerGain,
+            p.TallyByDisconnect);
 
         Assert.Equal(wire, back);
     }
@@ -700,8 +719,9 @@ public class HideSeekLoopTests
         var p = wire.Pack();
         Assert.Equal(HideSeekWire.NoTallyRound, p.TallyRound);
         HideSeekWire back = HideSeekWire.Unpack(p.Phase, p.Round, p.RemainingTenths, p.Hider,
-            p.Seeker, p.ScorePeers, p.ScoreValues, p.Refusal, p.Towers, p.TallyRound, p.TallyHider,
-            p.TallyHiderGain, p.TallySeeker, p.TallySeekerGain, p.TallyByDisconnect);
+            p.Seeker, p.ScorePeers, p.ScoreValues, p.Refusal, p.Towers, p.FoundTick,
+            p.TallyRound, p.TallyHider, p.TallyHiderGain, p.TallySeeker, p.TallySeekerGain,
+            p.TallyByDisconnect);
         Assert.Null(back.Tally);
     }
 
@@ -711,7 +731,7 @@ public class HideSeekLoopTests
     public void MismatchedScoreArrays_FoldToTheShorterRoster()
     {
         HideSeekWire wire = HideSeekWire.Unpack(0, 1, 0, Host, Joiner,
-            new[] { Host, Joiner, 33 }, new[] { 5 }, 0, 0,
+            new[] { Host, Joiner, 33 }, new[] { 5 }, 0, 0, HideSeekWire.NoFoundTick,
             HideSeekWire.NoTallyRound, 0, 0, 0, 0, false);
         HideSeekView view = HideSeekWire.Fold(null, wire);
 

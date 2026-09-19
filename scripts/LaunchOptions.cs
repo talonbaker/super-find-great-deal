@@ -532,6 +532,33 @@ public sealed class LaunchOptions
     public bool RunDriverSelfTest { get; private set; }
     // --- end L1 ----------------------------------------------------------------------------------
 
+    // --- the hide-seek round (ROUND-1, 2026-09-19) ------------------------------------------------
+    /// <summary>
+    /// <c>--round-script "start@2,confirm@8,found@20,end@25"</c>: <b>a DEV flag</b> (server only)
+    /// that feeds the round's facts on a schedule, so the whole loop can be driven end to end
+    /// before BTN-1's buttons, CARRY-1's bin or TASK-1's towers exist. Each entry is
+    /// <c>&lt;verb&gt;[:&lt;value&gt;]@&lt;seconds&gt;</c>, seconds measured from the driver's own
+    /// Setup, comma separated. Empty (every real launch) = nothing armed and no cost.
+    ///
+    /// <para><b>It can only ever ADD a fact, never suppress one.</b> The scripted source is one
+    /// <c>IRoundFactSource</c> among however many are registered and the driver ORs the edges — so
+    /// a human pressing a real Start on the same server is never overridden by the script, and the
+    /// script can never stop a real press landing. That, plus "a launch flag no human types" and a
+    /// loud <c>[round] DEV</c> line at Setup and at every fired verb, is the whole gate; there is
+    /// no persisted per-player fact here for <c>IIntentSource.IsHumanInput</c> to guard.</para>
+    ///
+    /// <para><b>Verbs.</b> <c>start</c>, <c>confirm</c>, <c>end</c> are one-tick presses;
+    /// <c>found</c> is the LEVEL "the target is in the bin" and latches on (a bin does not pulse).
+    /// <c>object</c>/<c>noobject</c> and <c>holdtarget</c>/<c>droptarget</c> set the two hands
+    /// facts; <c>reachable</c>/<c>unreachable</c> stand in for REACH-1; <c>towers:N</c> sets the
+    /// absolute tower count. The hands default to "holding a rack object, not holding the target,
+    /// reachable" so the packet's own four-verb example runs a whole round unaided; the others
+    /// exist so a suite can provoke each named refusal and watch the HUD render it.</para>
+    /// </summary>
+    public IReadOnlyList<(string Verb, string Value, double AtSec)> RoundScript => _roundScript;
+    private readonly List<(string Verb, string Value, double AtSec)> _roundScript = new();
+    // --- end ROUND-1 ------------------------------------------------------------------------------
+
     // --- Voice proximity gate + bandwidth instrumentation (perf followups, 2026-08-07) --------
     /// <summary>--net-stats &lt;path&gt;: the dedicated server appends one JSON line per second of
     /// ENet's own transport byte/packet counters plus the voice relay's relayed/gated counts.
@@ -1104,6 +1131,41 @@ public sealed class LaunchOptions
                 case "--run-driver-selftest":
                     options.RunDriverSelfTest = true;
                     break;
+                case "--round-script":
+                {
+                    // "<verb>[:<value>]@<seconds>[,...]". A malformed entry is DROPPED with a
+                    // warning rather than defaulted to t=0: a start verb silently firing on the
+                    // first frame is a fixture in the wrong place, and the suite that asked for it
+                    // would then fail on the round rather than on its own arguments — the same
+                    // call --seed-test-props already makes, a few cases up.
+                    foreach (string raw in Next(args, ref i).Split(','))
+                    {
+                        string entry = raw.Trim();
+                        if (entry.Length == 0)
+                            continue;
+                        int at = entry.LastIndexOf('@');
+                        if (at <= 0 || !double.TryParse(entry[(at + 1)..], NumberStyles.Float,
+                                CultureInfo.InvariantCulture, out double sec) || sec < 0)
+                        {
+                            GD.PushWarning($"[round] --round-script: dropped malformed entry '{entry}' " +
+                                           "(expected <verb>[:<value>]@<seconds>)");
+                            continue;
+                        }
+                        string head = entry[..at];
+                        int colon = head.IndexOf(':');
+                        string verb = (colon < 0 ? head : head[..colon]).Trim().ToLowerInvariant();
+                        string value = colon < 0 ? "" : head[(colon + 1)..].Trim();
+                        if (verb.Length == 0)
+                        {
+                            GD.PushWarning($"[round] --round-script: dropped entry with no verb: '{entry}'");
+                            continue;
+                        }
+                        options._roundScript.Add((verb, value, sec));
+                    }
+                    // Sorted so the driver walks one cursor forward, exactly as CaptureAtSec is.
+                    options._roundScript.Sort((a, b) => a.AtSec.CompareTo(b.AtSec));
+                    break;
+                }
                 // --- end L1 ------------------------------------------------------------------
                 // --- perf followups (2026-08-07) -------------------------------------------
                 case "--net-stats":

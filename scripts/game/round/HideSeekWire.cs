@@ -43,10 +43,12 @@ public readonly record struct HideSeekWireTally(
 /// bytes instead of one, and correct instead of fast.</para>
 ///
 /// <para><b>What is deliberately NOT here.</b> The one-shot <see cref="HideSeekState.Refusal"/> IS
-/// carried (BTN-1 and the HUD strip both need the sentence), but <see cref="HideSeekState.Tick"/>,
-/// <c>FoundTick</c> and <c>HidingExtended</c> are not: they are server bookkeeping, and the only
-/// thing a client does with the find is react to the phase change into
-/// <see cref="HideSeekPhase.Together"/>, which this message already carries.</para>
+/// carried (BTN-1 and the HUD strip both need the sentence) and so is
+/// <see cref="HideSeekState.FoundTick"/> — DOOR-1's burst has to be alignable to the SERVER's
+/// instant rather than to whenever each peer happened to apply the message, and a driver that
+/// raised its <c>Found</c> event with a locally invented tick would be lying about the one number
+/// the startle hangs on. <see cref="HideSeekState.Tick"/> and <c>HidingExtended</c> are not here:
+/// they are server bookkeeping nothing downstream reads.</para>
 /// </summary>
 public readonly record struct HideSeekWire(
     byte Phase,
@@ -57,12 +59,17 @@ public readonly record struct HideSeekWire(
     ImmutableArray<HideSeekWireScore> Scores,
     byte Refusal,
     ushort TowersCompleted,
+    int FoundTick,
     HideSeekWireTally? Tally)
 {
     /// <summary>Sentinel for "this message carries no card", used by <see cref="Pack"/> /
     /// <see cref="Unpack"/>. A round index is 1-based, so a negative one cannot collide with a
     /// real card.</summary>
     public const int NoTallyRound = -1;
+
+    /// <summary>Sentinel for "the target has not been found this round". Not 0 — tick 0 is a real
+    /// tick.</summary>
+    public const int NoFoundTick = -1;
 
     /// <summary>Clamp, never wrap. A score above 255 reads back as 255, not as itself modulo 256.
     /// NOT used for an identity — see the class doc.</summary>
@@ -99,6 +106,8 @@ public readonly record struct HideSeekWire(
             Scores: scores,
             Refusal: (byte)s.Refusal,
             TowersCompleted: ClampUShort(s.TowersCompleted),
+            // -1 rather than 0: tick 0 is a real tick, so there is no zero sentinel available.
+            FoundTick: s.FoundTick is { } ft ? (int)Math.Clamp(ft, 0, int.MaxValue) : NoFoundTick,
             Tally: tally);
     }
 
@@ -132,6 +141,7 @@ public readonly record struct HideSeekWire(
             scores,
             (HideSeekRefusal)wire.Refusal,
             wire.TowersCompleted,
+            wire.FoundTick,
             tally);
     }
 
@@ -146,7 +156,7 @@ public readonly record struct HideSeekWire(
     /// path.</para>
     /// </summary>
     public (byte Phase, int Round, int RemainingTenths, int Hider, int Seeker,
-        int[] ScorePeers, int[] ScoreValues, byte Refusal, int Towers,
+        int[] ScorePeers, int[] ScoreValues, byte Refusal, int Towers, int FoundTick,
         int TallyRound, int TallyHider, int TallyHiderGain, int TallySeeker, int TallySeekerGain,
         bool TallyByDisconnect) Pack()
     {
@@ -162,7 +172,8 @@ public readonly record struct HideSeekWire(
 
         HideSeekWireTally card = Tally ?? new HideSeekWireTally(NoTallyRound, 0, 0, 0, 0, false);
         return (Phase, Round, RemainingTenths, HiderPeerId, SeekerPeerId, peers, values, Refusal,
-            TowersCompleted, Tally is null ? NoTallyRound : card.RoundIndex, card.HiderPeerId,
+            TowersCompleted, FoundTick,
+            Tally is null ? NoTallyRound : card.RoundIndex, card.HiderPeerId,
             card.HiderGained, card.SeekerPeerId, card.SeekerGained, card.EndedByDisconnect);
     }
 
@@ -187,6 +198,7 @@ public readonly record struct HideSeekWire(
         && SeekerPeerId == other.SeekerPeerId
         && Refusal == other.Refusal
         && TowersCompleted == other.TowersCompleted
+        && FoundTick == other.FoundTick
         && Nullable.Equals(Tally, other.Tally)
         && SameScores(Scores, other.Scores);
 
@@ -216,6 +228,7 @@ public readonly record struct HideSeekWire(
         hash.Add(SeekerPeerId);
         hash.Add(Refusal);
         hash.Add(TowersCompleted);
+        hash.Add(FoundTick);
         hash.Add(Tally);
         if (!Scores.IsDefault)
             foreach (HideSeekWireScore row in Scores)
@@ -226,7 +239,7 @@ public readonly record struct HideSeekWire(
     /// <summary>The inverse of <see cref="Pack"/>. <paramref name="tallyRound"/> at
     /// <see cref="NoTallyRound"/> means the message carries no card.</summary>
     public static HideSeekWire Unpack(byte phase, int round, int remainingTenths, int hider,
-        int seeker, int[]? scorePeers, int[]? scoreValues, byte refusal, int towers,
+        int seeker, int[]? scorePeers, int[]? scoreValues, byte refusal, int towers, int foundTick,
         int tallyRound, int tallyHider, int tallyHiderGain, int tallySeeker, int tallySeekerGain,
         bool tallyByDisconnect)
     {
@@ -247,7 +260,7 @@ public readonly record struct HideSeekWire(
             ClampUShort(round), ClampUShort(remainingTenths), hider, seeker,
             rows.ToImmutable(),
             (byte)Math.Clamp((int)refusal, 0, (int)HideSeekRefusal.NobodyCouldReachThat),
-            ClampUShort(towers), card);
+            ClampUShort(towers), Math.Max(foundTick, NoFoundTick), card);
     }
 }
 
@@ -262,6 +275,7 @@ public readonly record struct HideSeekView(
     ImmutableDictionary<int, int> Scores,
     HideSeekRefusal Refusal,
     int TowersCompleted,
+    int FoundTick,
     HideSeekTally? LastTally)
 {
     /// <summary>This peer's cumulative score, or 0.</summary>
@@ -279,6 +293,7 @@ public readonly record struct HideSeekView(
             || !RemainingSec.Equals(other.RemainingSec)
             || HiderPeerId != other.HiderPeerId || SeekerPeerId != other.SeekerPeerId
             || Refusal != other.Refusal || TowersCompleted != other.TowersCompleted
+            || FoundTick != other.FoundTick
             || !Nullable.Equals(LastTally, other.LastTally))
         {
             return false;
@@ -305,6 +320,7 @@ public readonly record struct HideSeekView(
         hash.Add(SeekerPeerId);
         hash.Add(Refusal);
         hash.Add(TowersCompleted);
+        hash.Add(FoundTick);
         hash.Add(LastTally);
         // Order-independent, because a dictionary has none.
         if (Scores is not null)

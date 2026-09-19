@@ -46,6 +46,7 @@ public partial class Gameplay : Node3D
     private Node3D _entities = null!;
     private CycleDriver _cycleDriver = null!;
     private RunDriver _runDriver = null!;
+    private Round.HideSeekDriver _hideSeekDriver = null!;
 
     private Label _connectingLabel = null!;
     private Label _roomCodeLabel = null!;
@@ -197,14 +198,17 @@ public partial class Gameplay : Node3D
         _props = GetNode<Node3D>("Props");
         _propSpawner = GetNode<MultiplayerSpawner>("PropSpawner");
 
-        // NO WORLD-STATE STORE HERE ANY MORE (BASE-1, 2026-09-19). The old quota spine owned one,
-        // constructed at exactly this point, and it fanned ResetForNewPlaythrough across every
-        // registered slice at a playthrough boundary. The SLICES survive - PropManager and
-        // ReconnectRegistry still implement the interfaces in scripts/game/run/WorldStateSlices.cs
-        // - but nothing fans them today. ROUND-1 owns the round's reset edge; when it lands it
-        // either constructs a store here or calls the slices directly, and the ONE thing it must
-        // not lose is the reason ReconnectRegistry was a slice at all: a 60 s resume ticket into a
-        // world that has since been reset is an exploit, not a courtesy.
+        // THE WORLD-STATE SLICES ARE FANNED AGAIN, from the round's reset edge (ROUND-1,
+        // 2026-09-19). The old quota spine's WorldStateStore is still gone; what replaced it is
+        // one subscription (see OnRoundResetRequested, and _hideSeekDriver's construction below),
+        // because there are exactly two slices and a registry whose only job would be to call both
+        // of them is a layer with nothing in it.
+        //
+        // THE THING BASE-1 SAID NOT TO LOSE, kept: ReconnectRegistry is fanned as well as
+        // PropManager. A 60 s resume ticket into a world that has since been reset is an exploit,
+        // not a courtesy - without it, a peer that dropped a second before the reset edge comes
+        // back for up to a minute at its pre-reset position holding pre-reset props inside a
+        // freshly restored room.
 
         _propManager = new PropManager { Name = PropManager.NodeName };
         AddChild(_propManager);
@@ -266,6 +270,22 @@ public partial class Gameplay : Node3D
         // the existing suites. See RunCyclesOrUncapped's own doc for why the raw sentinel stays.
         _runDriver.Setup(net.Role == NetworkManager.SessionRole.Server,
             net.Options.RunCyclesOrUncapped, net.Options.CyclePeriodSec, net.Options.RunResetAtSec);
+
+        // The hide-seek round (ROUND-1). Present on every peer exactly like the two drivers above,
+        // so its own late-join delivery rides the same peer-connect funnel (see the
+        // SendRoundStateTo call in OnPeerConnected). Added AFTER PropManager, because the reset
+        // edge fans that manager's slice and a subscriber that fired before its subject existed
+        // would be a null on the one tick that matters.
+        //
+        // The world cast is deliberately a soft one: every world gets a driver, and a world with
+        // no named rooms simply never has anybody teleported. A hard cast here would make the
+        // round a reason the CI slab worlds could not boot.
+        _hideSeekDriver = new Round.HideSeekDriver { Name = Round.HideSeekDriver.NodeName };
+        AddChild(_hideSeekDriver);
+        _hideSeekDriver.Setup(net.Role == NetworkManager.SessionRole.Server,
+            _world as World.SupermarketWorld, _players, Round.HideSeekTuning.Current,
+            net.Options.RoundScript);
+        _hideSeekDriver.ResetRequested += OnRoundResetRequested;
         // WHAT USED TO BE HERE, in one line each, because every one of these blocks carried a
         // "THIS IS THE ONLY CONSTRUCTION SITE" warning and deleting them is exactly the move those
         // warnings were written against: the lake (WaterService plus the chill overlays and the
@@ -511,14 +531,51 @@ public partial class Gameplay : Node3D
         // before it renders anything, never the zero-initialized default (see
         // RunDriver.Synced's doc).
         _runDriver.SendRunStateTo((int)id);
+        // Round late-join delivery (ROUND-1): the roster is appended FIRST — join order is what
+        // decides who hides in the first round, and it is the order the message's score rows are
+        // walked in — and then the one absolute message goes out. That message is the same one the
+        // live broadcast sends, so a joiner and a peer who has been here all round hold views that
+        // were built by the same code from the same bytes.
+        _hideSeekDriver.ServerPeerJoined((int)id);
+        _hideSeekDriver.SendRoundStateTo((int)id);
         // EVERY OTHER LATE-JOIN DUMP THAT USED TO BE HERE WENT WITH ITS SYSTEM (BASE-1,
         // 2026-09-19): playthrough state, the quota ledger, the failure states, the flashlight,
         // the water state and the sight table. The call site and its reasoning are what matter
         // to the lanes that follow: a joiner must be COMPLETE from this one funnel, because an
-        // event fired before it arrived never reaches it. ROUND-1's phase/role/score dump and
-        // VOICE-1's room membership both belong on these lines, after the spawner call above so
-        // the new peer is already in whatever table is being sent.
+        // event fired before it arrived never reaches it. VOICE-1's room membership belongs on
+        // these lines too, after the spawner call above so the new peer is already in whatever
+        // table is being sent.
         ServerLog.Info("peer joined", $"peer={id} players={Multiplayer.GetPeers().Length}");
+    }
+
+    /// <summary>
+    /// <b>The round's reset edge, fanned across the world-state slices</b> (ROUND-1, 2026-09-19).
+    /// Raised on every peer by <c>HideSeekDriver</c>'s Tally -&gt; Holding transition; everything
+    /// below is server-only, because every slice named here is.
+    ///
+    /// <para><b>Here rather than in the driver</b> because this is where both slices live —
+    /// <see cref="_propManager"/> is a child of this node and <see cref="_reconnects"/> is a plain
+    /// field on it. A driver reaching into either would be a round system that knows about prop
+    /// authority, and the seam BASE-1 left is this one subscription.</para>
+    ///
+    /// <para><b>The reconnect registry is the half that is easy to forget and the one with an
+    /// exploit behind it.</b> The props going home is visible the moment it fails; a resume ticket
+    /// outliving the world it was issued in is not. A peer that drops a second before this edge
+    /// would otherwise reconnect, for up to <see cref="ReconnectRegistry.WindowSec"/>, at its
+    /// pre-reset position holding pre-reset props inside a freshly restored room. Clearing is
+    /// sufficient and simpler than stamping each ticket with a round index: a reconnector after
+    /// the edge joins as a fresh peer of the new round, which is what they are. Same-round resumes
+    /// are untouched — this runs at the round boundary and nowhere else.</para>
+    ///
+    /// <para>Both slices are idempotent by their own contract, so a duplicate edge is harmless.</para>
+    /// </summary>
+    private void OnRoundResetRequested()
+    {
+        if (!_isServer)
+            return;
+        _propManager.ResetForNewPlaythrough();
+        _reconnects.ResetForNewPlaythrough();
+        ServerLog.Info("round reset", "slices=props,reconnect-registry");
     }
 
     /// <summary>Every live avatar. A method rather than an
@@ -550,11 +607,16 @@ public partial class Gameplay : Node3D
         int[] heldPropIds = _propManager.HeldPropIdsFor((int)id);
 
         // The per-peer state the water, drowning and incapacitation services used to forget
-        // here went with them at the fork (BASE-1, 2026-09-19). The rule they shared is worth
-        // keeping in view for anything ROUND-1 adds: a departed peer left in a server-side
-        // dictionary is not merely litter - one of them counted toward an all-players predicate,
-        // so a player who disconnected at the wrong moment armed a loss condition forever. ENet
-        // peer ids are also RECYCLED, so a stale entry lands on whoever joins next.
+        // here went with them at the fork (BASE-1, 2026-09-19). The rule they shared is exactly
+        // why the round is told next: a departed peer left in a server-side dictionary is not
+        // merely litter - one of them counted toward an all-players predicate, so a player who
+        // disconnected at the wrong moment armed a loss condition forever. ENet peer ids are also
+        // RECYCLED, so a stale entry lands on whoever joins next.
+        //
+        // ROUND-1's roster IS such a predicate - "exactly two humans" is read off it, and a role
+        // holder missing from it is what ends a round early. Dropping the peer here also drops its
+        // teleport cooldown, for the recycled-id half of the same rule.
+        _hideSeekDriver.ServerPeerLeft((int)id);
 
         // Release everything this peer held BEFORE freeing its avatar node, so the drop
         // position derives from its still-valid last authoritative transform (and so no prop

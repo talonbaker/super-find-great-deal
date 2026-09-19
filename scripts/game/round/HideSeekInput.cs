@@ -26,10 +26,14 @@ public readonly record struct HideSeekInput
     /// assigns the first round's roles (program §1 item 5 — the host hides first), and the
     /// identities are what let the loop notice that a role holder has gone.
     ///
+    /// <para>"Human" means A PLAYER PEER, as opposed to the dedicated server process, which
+    /// holds no avatar and is not in the round. A <c>--bot</c> client IS one: the gate this feeds
+    /// counts players, and a suite's two bots are two players by every definition the round cares
+    /// about.</para>
+    ///
     /// <para>May be <c>default</c> (an uninitialised <c>ImmutableArray</c>) on a tick nobody
-    /// filled it; every read goes through <see cref="Humans"/>, which normalises that to empty.
-    /// Bots are deliberately NOT humans here — a two-bot suite that satisfied "exactly two
-    /// humans" would be proving the gate against the very thing it exists to exclude.</para>
+    /// filled it; every read goes through <see cref="Humans"/>, which normalises that to
+    /// empty.</para>
     /// </summary>
     public ImmutableArray<int> HumanPeerIds { get; init; }
 
