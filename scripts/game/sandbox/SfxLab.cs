@@ -66,6 +66,57 @@ public enum Sfx
     /// can retune it by editing the named constants beside
     /// <see cref="SfxLab.TriumphPcm"/>.</para></summary>
     Triumph = 23,
+
+    // 24–35 reserved: Bang (DOOR-1), material voices (SFX-1)
+    //
+    // Those two lanes branched from the same base as CLOCK-1 and cannot see each other, so the
+    // gap is deliberate and this block is a NO-OP at merge rather than a renumbering: DOOR-1 takes
+    // 24 (Bang) and SFX-1 takes 25–35 (TinPick, TinClank, TinBuzz, TinTick, CardPick, CardThud,
+    // CardSettle, ProducePick, ProduceThump, ProducePlop, Whoosh). The ordinals above are pinned
+    // by EventResponse.Sound's .tres serialization — see the note at the top of this enum — so a
+    // lane that compacted this gap would silently re-point every profile that referenced one.
+
+    /// <summary><b>The round starting</b> (CLOCK-1, 2026-09-19): two rising notes, ~0.35 s, played
+    /// flat on every peer at the Holding → Hiding edge. The one cue in the round's palette that is
+    /// an invitation rather than a deadline, which is why it rises.</summary>
+    ChimeUp = 36,
+
+    /// <summary><b>One second of the last ten</b> (CLOCK-1): a 40 ms wood-block click, positional
+    /// from every <c>RoundClock</c>, so a hider head-down in an aisle hears the room counting. The
+    /// pitch bias for the last seconds is the CALLER's (see <c>RoundAudioCues.TickPitchBias</c>) —
+    /// one recipe, played higher, rather than three recipes that could drift apart.</summary>
+    Tick = 37,
+
+    /// <summary><b>Confirm</b> (CLOCK-1): one note, ~0.2 s, flat. The hider saying "I am done"
+    /// before the clock said it for them.</summary>
+    Note = 38,
+
+    /// <summary><b>The hide buzzer</b> (CLOCK-1): ~0.5 s, positional from every clock and flat on
+    /// top. Named <c>RoundBuzz</c> and not <c>Buzz</c> — the packet's name — because
+    /// <see cref="Buzz"/> (17) is already taken by the outdoor insect buzz and an enum cannot
+    /// carry the name twice. See the handoff's ordinal table.</summary>
+    RoundBuzz = 39,
+
+    /// <summary><b>The grace buzzer</b> (CLOCK-1): lower and shorter than
+    /// <see cref="RoundBuzz"/>, ~0.25 s. The hide was not retrievable at the buzzer and the loop
+    /// bought the hider one 10 s extension; a shorter, lower buzz says "not yet" rather than
+    /// "time".</summary>
+    BuzzShort = 40,
+
+    /// <summary><b>The seek timeout</b> (CLOCK-1): two blasts, ~0.5 s total. Deliberately the only
+    /// cue in the palette that repeats itself — the seeker ran out of clock, and a single buzz is
+    /// already spoken for by the hide.</summary>
+    BuzzDouble = 41,
+
+    /// <summary><b>The world going home</b> (CLOCK-1): a soft filtered-noise whoosh at the
+    /// Tally → Holding reset edge, flat.
+    ///
+    /// <para><b>Named <c>ResetWhoosh</c> rather than <c>Whoosh</c> on purpose.</b> SFX-1 appends a
+    /// general-purpose <c>Whoosh</c> at 35 on its own branch for a thrown prop's release, and two
+    /// lanes that cannot see each other must not both try to own one name at one ordinal. The
+    /// orchestrator may collapse this onto SFX-1's <c>Whoosh</c> at merge; until then this is the
+    /// reset's own cue and nothing else reads it.</para></summary>
+    ResetWhoosh = 42,
 }
 
 /// <summary>
@@ -169,7 +220,12 @@ public static class SfxLab
     /// <summary>Fire-and-forget non-positional one-shot for UI/front-door beats (menus,
     /// splash) — outside the 3D pool entirely, since there's no world position to attach
     /// to. A plain AudioStreamPlayer frees itself when done.</summary>
-    public static void PlayUi(Sfx kind, float volumeDb = -6f, float pitchJitter = 0f)
+    /// <param name="pitchBias">Added to the pitch scale BEFORE the jitter (CLOCK-1, 2026-09-19).
+    /// It is a deliberate, caller-chosen transposition — the round's last three ticks rise — as
+    /// distinct from <paramref name="pitchJitter"/>, which is per-shot randomness whose whole job
+    /// is to be unnoticed. Defaulted to zero, so no existing call site moves by a cent.</param>
+    public static void PlayUi(Sfx kind, float volumeDb = -6f, float pitchJitter = 0f,
+        float pitchBias = 0f)
     {
         SceneTree? tree = Engine.GetMainLoop() as SceneTree;
         Node? root = tree?.Root;
@@ -181,7 +237,7 @@ public static class SfxLab
             Stream = Get(kind),
             Bus = Bus,
             VolumeDb = volumeDb,
-            PitchScale = 1f + (float)(Rng.NextDouble() * 2 - 1) * pitchJitter,
+            PitchScale = 1f + pitchBias + (float)(Rng.NextDouble() * 2 - 1) * pitchJitter,
         };
         root.AddChild(player);
         player.Finished += player.QueueFree;
@@ -204,10 +260,15 @@ public static class SfxLab
     /// voice's curve (<c>VoiceConfig.ProximityUnitSize</c>) rather than on the one-shot pool's,
     /// and a caller that must match another system's falloff needs both halves of the curve, not
     /// just the cutoff. Deliberately nullable rather than defaulted to a literal 10: writing the
-    /// engine default down here would be a second copy of a number this file does not own.</para></summary>
+    /// engine default down here would be a second copy of a number this file does not own.</para>
+    ///
+    /// <para><paramref name="pitchBias"/> is CLOCK-1's (2026-09-19), on the same "additive, zero
+    /// by default, nobody else moves" contract as <paramref name="unitSize"/>: a deliberate
+    /// transposition chosen by the caller (the round's last three ticks rise) as opposed to the
+    /// per-shot randomness <paramref name="pitchJitter"/> exists to hide.</para></summary>
     public static void PlayStream3D(Node parent, Vector3 globalPos, AudioStream stream,
         float volumeDb = -6f, float pitchJitter = 0.08f, float maxDistance = 40f,
-        string? bus = null, float? unitSize = null)
+        string? bus = null, float? unitSize = null, float pitchBias = 0f)
     {
         AudioStreamPlayer3D? player = Rent(parent);
         if (player == null)
@@ -219,7 +280,7 @@ public static class SfxLab
         player.Bus = bus != null && AudioServer.GetBusIndex(bus) >= 0 ? bus : Bus;
         player.Stream = stream;
         player.VolumeDb = volumeDb;
-        player.PitchScale = 1f + (float)(Rng.NextDouble() * 2 - 1) * pitchJitter;
+        player.PitchScale = 1f + pitchBias + (float)(Rng.NextDouble() * 2 - 1) * pitchJitter;
         player.MaxDistance = maxDistance;
         // ALWAYS written, never conditionally: a pool slot is borrowed, and a setting left behind
         // by the previous borrower is a falloff curve the next caller never asked for. The
@@ -561,6 +622,16 @@ public static class SfxLab
             Sfx.Buzz => Buzz(0.45f),
             Sfx.GooseHonk => GooseHonkPcm(),
             Sfx.Triumph => TriumphPcm(),
+            // The round's palette (CLOCK-1). Every one of these is public and returns raw PCM for
+            // the same reason the two above are: the Godot-free unit suite asserts each one is
+            // non-silent, finite and under 0 dBFS without an audio device.
+            Sfx.ChimeUp => ChimeUpPcm(),
+            Sfx.Tick => TickPcm(),
+            Sfx.Note => NotePcm(),
+            Sfx.RoundBuzz => RoundBuzzPcm(),
+            Sfx.BuzzShort => BuzzShortPcm(),
+            Sfx.BuzzDouble => BuzzDoublePcm(),
+            Sfx.ResetWhoosh => ResetWhooshPcm(),
             _ => Sweep(0.05f, 400f, 400f),
         };
 
@@ -1034,6 +1105,246 @@ public static class SfxLab
                 sum += voice * attack * Mathf.Pow(1f - u, TriumphDecayCurve);
             }
             return sum * TriumphGain;
+        });
+    }
+
+    // --- The round's palette (CLOCK-1, 2026-09-19) ----------------------------------------------
+    //
+    // SEVEN RECIPES, ONE JOB: make the countdown audible from inside an aisle. The design is
+    // PROPOSAL-2026-09-19-SOUND-STATES.md §3.2; the edge -> cue mapping is engine-free in
+    // RoundAudioCues and is NOT restated here — this file only knows how each sound is made.
+    //
+    // EVERY NUMBER IS A KNOB, named, for the same reason the goose's and the triumph's are: Talon
+    // picked none of them and retuning is his. All seven are public and return raw PCM so the
+    // Godot-free unit suite can assert the headroom (RoundClockTests) without an audio device.
+    //
+    // THE PALETTE HAS A SHAPE, and it is deliberate: the two invitations (ChimeUp, Note) are
+    // clean sines that RISE, and the three deadlines (RoundBuzz, BuzzShort, BuzzDouble) are the
+    // same low inharmonic buzz at three lengths. A player should not have to learn six sounds —
+    // they have to learn "bright = you may, low = you must", which is one bit, and then the
+    // LENGTH says which deadline it was.
+
+    /// <summary>Total length of the start chime, including the second note's tail.</summary>
+    private const float ChimeSeconds = 0.35f;
+
+    /// <summary>The two notes, in Hz: G5 then D6, a rising fifth. A fifth rather than an octave
+    /// because an octave is the triumph's ending shape and this is a beginning.</summary>
+    private const float ChimeNoteAHz = 784.0f;
+    private const float ChimeNoteBHz = 1174.7f;
+
+    /// <summary>When the second note starts. Short enough that the two read as one gesture.</summary>
+    private const float ChimeNoteBOnsetSec = 0.12f;
+
+    /// <summary>How long each note rings. Longer than the gap, so the two overlap into an
+    /// interval rather than being two separate pings.</summary>
+    private const float ChimeRingSec = 0.22f;
+
+    /// <summary>Per-note attack (~4 ms) and decay shape — struck glass, like the triumph.</summary>
+    private const float ChimeAttackSec = 0.004f;
+    private const float ChimeDecayCurve = 2.2f;
+
+    /// <summary>The one quiet upper partial. Keep it small or the chime turns into an organ.</summary>
+    private const float ChimePartial2 = 0.22f;
+
+    /// <summary>Output trim, set so the overlap of the two tails stays well under full scale —
+    /// <see cref="Render"/>'s clamp would otherwise flatten the peak into a crunch.</summary>
+    private const float ChimeGain = 0.46f;
+
+    /// <summary>Renders the round-start chime. Two rising notes; see the block comment above.</summary>
+    public static float[] ChimeUpPcm() => Render(ChimeSeconds, (t, _) =>
+    {
+        float sum = 0f;
+        for (int n = 0; n < 2; n++)
+        {
+            float onset = n == 0 ? 0f : ChimeNoteBOnsetSec;
+            float age = t - onset;
+            if (age < 0f || age >= ChimeRingSec)
+                continue;
+            float hz = n == 0 ? ChimeNoteAHz : ChimeNoteBHz;
+            float phase = Mathf.Tau * hz * age;
+            float voice = Mathf.Sin(phase) + ChimePartial2 * Mathf.Sin(2f * phase);
+            sum += voice * Envelope(age / ChimeRingSec, ChimeAttackSec / ChimeRingSec, ChimeDecayCurve);
+        }
+        return sum * ChimeGain;
+    });
+
+    /// <summary>The packet's 40 ms. A tick longer than this stops being a click and starts being
+    /// a note, and ten of them in ten seconds would then be a melody.</summary>
+    private const float TickSeconds = 0.040f;
+
+    /// <summary>The two resonances of the block, in Hz. DELIBERATELY NOT HARMONIC (2100/1400 is
+    /// 1.5, close to a fifth, but the decays differ) — a struck piece of wood is inharmonic, and
+    /// two partials an exact octave apart read as a tuned instrument instead.</summary>
+    private const float TickLowHz = 1400f;
+    private const float TickHighHz = 2100f;
+
+    /// <summary>How fast each resonance dies. High: the whole point of a click.</summary>
+    private const float TickDecayCurve = 5.0f;
+
+    /// <summary>The noise transient's share of the first few milliseconds — the stick hitting the
+    /// wood. Without it the tick is a beep.</summary>
+    private const float TickNoiseMix = 0.55f;
+    private const float TickNoiseSec = 0.004f;
+
+    /// <summary>
+    /// Sub-millisecond onset ramp, and it is not a softening.
+    ///
+    /// <para><b>Found by the headroom test, which is why it is here.</b> The first draft had no
+    /// ramp at all — a click should start instantly — and rendered a buffer whose first sample
+    /// was 0.137. A buffer that begins at a non-zero value is a step discontinuity on top of the
+    /// sound, which the mixer reproduces as a second, different click every single time the
+    /// sample plays, and 0.8 ms at 48 kHz is 38 samples: inaudible as an attack, sufficient to
+    /// start at zero. Every other recipe here already had an attack and this one did not.</para>
+    /// </summary>
+    private const float TickAttackSec = 0.0008f;
+
+    /// <summary>Output trim.</summary>
+    private const float TickGain = 0.62f;
+
+    /// <summary>Renders one wood-block tick. Seeded: every tick in a round is the same tick, and
+    /// the variation the ear wants comes from the pool's pitch jitter and the caller's pitch bias
+    /// (<c>RoundAudioCues.TickPitchBias</c>) rather than from a different render.</summary>
+    public static float[] TickPcm()
+    {
+        var rng = new Random(20260919);
+        return Render(TickSeconds, (t, u) =>
+        {
+            float body = Mathf.Sin(Mathf.Tau * TickLowHz * t)
+                         + 0.7f * Mathf.Sin(Mathf.Tau * TickHighHz * t);
+            body *= 0.5f;
+            float noise = t < TickNoiseSec
+                ? (float)(rng.NextDouble() * 2 - 1) * TickNoiseMix * (1f - t / TickNoiseSec)
+                : 0f;
+            float attack = t < TickAttackSec ? t / TickAttackSec : 1f;
+            return (body + noise) * attack * Mathf.Pow(1f - u, TickDecayCurve) * TickGain;
+        });
+    }
+
+    /// <summary>Confirm, in one note. 0.2 s per the packet.</summary>
+    private const float NoteSeconds = 0.20f;
+
+    /// <summary>A5. One octave under the chime's second note, so Confirm answers the start rather
+    /// than competing with it.</summary>
+    private const float NoteHz = 880.0f;
+
+    private const float NoteAttackSec = 0.005f;
+    private const float NoteDecayCurve = 2.4f;
+    private const float NotePartial2 = 0.18f;
+    private const float NoteGain = 0.50f;
+
+    /// <summary>Renders the Confirm note.</summary>
+    public static float[] NotePcm() => Render(NoteSeconds, (t, u) =>
+    {
+        float phase = Mathf.Tau * NoteHz * t;
+        float voice = Mathf.Sin(phase) + NotePartial2 * Mathf.Sin(2f * phase);
+        return voice * Envelope(u, NoteAttackSec / NoteSeconds, NoteDecayCurve) * NoteGain;
+    });
+
+    /// <summary>The buzzer's fundamental. Low enough to be felt rather than heard past a wall,
+    /// which is the whole point of putting it on the clocks.</summary>
+    private const float BuzzFundamentalHz = 150f;
+
+    /// <summary>How many harmonics the buzz carries. A buzzer is a reed, not a sine: the odd
+    /// harmonics are what make it unpleasant, which is the job.</summary>
+    private const int BuzzHarmonics = 7;
+
+    /// <summary>The amplitude tremolo, in Hz. This is the difference between "a low tone" and "a
+    /// BUZZER" — a mechanical buzzer's armature chatters, and this is that chatter.</summary>
+    private const float BuzzChatterHz = 32f;
+
+    /// <summary>How deep the chatter cuts, 0..1. At 1.0 the sound gates fully off between
+    /// chatters and reads as a rattle rather than a buzz.</summary>
+    private const float BuzzChatterDepth = 0.45f;
+
+    /// <summary>Attack and release, seconds. Both short — a buzzer has no bloom — but not zero,
+    /// which clicks.</summary>
+    private const float BuzzEdgeSec = 0.012f;
+
+    /// <summary>Output trim. Seven harmonics sum well past unity before this.</summary>
+    private const float BuzzGain = 0.40f;
+
+    /// <summary>The hide buzzer's length (packet: 0.5 s).</summary>
+    private const float RoundBuzzSeconds = 0.50f;
+
+    /// <summary>The grace buzzer: shorter AND lower, both, so it is distinguishable from the hide
+    /// buzzer in a room where the player is not looking at anything.</summary>
+    private const float BuzzShortSeconds = 0.25f;
+    private const float BuzzShortHz = 104f;
+
+    /// <summary>The seek timeout: two blasts with a gap. Total stays inside half a second so it
+    /// does not overlap the tally the phase change is about to put on the clocks.</summary>
+    private const float BuzzDoubleBlastSec = 0.19f;
+    private const float BuzzDoubleGapSec = 0.08f;
+
+    /// <summary>One buzzer blast, sampled at time <paramref name="age"/> into a blast of
+    /// <paramref name="length"/> seconds at <paramref name="hz"/>. Shared by all three buzzers so
+    /// the family cannot drift apart into three unrelated noises.</summary>
+    private static float BuzzBlast(float age, float length, float hz)
+    {
+        if (age < 0f || age >= length)
+            return 0f;
+        float body = 0f;
+        for (int n = 1; n <= BuzzHarmonics; n++)
+            body += Mathf.Sin(n * Mathf.Tau * hz * age) / n;
+        float chatter = 1f - BuzzChatterDepth * 0.5f * (1f - Mathf.Cos(Mathf.Tau * BuzzChatterHz * age));
+        float edge = Mathf.Min(age, length - age) / BuzzEdgeSec;
+        return body * chatter * Mathf.Clamp(edge, 0f, 1f);
+    }
+
+    /// <summary>Renders the hide buzzer.</summary>
+    public static float[] RoundBuzzPcm() => Render(RoundBuzzSeconds,
+        (t, _) => BuzzBlast(t, RoundBuzzSeconds, BuzzFundamentalHz) * BuzzGain);
+
+    /// <summary>Renders the grace buzzer — shorter and lower than the hide buzzer.</summary>
+    public static float[] BuzzShortPcm() => Render(BuzzShortSeconds,
+        (t, _) => BuzzBlast(t, BuzzShortSeconds, BuzzShortHz) * BuzzGain);
+
+    /// <summary>Renders the seek-timeout buzzer: the same blast, twice.</summary>
+    public static float[] BuzzDoublePcm() =>
+        Render(BuzzDoubleBlastSec * 2f + BuzzDoubleGapSec, (t, _) =>
+        {
+            float a = BuzzBlast(t, BuzzDoubleBlastSec, BuzzFundamentalHz);
+            float b = BuzzBlast(t - (BuzzDoubleBlastSec + BuzzDoubleGapSec), BuzzDoubleBlastSec,
+                BuzzFundamentalHz);
+            return (a + b) * BuzzGain;
+        });
+
+    /// <summary>The reset whoosh's length. Long enough to be a movement, short enough that the
+    /// holding room is quiet again before anybody reaches the Start button.</summary>
+    private const float WhooshSeconds = 0.40f;
+
+    /// <summary>The band the whoosh sweeps through, in Hz. It rises and falls rather than only
+    /// rising: the world is going HOME, not launching.</summary>
+    private const float WhooshLowHz = 300f;
+    private const float WhooshPeakHz = 1500f;
+
+    /// <summary>Resonance of the one-pole band. Higher is more "jet", lower is more "air"; this
+    /// is deliberately near the air end, because the loudest thing in the reset should be the
+    /// props landing, not the transition.</summary>
+    private const float WhooshBandwidth = 0.35f;
+
+    private const float WhooshGain = 0.55f;
+
+    /// <summary>Renders the reset whoosh: white noise through a one-pole band whose centre
+    /// sweeps up and back. Seeded, so the reset sounds the same every round.</summary>
+    public static float[] ResetWhooshPcm()
+    {
+        var rng = new Random(20260920);
+        float lp = 0f;
+        float bp = 0f;
+        return Render(WhooshSeconds, (_, u) =>
+        {
+            // A half-sine sweep: 0 -> 1 -> 0 over the whole buffer.
+            float centre = Mathf.Lerp(WhooshLowHz, WhooshPeakHz, Mathf.Sin(Mathf.Pi * u));
+            float f = Mathf.Clamp(centre / (SampleRate * 0.5f), 0.001f, 0.9f);
+            float white = (float)(rng.NextDouble() * 2 - 1);
+            lp += f * (white - lp);
+            bp += f * WhooshBandwidth * (lp - bp);
+            // Band-passed: the low-passed signal minus its own slower copy.
+            float band = lp - bp;
+            // Soft both ends — a whoosh that starts at full level is a click.
+            float env = Mathf.Sin(Mathf.Pi * u);
+            return band * env * WhooshGain;
         });
     }
 

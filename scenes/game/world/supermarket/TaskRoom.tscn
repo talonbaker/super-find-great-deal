@@ -1,4 +1,4 @@
-[gd_scene load_steps=16 format=3]
+[gd_scene load_steps=17 format=3]
 
 ; BASE-1 (2026-09-19) — THE TASK ROOM. 10 x 10 x 3.5 m interior box, same construction as
 ; HoldingRoom.tscn (read that file's header for the convention and for why nothing here may be
@@ -14,6 +14,8 @@
 ;
 ; The vestibule is sealed on its other three sides and has its own dimmer light, so a hider in
 ; the main room sees nothing of it even for the frames between the teleport and the burst.
+
+[ext_resource type="PackedScene" path="res://scenes/game/world/supermarket/RoundClock.tscn" id="9_clock"]
 
 [sub_resource type="StandardMaterial3D" id="Mat_floor"]
 resource_name = "task room floor (warm grey)"
@@ -226,3 +228,19 @@ collision_mask = 0
 
 [node name="Collision" type="CollisionShape3D" parent="RoomBounds"]
 shape = SubResource("BoxShape3D_bounds")
+
+; CLOCK-1 (2026-09-19) — THE ROUND CLOCK. One instance of RoundClock.tscn, high on the -Z wall's
+; inner face (the wall is at z = -5.2 and is 0.4 m thick, so its inner face is z = -5.0) looking
+; at the centre of the room. Identity basis: a Label3D faces +Z with no rotation, which is into
+; the room from this wall.
+;
+; y = 2.35 puts the panel's centre 1.31 m above the 1.04 m eyeline and its top 0.55 m clear of the
+; ceiling, so it is looked UP at from anywhere in the room and is not something a body walks into
+; -- it carries no collision at all (see RoundClock.tscn).
+;
+; The `room` export is the key SupermarketWorld and RoomTeleport already use for this room, so
+; "which room" has one spelling across the level, the teleports and the --log-clock line.
+
+[node name="RoundClock" parent="." instance=ExtResource("9_clock")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.35, -4.94)
+room = "task"

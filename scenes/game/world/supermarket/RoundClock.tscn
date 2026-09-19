@@ -1,0 +1,65 @@
+[gd_scene load_steps=4 format=3]
+
+; CLOCK-1 (2026-09-19) — THE CLOCK ON THE WALL. Authored ONCE, here, and instanced by each of the
+; three room scenes. Every room's clock is therefore the same object and a change to the panel is
+; one edit; HOLD-1's board is meant to be built the same way out of the same two pieces (see
+; docs/agents/handoffs/2026-09-19-CLOCK-1.md, "one screen").
+;
+; WHAT A ROOM DOES WITH IT: instance this file, set the node's transform onto the inner face of a
+; wall FACING THE ROOM'S CENTRE, and set the `room` export to the room key
+; (SupermarketWorld.HoldingRoom / SearchRoom / TaskRoom). Nothing else. A Label3D with no rotation
+; faces +Z, so a clock on the -Z wall of a room needs the identity basis and one on the +Z wall
+; needs a 180 degree yaw -- and .claude/rules/godot-scenes.md's first line is that a .tscn's twelve
+; transform floats are basis ROWS, so do not hand-compute one without looking at a render.
+;
+; THERE IS NO COLLISION AND THERE IS NO COLOUR IN THIS FILE, and both absences are deliberate.
+;   - No collision: a player must never be stopped by the clock, and a StaticBody3D on a wall
+;     panel is a lip a body can catch on at head height.
+;   - No colour: the panel's albedo and both labels' modulates come from UiTokens through
+;     UiThemeService at runtime (RoundClock.ApplyTokens), so the clock and the HUD strip cannot
+;     disagree about what dark is. The material below therefore ships WHITE: a clock that loses
+;     its binding renders white and screams, rather than quietly reverting to a palette this
+;     project retired. That is the same choice the scrims made -- see
+;     tests/unit/UiNoBespokeStylingTests.NoScene_TypesItsOwnColour, which scans every .tscn in the
+;     repo for exactly this.
+;
+; SIZED TO BE READ FROM 8 M IN FIRST PERSON (FOV 75, eye height 1.04 m). The timer's glyphs are
+; font_size 96 at the default pixel_size 0.005 = 0.48 m tall, which subtends ~3.5% of the vertical
+; frame at 8 m -- about 40 px on a 1152-line viewport. The phase word is half that, because it
+; changes five times a round and the second changes sixty. RoundClock shrinks the second line when
+; the tally replaces the timer (RoundClockLayout.FitPixelSize); it never grows it, because the
+; panel is a fixed size and the two labels have to stay in proportion to each other.
+;
+; The label flags Godot defaults to are the ones this wants and are therefore NOT restated here
+; (Godot drops a property that equals its default on the next save, so writing them would be
+; churn rather than documentation): billboard OFF -- the clock is a thing on a wall and a panel
+; that turned to follow you would be a HUD element pretending to be furniture; shaded OFF -- the
+; digits must not dim as a player walks out of the room light; no_depth_test OFF -- a clock that
+; drew through a shelf would tell a seeker where the aisles are not.
+
+[ext_resource type="Script" path="res://scripts/game/round/RoundClock.cs" id="1_clock"]
+
+[sub_resource type="BoxMesh" id="BoxMesh_panel"]
+size = Vector3(2.4, 1.2, 0.08)
+
+[sub_resource type="StandardMaterial3D" id="Mat_panel"]
+resource_name = "round clock panel (albedo comes from UiTokens at runtime)"
+resource_local_to_scene = true
+roughness = 0.85
+
+[node name="RoundClock" type="Node3D"]
+script = ExtResource("1_clock")
+
+[node name="Panel" type="MeshInstance3D" parent="."]
+mesh = SubResource("BoxMesh_panel")
+surface_material_override/0 = SubResource("Mat_panel")
+
+[node name="PhaseLabel" type="Label3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.34, 0.06)
+text = "—"
+font_size = 52
+
+[node name="TimerLabel" type="Label3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.24, 0.06)
+text = "—"
+font_size = 96

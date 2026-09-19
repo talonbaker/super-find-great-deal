@@ -42,8 +42,15 @@ public partial class GameHud : CanvasLayer
 {
     private static GameHud? _instance;
 
-    /// <summary>See the class doc.</summary>
-    private const double PollIntervalSec = 0.1;
+    /// <summary>See the class doc.
+    ///
+    /// <para><b>Public since CLOCK-1 (2026-09-19), and that is the point rather than a
+    /// convenience.</b> The diegetic <c>RoundClock</c>s on the walls show the same second as the
+    /// round strip does, and "the same second" is only true if the two are read at the same rate.
+    /// <c>RoundAudio.PollIntervalSec</c> is defined AS this constant and a unit test fails if
+    /// that stops being so, which makes "hook into the same cadence" a fact rather than two
+    /// files that happen to say 0.1.</para></summary>
+    public const double PollIntervalSec = 0.1;
 
     private DayPhaseWidget? _dayPhase;
     private RoundStripWidget? _roundStrip;

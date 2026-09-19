@@ -170,14 +170,55 @@ public class UiNoBespokeStylingTests
             + string.Join("\n  ", hits));
     }
 
+    /// <summary>
+    /// Sources outside <c>scripts/ui/</c> that are nonetheless styled by the design system and
+    /// must be swept, each named individually with the reason.
+    ///
+    /// <para><b>Why a list and not a second directory.</b> The sweep's whole claim is "every
+    /// colour in the INTERFACE resolves through the tokens", and the boundary of "the interface"
+    /// stopped matching the boundary of <c>scripts/ui/</c> the moment a piece of chrome moved
+    /// into the world. Widening the sweep to <c>scripts/game/</c> would drag in several hundred
+    /// files of material albedos, light energies and particle tints, which are not interface and
+    /// which would then all need exemptions — an allow-list that long is how a guard rots into
+    /// decoration. Naming the handful of world objects that ARE chrome keeps the claim true and
+    /// keeps the reason attached to each one.</para>
+    /// </summary>
+    private static readonly (string RelativePath, string Why)[] AlsoScanned =
+    {
+        ("scripts/game/round/RoundClock.cs",
+            "CLOCK-1: a diegetic readout. Its panel and digits take UiTokens so the wall and the "
+            + "HUD strip cannot disagree about what dark is — the same substrate, on a mesh."),
+    };
+
+    /// <summary>The sweep reaches the world chrome, not only <c>scripts/ui/</c>. An absence check
+    /// that stopped looking at a file the day it moved is an absence check about nothing.</summary>
+    [Fact]
+    public void TheSweep_ReachesTheWorldChromeToo()
+    {
+        var files = ScannedFiles().Select(f => f.Replace('\\', '/')).ToList();
+        foreach ((string relative, string why) in AlsoScanned)
+            Assert.True(files.Any(f => f.EndsWith(relative, StringComparison.Ordinal)),
+                $"{relative} is not being scanned — {why}");
+    }
+
     private static IEnumerable<string> ScannedFiles()
     {
-        string uiRoot = Path.Combine(FindRepoRoot(), "scripts", "ui");
+        string root = FindRepoRoot();
+        string uiRoot = Path.Combine(root, "scripts", "ui");
         foreach (string file in Directory.EnumerateFiles(uiRoot, "*.cs", SearchOption.AllDirectories))
         {
             string normalised = file.Replace('\\', '/');
             if (Allowed.Any(a => normalised.Contains(a.Fragment, StringComparison.Ordinal)))
                 continue;
+            yield return file;
+        }
+
+        foreach ((string relative, string _) in AlsoScanned)
+        {
+            string file = Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar));
+            // A named file that has been moved or deleted is a silent hole in the sweep, so it
+            // fails here rather than quietly shrinking the file set.
+            Assert.True(File.Exists(file), $"{relative} is named in AlsoScanned but does not exist");
             yield return file;
         }
     }

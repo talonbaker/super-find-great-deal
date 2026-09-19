@@ -649,6 +649,30 @@ public sealed class LaunchOptions
     private readonly List<(string Verb, string Value, double AtSec)> _roundScript = new();
     // --- end ROUND-1 ------------------------------------------------------------------------------
 
+    // --- CLOCK-1 (2026-09-19) ---------------------------------------------------------------------
+    /// <summary>
+    /// <c>--log-clock</c>: a <b>dev instrument</b>, on both sides of the wire, for
+    /// <c>tests/Run-RoundClockTest.ps1</c>.
+    ///
+    /// <para>On a client it makes <c>RoundAudio</c> print one line per <c>RoundClock</c> per
+    /// second — <c>clock &lt;room&gt; &lt;phase&gt; &lt;M:SS&gt; shown=…</c>, read off the labels
+    /// — and one line per audio cue as it fires. On a dedicated server it is also what causes
+    /// <c>RoundAudio</c> to be attached AT ALL, in a log-only mode that plays nothing and drives
+    /// no clock, purely so the suite has a server-side reference second to compare the clients
+    /// against.</para>
+    ///
+    /// <para><b>It covers the cues as well as the clocks, and that is a merge decision rather
+    /// than a design one.</b> SFX-1 adds a <c>--log-sfx</c> flag on its own branch for the
+    /// material voices; this branch cannot see it, and two lanes each inventing a flag of that
+    /// name is a conflict for no gain. The round's cue sequence is a fact about the round, so it
+    /// rides the round's own flag; if the orchestrator wants it under <c>--log-sfx</c> after the
+    /// merge, it is one line in <c>RoundAudio.Fire</c>.</para>
+    ///
+    /// <para>Off by default and it prints nothing when off, so it costs a bool per frame.</para>
+    /// </summary>
+    public bool LogClock { get; private set; }
+    // --- end CLOCK-1 ------------------------------------------------------------------------------
+
     // --- Voice proximity gate + bandwidth instrumentation (perf followups, 2026-08-07) --------
     /// <summary>--net-stats &lt;path&gt;: the dedicated server appends one JSON line per second of
     /// ENet's own transport byte/packet counters plus the voice relay's relayed/gated counts.
@@ -1310,6 +1334,12 @@ public sealed class LaunchOptions
                     options._roundScript.Sort((a, b) => a.AtSec.CompareTo(b.AtSec));
                     break;
                 }
+                // CLOCK-1 (2026-09-19). A bare presence flag on purpose: it turns logging on and
+                // has nothing to configure, and every "--log-clock on|off" in this file exists
+                // only where a flag OVERRIDES a default that is already true.
+                case "--log-clock":
+                    options.LogClock = true;
+                    break;
                 // --- end L1 ------------------------------------------------------------------
                 // --- perf followups (2026-08-07) -------------------------------------------
                 case "--net-stats":
