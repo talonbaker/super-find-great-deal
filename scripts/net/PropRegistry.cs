@@ -85,6 +85,28 @@ public sealed class PropRegistry
         return true;
     }
 
+    /// <summary>
+    /// Puts a prop into <see cref="PropMode.Loose"/> at <paramref name="at"/> from ANY mode —
+    /// the sibling of <see cref="SetResting"/> in the other direction. Returns false on an
+    /// unknown id.
+    ///
+    /// <para><b>Why it exists next to <see cref="Release"/>, which looks like the same thing.</b>
+    /// <see cref="Release"/> is the drop/throw verb and deliberately refuses anything that is not
+    /// HELD: a resting prop must not be made loose by a stray release packet. REACH-1's
+    /// <c>PropManager.ServerNudgeLoose</c> needs exactly what Release refuses — a RESTING prop
+    /// shoved back into physics with nobody holding it — because §5b's sixth planted case is a
+    /// prop "pushed through the floor by a scripted impulse" in a room with no players in it, and
+    /// every shipped route into Loose starts from a hand. Keeping the two verbs separate is what
+    /// stops the dev hook from loosening the rule the real one enforces.</para>
+    /// </summary>
+    public bool SetLoose(int id, Transform3D at)
+    {
+        if (!_props.TryGetValue(id, out PropState s))
+            return false;
+        _props[id] = s.AsLoose(at);
+        return true;
+    }
+
     /// <summary>Updates a Loose prop's streamed transform. Returns false unless the prop is Loose,
     /// so a resting or held prop can never be moved by a stray transform update.</summary>
     public bool SetLooseTransform(int id, Transform3D at)

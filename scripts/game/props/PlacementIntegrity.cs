@@ -94,7 +94,15 @@ public static class PlacementIntegrity
     /// handoff — the player-facing reason is the <c>PlaceDenial</c> ordinal the RPC carries, so
     /// nothing here has to be localised or trusted across the wire.
     /// </summary>
-    public readonly record struct Verdict(PlacementFault Fault, float PenetrationM, string Detail)
+    /// <param name="BlockerIsProp">REACH-1: true when the named blocker is another PROP rather
+    /// than static geometry. Set only on the <see cref="PlacementFault.Overlapping"/> path,
+    /// where the refusal already pays for a second query to name what it hit, so this costs
+    /// nothing new. Layer 2's log line distinguishes <c>PropOverlap</c> from <c>StaticOverlap</c>
+    /// with it, and the distinction is not cosmetic: a prop inside a WALL is the defect §5b
+    /// exists to prevent, a prop inside another PROP is usually two crates the solver is about
+    /// to push apart by itself.</param>
+    public readonly record struct Verdict(PlacementFault Fault, float PenetrationM, string Detail,
+        bool BlockerIsProp = false)
     {
         public static readonly Verdict Ok = new(PlacementFault.None, 0f, "");
 
@@ -297,13 +305,168 @@ public static class PlacementIntegrity
         // that passes never pays for it, and a refusal that cannot say what it hit is the kind of
         // bug report nobody can act on.
         string what = "something";
+        bool blockerIsProp = false;
         Godot.Collections.Array<Godot.Collections.Dictionary> hits = space.IntersectShape(query, 1);
         if (hits.Count > 0 && hits[0].TryGetValue("collider", out Variant collider)
             && collider.As<GodotObject>() is Node hitNode)
+        {
             what = hitNode.GetPath().ToString();
+            // REACH-1: static geometry or another prop? The prop bodies in this game are all
+            // Carryable, and a prop's own NetworkedProp is its parent — checking the node itself
+            // rather than the registry keeps this usable from a layer-2 audit that has no
+            // PropManager in scope (the planted self-test is exactly that case).
+            blockerIsProp = hitNode is MpFoundation.Game.Sandbox.Carryable
+                            || hitNode.GetParent() is NetworkedProp;
+        }
 
         return new Verdict(PlacementFault.Overlapping, deepest,
-            $"penetrates {what} by {deepest:0.000} m (tolerance {overlapToleranceM:0.000} m)");
+            $"penetrates {what} by {deepest:0.000} m (tolerance {overlapToleranceM:0.000} m)",
+            blockerIsProp);
+    }
+
+    // --- REACH-1: the correction half of layer 2 -------------------------------------------
+
+    /// <summary>
+    /// Try to push <paramref name="propBody"/> OUT of whatever it is inside, from
+    /// <paramref name="at"/>, by at most <paramref name="maxTranslationM"/> metres.
+    ///
+    /// <para><b>The minimum translation, from the engine's own rest info.</b>
+    /// <see cref="PhysicsDirectSpaceState3D.GetRestInfo"/> reports the deepest contact's point
+    /// and its NORMAL — the direction out of the thing the shape is inside — and
+    /// <see cref="CollideShape"/> gives the depth. Moving along the normal by the depth (plus a
+    /// hair, so the re-test is not deciding a float tie) is the minimum translation vector, and
+    /// it is the only push that is guaranteed not to make some other overlap worse than the one
+    /// it is fixing.</para>
+    ///
+    /// <para><b>It re-checks, and a push that does not clear is not applied.</b> 0.15 m out of a
+    /// 1 m pillar leaves the crate still inside it; reporting that as corrected would be worse
+    /// than reporting the failure, because the caller's fallback (the last good transform) is
+    /// the thing that actually saves the round.</para>
+    ///
+    /// <para><b>Iterative, up to <see cref="DepenetrateSteps"/> pushes.</b> A crate wedged in the
+    /// corner where a wall meets a shelf is inside TWO things, and one push along one normal
+    /// clears one of them; the second pass sees the other. The total distance moved is still
+    /// capped at <paramref name="maxTranslationM"/>, so this buys correctness in a corner
+    /// without buying a prop that walks across the room.</para>
+    /// </summary>
+    /// <returns>True with <paramref name="corrected"/> set to a transform that passes
+    /// <see cref="Check"/>; false with <paramref name="corrected"/> left at
+    /// <paramref name="at"/>.</returns>
+    public static bool TryDepenetrate(RigidBody3D propBody, Transform3D at, float maxTranslationM,
+        out Transform3D corrected, out float movedM, out int queries)
+    {
+        corrected = at;
+        movedM = 0f;
+        queries = 0;
+
+        if (!GodotObject.IsInstanceValid(propBody) || !propBody.IsInsideTree())
+            return false;
+        CollisionShape3D? shapeNode = FirstShapeOf(propBody);
+        if (shapeNode?.Shape is not Shape3D shape)
+            return false;
+        PhysicsDirectSpaceState3D? space = propBody.GetWorld3D()?.DirectSpaceState;
+        if (space == null)
+            return false;
+
+        Godot.Collections.Array<Rid> exclude = ExclusionsFor(propBody);
+        Transform3D candidate = at;
+
+        for (int step = 0; step < DepenetrateSteps; step++)
+        {
+            Transform3D shapeAt = candidate * shapeNode.Transform;
+            var query = new PhysicsShapeQueryParameters3D
+            {
+                Shape = shape,
+                Transform = shapeAt,
+                CollisionMask = QueryMask,
+                CollideWithBodies = true,
+                CollideWithAreas = false,
+                Exclude = exclude,
+                Margin = 0f,
+            };
+
+            queries++;
+            Godot.Collections.Dictionary rest = space.GetRestInfo(query);
+            if (rest.Count == 0 || !rest.TryGetValue("normal", out Variant n))
+                break;   // nothing to push out of; the Check below is the authority either way
+            Vector3 normal = n.AsVector3();
+            if (normal.LengthSquared() < 0.0001f)
+                break;
+
+            queries++;
+            float depth = DeepestContact(space, query);
+            if (depth <= DefaultOverlapToleranceM)
+                break;
+
+            float push = Mathf.Min(depth + DepenetrateSlackM, maxTranslationM - movedM);
+            if (push <= 0f)
+                break;
+            candidate.Origin += normal.Normalized() * push;
+            movedM += push;
+
+            queries++;
+            if (Check(propBody, candidate).Allowed)
+            {
+                corrected = candidate;
+                return true;
+            }
+            if (movedM >= maxTranslationM)
+                break;
+        }
+
+        // One last honest answer: the loop may have broken out because the overlap was already
+        // inside tolerance, in which case the candidate IS good and saying otherwise would send
+        // a perfectly placed prop back to its last good transform for no reason.
+        queries++;
+        if (movedM > 0f && Check(propBody, candidate).Allowed)
+        {
+            corrected = candidate;
+            return true;
+        }
+        movedM = 0f;
+        return false;
+    }
+
+    /// <summary>How many push-and-re-test passes <see cref="TryDepenetrate"/> makes. Three: one
+    /// for the ordinary single contact, two more for a corner. Beyond that the answer is "it is
+    /// stuck", and the last good transform is the better tool.</summary>
+    public const int DepenetrateSteps = 3;
+
+    /// <summary>Extra distance added to a push so the re-test is not deciding a float tie,
+    /// metres.</summary>
+    public const float DepenetrateSlackM = 0.005f;
+
+    /// <summary>The deepest contact pair a shape query reports, metres. Split out of
+    /// <see cref="CheckOverlap"/> so the depenetration loop measures depth with the same code
+    /// the refusal does.</summary>
+    private static float DeepestContact(PhysicsDirectSpaceState3D space,
+        PhysicsShapeQueryParameters3D query)
+    {
+        Godot.Collections.Array<Vector3> contacts = space.CollideShape(query, MaxContacts);
+        float deepest = 0f;
+        for (int i = 0; i + 1 < contacts.Count; i += 2)
+        {
+            float depth = contacts[i].DistanceTo(contacts[i + 1]);
+            if (depth > deepest)
+                deepest = depth;
+        }
+        return deepest;
+    }
+
+    /// <summary>The prop itself plus every avatar — the same exclusion set
+    /// <see cref="CheckOverlap"/> builds, for the same reason (see its comment). Shared so the
+    /// depenetration loop can never be pushing out of a body the audit is about to ignore.
+    /// </summary>
+    private static Godot.Collections.Array<Rid> ExclusionsFor(RigidBody3D propBody)
+    {
+        var exclude = new Godot.Collections.Array<Rid> { propBody.GetRid() };
+        foreach (MpFoundation.Game.Sandbox.SandboxAvatar avatar
+                 in MpFoundation.Game.Sandbox.SandboxAvatar.Live)
+        {
+            if (GodotObject.IsInstanceValid(avatar) && avatar.IsInsideTree())
+                exclude.Add(avatar.GetRid());
+        }
+        return exclude;
     }
 
     /// <summary>The first <see cref="CollisionShape3D"/> child of a body or area, by tree order.
