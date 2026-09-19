@@ -199,6 +199,12 @@ public partial class Gameplay : Node3D
 
         var net = NetworkManager.Instance;
 
+        // The intercom's one knob (VOICE-1). Written before anything can speak, so the PA bus
+        // reads it when it is lazily built; ApplyIntercomWetDb covers the case where a previous
+        // session in this process already built the bus. 0 is the shipped character.
+        Voice.VoiceConfig.IntercomWetDb = net.Options.IntercomWetDb;
+        Voice.VoiceManager.ApplyIntercomWetDb();
+
         // Networked objects: the prop spawner + authoritative registry. Set up before connecting
         // so a prop spawn replicated to a joining client never races the spawn function being wired.
         _props = GetNode<Node3D>("Props");
@@ -292,6 +298,22 @@ public partial class Gameplay : Node3D
             _world as World.SupermarketWorld, _players, Round.HideSeekTuning.Current,
             net.Options.RoundScript);
         _hideSeekDriver.ResetRequested += OnRoundResetRequested;
+
+        // THE INTERCOM (VOICE-1). Cross-room voice goes out on the PA route, same-room stays
+        // proximity, and both halves are derived from the driver's room map so the client's route
+        // and the server's relay exemption cannot disagree. Wired here, immediately after the
+        // driver exists and on BOTH sides of the session, because the server half is not optional
+        // on this world: VoiceProximityGate.DefaultForWorld is on for the supermarket (the rooms
+        // are 40 m apart against a 24 m cutoff, deliberately), so a client-only wiring would
+        // leave every cross-room packet culled at the relay and the intercom would be silent with
+        // nothing in any log to say why. See VoiceIntercom's class doc.
+        //
+        // Only on a world that HAS rooms: elsewhere the relay stays exactly what it was.
+        if (_world is World.SupermarketWorld)
+        {
+            Voice.VoiceIntercom.Wire(this, _hideSeekDriver,
+                net.Role == NetworkManager.SessionRole.Server);
+        }
         // WHAT USED TO BE HERE, in one line each, because every one of these blocks carried a
         // "THIS IS THE ONLY CONSTRUCTION SITE" warning and deleting them is exactly the move those
         // warnings were written against: the lake (WaterService plus the chill overlays and the
@@ -417,10 +439,19 @@ public partial class Gameplay : Node3D
         if (net.Options.VoiceGateOverride)
             MpFoundation.Net.VoiceProximityGate.Enabled = net.Options.VoiceGateOn;
         // Test-only (--voice-pa-all): makes every sender read as "on the PA" so the gate's
-        // exemption branch is exercised by a live session instead of only compiling. The shipped
-        // game wires no PA resolver at all yet; see LaunchOptions.VoicePaAll.
+        // exemption branch is exercised by a live session instead of only compiling. See
+        // LaunchOptions.VoicePaAll.
+        //
+        // BOTH hooks, as of VOICE-1, and that is not belt-and-braces. The relay now prefers the
+        // PAIRWISE resolver over the per-talker one, so a blanket per-talker "everyone is on the
+        // PA" set on a world whose intercom is wired would be silently outvoted by the room rule
+        // and this flag would quietly stop meaning what it says. Setting both keeps "--voice-pa-all
+        // means every packet is exempt" true on every world.
         if (net.Options.VoicePaAll)
+        {
             Voice.VoiceManager.Instance.PaResolver = _ => true;
+            Voice.VoiceManager.Instance.PaPairResolver = (_, _) => true;
+        }
 
         _serverSignals = true;
         Multiplayer.PeerConnected += OnPeerConnected;

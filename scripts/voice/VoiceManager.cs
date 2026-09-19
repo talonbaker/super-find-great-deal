@@ -89,10 +89,140 @@ public partial class VoiceManager : Node
     /// PA is diagnosable from a log line instead of from a playtest.</summary>
     public System.Func<int, bool>? PaResolver { get; set; }
 
+    /// <summary>
+    /// <b>The server's listener-relative PA hook</b> (VOICE-1). Given (talker, listener), is that
+    /// talker on the PA route <i>for that listener</i>?
+    ///
+    /// <para><b>Why the pair, when <see cref="PaResolver"/> already exists.</b> "T is on the PA"
+    /// is not a property of T. The supermarket's intercom is cross-ROOM voice: T is on the PA for
+    /// everyone in a different room and on ordinary proximity for everyone in the same one, at
+    /// the same instant. On a client that distinction is invisible because the listener is always
+    /// the local player — which is exactly why the per-talker signature was enough until now, and
+    /// exactly why it is not enough on the relay, where one packet is judged against every peer
+    /// in the match.</para>
+    ///
+    /// <para><b>Null = today's behaviour, byte for byte.</b> <see cref="RelayGated"/> falls back
+    /// to <see cref="PaResolver"/> for every listener, which is what <c>--voice-pa-all</c> and
+    /// every pre-VOICE-1 build do. Wired, it WINS over <see cref="PaResolver"/> on the server —
+    /// so anything setting a blanket per-talker resolver on the server (the test flag) must set
+    /// this one too or it is silently outvoted.</para>
+    ///
+    /// <para>Server-side only; a client never relays. The server prints which hooks are wired at
+    /// its first gated relay — see <see cref="LogGateOnce"/>.</para>
+    /// </summary>
+    public System.Func<int, int, bool>? PaPairResolver { get; set; }
+
+    /// <summary>
+    /// <b>Where a peer is</b>, as the game decides it — the supermarket wires this to the round's
+    /// authoritative room map (<c>HideSeekDriver.RoomOf</c>). Empty string = unknown.
+    ///
+    /// <para><b>Diagnostic, not a decision.</b> Nothing in the relay or the route reads this; the
+    /// two resolvers above are what decide, and the wiring derives all three from one source so
+    /// they cannot disagree. This one exists so <see cref="GetEmitRouting"/> can say WHY a route
+    /// came out the way it did — "both ends say pa" is also what two unknown rooms produce, and
+    /// that is the fail-open path rather than the intercom working.</para>
+    /// </summary>
+    public System.Func<int, string>? RoomResolver { get; set; }
+
     /// <summary>Test/telemetry seam: the route the local client would give this sender's
     /// voice right now ("pa" or "proximity"). Resolved exactly like _Process does.</summary>
     public string DescribeRouteFor(int peerId) =>
-        PaResolver?.Invoke(peerId) == true ? "pa" : "proximity";
+        PaResolver?.Invoke(peerId) == true ? VoiceRouting.RoutePa : VoiceRouting.RouteProximity;
+
+    /// <summary>This process's room for <paramref name="peerId"/>, or
+    /// <see cref="Game.Round.RoundRooms.Unknown"/> when nothing has wired
+    /// <see cref="RoomResolver"/>.</summary>
+    public string DescribeRoomOf(int peerId) =>
+        RoomResolver?.Invoke(peerId) ?? Game.Round.RoundRooms.Unknown;
+
+    /// <summary>
+    /// <b>The routing verdict</b> (VOICE-1): this process's whole decision about every voice it
+    /// can currently hear — its own room, each known peer's room, and the route that pair
+    /// resolves to — plus which of the three hooks are wired and whether the relay gate is on.
+    ///
+    /// <para><b>Asserted on by the suites rather than inferred from a log.</b> A bot embeds it in
+    /// every sample (<c>vroute</c>), so "cross-room says pa on both peers and same-room says
+    /// proximity" is a claim about a value the game published, not about a sentence somebody
+    /// wrote in a print statement.</para>
+    ///
+    /// <para>Peers come from the replicated player list, not from the transport's peer list —
+    /// the same rule <see cref="GetRemotePlayers"/> already follows.</para>
+    /// </summary>
+    public VoiceRouting.Verdict GetEmitRoutingVerdict()
+    {
+        int self = Multiplayer.MultiplayerPeer is null or OfflineMultiplayerPeer
+            ? 0
+            : Multiplayer.GetUniqueId();
+        var peers = new List<VoiceRouting.PeerVerdict>();
+        string selfRoom = DescribeRoomOf(self);
+        foreach ((int id, string name) in GetRemotePlayers())
+        {
+            string room = DescribeRoomOf(id);
+            // The ROUTE is read from the resolver that actually drives VoiceSpeaker, not
+            // recomputed from the two rooms beside it: a verdict that recomputed its own answer
+            // would stay green with the resolver unwired.
+            peers.Add(new VoiceRouting.PeerVerdict(id, name, room, DescribeRouteFor(id)));
+        }
+        peers.Sort(static (a, b) => a.Id.CompareTo(b.Id));
+
+        return new VoiceRouting.Verdict(
+            Self: self,
+            Room: selfRoom,
+            Server: Multiplayer.IsServer(),
+            GateOn: VoiceProximityGate.Enabled,
+            PaResolverWired: PaResolver != null,
+            PaPairResolverWired: PaPairResolver != null,
+            RoomResolverWired: RoomResolver != null,
+            Peers: peers);
+    }
+
+    /// <inheritdoc cref="GetEmitRoutingVerdict"/>
+    public string GetEmitRouting() =>
+        System.Text.Json.JsonSerializer.Serialize(GetEmitRoutingVerdict(), RoutingJsonOptions);
+
+    private static readonly System.Text.Json.JsonSerializerOptions RoutingJsonOptions =
+        new(System.Text.Json.JsonSerializerDefaults.Web);
+
+    /// <summary>
+    /// <b>Who is talking on the intercom right now</b>, for the HUD lamp — the loudest remote
+    /// peer whose voice this client is routing to the PA bus, or <c>(0, "")</c> when nobody is.
+    ///
+    /// <para><b>The redundant channel INTERACTION-BIBLE §8.2 asks for.</b> A cross-room voice is
+    /// deliberately filtered and quiet; a hider facing away from nothing in particular can miss
+    /// that the seeker is taunting them at all, and "did they say something?" is the one thing
+    /// this design cannot afford to be ambiguous about, because the bluff IS the mechanic. The
+    /// lamp is the non-audio half of the same consequence.</para>
+    ///
+    /// <para>Loudest wins rather than first-found so two talkers do not make the lamp flicker
+    /// between two names at the poll rate.</para>
+    /// </summary>
+    public (int Id, string Name) PaSpeakerNow()
+    {
+        int bestId = 0;
+        float best = PaLampEnvelopeFloor;
+        foreach (KeyValuePair<int, VoiceSpeaker> kv in _speakers)
+        {
+            if (kv.Value.Envelope <= best || PaResolver?.Invoke(kv.Key) != true)
+                continue;
+            best = kv.Value.Envelope;
+            bestId = kv.Key;
+        }
+        if (bestId == 0)
+            return (0, string.Empty);
+
+        string name = string.Empty;
+        if (_playersRoot != null && GodotObject.IsInstanceValid(_playersRoot)
+            && _playersRoot.GetNodeOrNull<Node3D>(bestId.ToString()) is SandboxAvatar avatar)
+        {
+            name = avatar.DisplayName;
+        }
+        return (bestId, name);
+    }
+
+    /// <summary>Below this the envelope is room tone or the tail of a word, not somebody talking.
+    /// An order of magnitude above <see cref="VoiceEnvelope.SilenceFloor"/>'s effect so the lamp
+    /// does not strobe between syllables; the widget holds it on top of this.</summary>
+    private const float PaLampEnvelopeFloor = 0.05f;
 
     // Keyed by peer id, not by peer id .ToString(). SubmitVoice ran the limiter on EVERY
     // inbound voice packet — 300/sec at six talkers — and each call allocated a string just to
@@ -150,6 +280,10 @@ public partial class VoiceManager : Node
         _serverPosCache.Clear();
         _gateLogged = false;
         PaResolver = null;
+        // Every VOICE-1 hook closes over the session's round driver and its peer ids, so all
+        // three go with the session for the same reason the resolver above always has.
+        PaPairResolver = null;
+        RoomResolver = null;
         foreach (VoiceSpeaker speaker in _speakers.Values)
             speaker.Cleanup();
         _speakers.Clear();
@@ -324,23 +458,45 @@ public partial class VoiceManager : Node
         RelayGated(sender, packet, now);
     }
 
-    /// <summary>The gated relay. Resolved once per packet, not once per (talker, listener)
-    /// pair: the PA predicate and the talker's own position are hoisted out of the peer loop
-    /// because they cannot change inside it.</summary>
+    /// <summary>The gated relay. The talker's own position is still hoisted out of the peer loop
+    /// (it cannot change inside it) and is resolved LAZILY, so a packet every listener is exempt
+    /// for costs no position sample at all.
+    ///
+    /// <para><b>The exemption is per (talker, listener) PAIR as of VOICE-1</b>, not per packet.
+    /// It used to be one <c>PaResolver(sender)</c> hoisted above the loop, which is correct for a
+    /// broadcast prop — "T is on the PA" full stop — and wrong for an intercom keyed on rooms,
+    /// where the same sentence is a PA broadcast to the player two rooms away and ordinary
+    /// proximity to the one standing beside them. <see cref="PaPairResolver"/> is the pairwise
+    /// hook; with it unwired this method is byte-for-byte what it was, because every listener
+    /// then gets the same per-talker answer the hoisted call used to produce.</para></summary>
     private void RelayGated(int sender, byte[] packet, double now)
     {
-        // PA first and unconditionally: a broadcast has no distance falloff at all, so it must
-        // reach every accepted peer no matter where they are standing. See PaResolver's doc
-        // comment for why the server is allowed to read a hook the design put on the client.
-        bool paExempt = PaResolver?.Invoke(sender) == true;
+        System.Func<int, int, bool>? pairResolver = PaPairResolver;
+        // The per-talker fallback, and the only thing read when nothing wired the pairwise hook.
+        bool senderPaForAll = pairResolver is null && PaResolver?.Invoke(sender) == true;
         LogGateOnce();
-        Vector3? talkerPos = paExempt ? null : ServerPosFor(sender, now);
+
+        Vector3? talkerPos = null;
+        bool talkerPosSampled = false;
 
         foreach (int peer in Multiplayer.GetPeers())
         {
             if (peer == sender || !NetworkManager.Instance.IsPeerAccepted(peer))
                 continue;
-            if (!_relayGate.ShouldRelay(sender, peer, talkerPos, paExempt ? null : ServerPosFor(peer, now), paExempt))
+
+            bool paExempt = pairResolver is not null ? pairResolver(sender, peer) : senderPaForAll;
+            Vector3? listenerPos = null;
+            if (!paExempt)
+            {
+                if (!talkerPosSampled)
+                {
+                    talkerPos = ServerPosFor(sender, now);
+                    talkerPosSampled = true;
+                }
+                listenerPos = ServerPosFor(peer, now);
+            }
+
+            if (!_relayGate.ShouldRelay(sender, peer, paExempt ? null : talkerPos, listenerPos, paExempt))
                 continue;
             RpcId(peer, MethodName.ReceiveVoice, sender, packet);
         }
@@ -363,10 +519,15 @@ public partial class VoiceManager : Node
         return pos;
     }
 
-    /// <summary>One line, once per session, recording the two facts that decide whether the
-    /// gate is safe in THIS build: that it is on, and whether a PA resolver is wired on the
+    /// <summary>One line, once per session, recording the facts that decide whether the
+    /// gate is safe in THIS build: that it is on, and which PA hooks are wired on the
     /// server. A silenced PA is otherwise a bug with no evidence — it looks exactly like
-    /// "the intercom didn't work", which is unreportable.</summary>
+    /// "the intercom didn't work", which is unreportable.
+    ///
+    /// <para><b><c>paPairResolver</c> joined the line at VOICE-1</b> and is the one that matters
+    /// for a room-keyed intercom: <c>paResolver=wired paPairResolver=NOT-WIRED</c> on the
+    /// supermarket means the relay is answering "is T on the PA" for the whole match at once,
+    /// which is the exact shape of the hazard this line was written for, one level in.</para></summary>
     private void LogGateOnce()
     {
         if (_gateLogged)
@@ -374,7 +535,14 @@ public partial class VoiceManager : Node
         _gateLogged = true;
         ServerLog.Info("voice proximity gate active",
             $"enter={VoiceProximityGate.EnterRadiusM:F0}m exit={VoiceProximityGate.ExitRadiusM:F0}m " +
-            $"audible={VoiceConfig.ProximityMaxDistance:F0}m paResolver={(PaResolver != null ? "wired" : "NOT-WIRED")}");
+            $"audible={VoiceConfig.ProximityMaxDistance:F0}m " +
+            $"paResolver={(PaResolver != null ? "wired" : "NOT-WIRED")} " +
+            $"paPairResolver={(PaPairResolver != null ? "wired" : "NOT-WIRED")} " +
+            $"roomResolver={(RoomResolver != null ? "wired" : "NOT-WIRED")}");
+        GD.Print("[voice] gate on, "
+                 + $"paResolver={(PaResolver != null ? "wired" : "NOT-WIRED")} "
+                 + $"paPairResolver={(PaPairResolver != null ? "wired" : "NOT-WIRED")} "
+                 + $"roomResolver={(RoomResolver != null ? "wired" : "NOT-WIRED")}");
     }
 
     /// <summary>Reads and resets the relay's packet counters (relayed / gated / PA-exempt) for
@@ -505,10 +673,35 @@ public partial class VoiceManager : Node
         {
             RoomSize = 0.7f,
             Damping = 0.4f,
-            Wet = 0.25f,
+            Wet = VoiceRouting.WetFromDb(VoiceConfig.IntercomWetDb),
             Dry = 0.9f,
         });
         return name;
+    }
+
+    /// <summary>
+    /// <b>Re-applies <see cref="VoiceConfig.IntercomWetDb"/> to a PA bus that already exists.</b>
+    /// A no-op before the first PA voice builds the bus — the value is read at construction, so
+    /// setting the knob early needs nothing else.
+    ///
+    /// <para>Separate from <see cref="EnsurePaBusName"/> because the bus is built lazily on the
+    /// first cross-room voice, which on a two-player round can be a minute into the session. A
+    /// launch flag that only wrote the field would appear to do nothing for that minute and then
+    /// work, which is worse than either.</para>
+    ///
+    /// <para>Walks the bus's effects by TYPE, never by index: the three effects are added in a
+    /// fixed order today, but a reader who inserts a fourth should not have to know that a
+    /// hard-coded <c>2</c> somewhere else depends on it.</para>
+    /// </summary>
+    public static void ApplyIntercomWetDb()
+    {
+        int idx = AudioServer.GetBusIndex("PA");
+        if (idx < 0)
+            return; // nothing has spoken on the PA yet; EnsurePaBusName will read the knob.
+        float wet = VoiceRouting.WetFromDb(VoiceConfig.IntercomWetDb);
+        for (int i = 0; i < AudioServer.GetBusEffectCount(idx); i++)
+            if (AudioServer.GetBusEffect(idx, i) is AudioEffectReverb reverb)
+                reverb.Wet = wet;
     }
 
     private void LogRejectThrottled(string reason, int peer, string message, string kv)

@@ -551,7 +551,16 @@ public partial class BotHarness : Node
                 ? new RoundTallySample(card.RoundIndex, card.HiderPeerId, card.HiderGained,
                     card.SeekerPeerId, card.SeekerGained, card.EndedByDisconnect)
                 : null,
-            entities, placeDeny);
+            entities, placeDeny,
+            // VOICE-1: this peer's whole voice-routing decision — its own room, every known
+            // peer's room, the route each pair resolved to, and which hooks are wired. Embedded
+            // as the object rather than as a pre-serialised string so it reads as real JSON in
+            // the line and a suite can index into it.
+            //
+            // The ROOMS ride along with the routes deliberately: "both peers say pa" is also
+            // what two UNKNOWN rooms produce through the fail-open rule, so a suite asserting
+            // only the route could pass on a session where the round never synced at all.
+            Voice.VoiceManager.Instance.GetEmitRoutingVerdict());
         string line = JsonSerializer.Serialize(sample, JsonOptions);
         if (_writer != null)
         {
@@ -603,7 +612,10 @@ public partial class BotHarness : Node
         // here needs its own synced flag for that reason.)
         List<EntitySample> Entities,
         // CARRY-1: the newest place refusal's ordinal, 0 = none. See its computation site.
-        int PlaceDeny);
+        int PlaceDeny,
+        // VOICE-1: the routing verdict, as `vroute`. See its computation site and
+        // VoiceManager.GetEmitRoutingVerdict.
+        Voice.VoiceRouting.Verdict Vroute);
 
     // THE FIRST-PERSON LENS, in world space (INT-0, 2026-09-19). X/Y/Z is the lens itself, not the
     // rig node it hangs off; Dx/Dy/Dz is the direction it faces (-Z of its own basis, which is
