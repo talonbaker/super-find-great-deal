@@ -60,7 +60,15 @@
 [CmdletBinding()]
 param(
     [switch]$SkipBuild,
-    [int]$Port = 7896,
+    # 7897, NOT 7896 (INT-0, 2026-09-19). FP-1 and ROUND-1 branched off BASE-1 in parallel and both
+    # picked 7896 as "the next free port", neither able to see the other; the merge put their two
+    # suites LAST and SECOND-LAST in Run-AllTests.ps1's registry, so in a marathon they run back to
+    # back on one socket. Measured, not reasoned: the first integration run of this suite died at
+    # "the server never reported listening within 30s" with `Couldn't create an ENet host` in
+    # fp-server.err.log, immediately after Run-RoundLoopSmoke.ps1 released 7896. The ladder in
+    # Run-CarryNetTest's header (7893/7894/7895) and Run-RoundLoopSmoke's (7896) is the one this
+    # continues; FP-1's own two-client capture harness already used 7897 for the same reason.
+    [int]$Port = 7897,
     [double]$DurationSec = 12,
     # Two marks, both after the walk below has finished. Comma-separated, which is --capture-at's
     # bare-mark form (the other form leads with a directory; see LaunchOptions).
