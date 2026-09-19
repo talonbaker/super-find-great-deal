@@ -28,8 +28,8 @@ public readonly record struct HideSeekTuning
     /// <see cref="MinTimerSec"/> and for the same reason: a zero (or negative) match length makes
     /// <c>RoundIndex % MatchRounds</c> a divide-by-zero on the one line the whole match end hangs
     /// off, and a tuning panel can type a zero. Applied where it is READ
-    /// (<c>HideSeekLoop</c>'s <c>MatchRoundsOf</c>), never on construction — see the class
-    /// doc.</summary>
+    /// (<see cref="MatchRoundsOrFloor"/>, which every question below goes through), never on
+    /// construction — see the class doc.</summary>
     public const int MinMatchRounds = 1;
 
     /// <summary>How long the hider gets in the search room. Packet default 30 s.</summary>

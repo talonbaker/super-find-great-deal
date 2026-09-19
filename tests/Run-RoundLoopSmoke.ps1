@@ -422,16 +422,35 @@ try {
     # live index has already advanced by the time the card exists). A later sample of the same
     # round replaces an earlier one, so the map holds the settled version of each card.
     # ==========================================================================================
-    function Get-CardsByRound($Samples) {
+    #
+    # TWO maps, and the difference between them is a real distinction rather than bookkeeping.
+    # A card OUTLIVES the numbers it describes: it is still the peer's LastTally long after the
+    # Tally phase ended, and the Start that begins the next match zeroes the live score map while
+    # the card still reads 173-171. So:
+    #   Cards         -- the last sample carrying each card. Use it for the card's OWN frozen
+    #                    fields, and to prove they survived the reset.
+    #   CardsAtTally  -- the last sample carrying each card WHILE ITS TALLY WAS ON SCREEN
+    #                    (phase ordinal 4). The only instant at which the live score map and the
+    #                    card are describing the same moment, so every live-vs-card comparison
+    #                    belongs here.
+    # The first version of this suite used one map for both and failed with "the totals on the
+    # wire are level at 0 but the card names peer N the winner" -- the suite reading the live map
+    # one round too late, which is precisely the bug the frozen totals exist to prevent, caught
+    # against the suite instead of against the game.
+    function Get-CardsByRound($Samples, [int]$PhaseFilter = -1) {
         $cards = @{}
         foreach ($s in @($Samples)) {
             if (-not [bool]$s.roundSynced) { continue }
             if ($null -eq $s.roundTally) { continue }
+            if ($PhaseFilter -ge 0 -and [int]$s.roundPhase -ne $PhaseFilter) { continue }
             $cards[[int]$s.roundTally.roundIndex] = $s
         }
         return ,$cards
     }
-    foreach ($b in $bots) { $b.Cards = Get-CardsByRound $b.Samples }
+    foreach ($b in $bots) {
+        $b.Cards = Get-CardsByRound $b.Samples
+        $b.CardsAtTally = Get-CardsByRound $b.Samples 4
+    }
 
     # Phase ordinal 4 = Tally (HideSeekPhase): every peer must have SEEN the phase, not merely
     # folded a card at some point.
@@ -451,10 +470,10 @@ try {
     foreach ($round in @(1, 2)) {
         $rows = @()
         foreach ($b in $bots) {
-            if (-not $b.Cards.ContainsKey($round)) {
-                Add-Failure "$($b.Name) never folded a card for round $round -- that round never finished on this peer"
+            if (-not $b.CardsAtTally.ContainsKey($round)) {
+                Add-Failure "$($b.Name) never folded round $round's card during its own Tally -- that round never finished on this peer"
             } else {
-                $rows += ,@{ Name = $b.Name; S = $b.Cards[$round] }
+                $rows += ,@{ Name = $b.Name; S = $b.CardsAtTally[$round] }
             }
         }
         if ($rows.Count -ne 2) { continue }
@@ -535,12 +554,13 @@ try {
             Add-Failure ("$($b.Name) folded round 2's card with matchOver=false -- two rounds is a whole " +
                          "match and the game never said who won")
         }
-        if (-not $b.Cards.ContainsKey(2)) { continue }
+        if (-not $b.CardsAtTally.ContainsKey(2)) { continue }
 
-        # The winner id equals whichever peer actually holds the higher total ON THE WIRE. The
-        # card decides the winner server-side; this asserts the two agree after a round trip,
-        # which is the failure a client-side recomputation would produce.
-        $s = $b.Cards[2]
+        # The winner id equals whichever peer actually holds the higher total ON THE WIRE, read
+        # at the one instant the live map and the card describe the same moment: while the match
+        # card is on screen. The card decides the winner server-side; this asserts the two agree
+        # after a round trip, which is the failure a client-side recomputation would produce.
+        $s = $b.CardsAtTally[2]
         $keys = @($s.roundScores.PSObject.Properties.Name)
         $best = ""; $bestVal = -1; $tie = $false
         foreach ($k in $keys) {
@@ -597,8 +617,35 @@ try {
         if ($nonZero.Count -gt 0) {
             Add-Failure ("$($b.Name): after the Start that begins match 2 the scores still read " +
                          "$([string]::Join(', ', $nonZero)) -- the new match inherited the old one's score")
+        }
+
+        # AND THE CARD STILL READS THE OLD RESULT. This is the other half, and it is the whole
+        # argument for freezing the totals onto the card instead of reading them off the live
+        # map: at this exact sample the map says 0-0 and the card must still say who won match 1.
+        # HOLD-1's board shows the last card during the next round, so a board built on the live
+        # map would print "X WON 0-0" from here on.
+        if ($null -eq $afterStart.roundTally) {
+            Add-Failure "$($b.Name): the card was cleared by the Start that began match 2 -- the last result is gone from the board"
+        } elseif ([int]$afterStart.roundTally.roundIndex -ne 2) {
+            Add-Failure ("$($b.Name): after the third Start the card is round $($afterStart.roundTally.roundIndex)'s, " +
+                         "not round 2's -- a new match should not produce a card")
+        } elseif (-not [bool]$afterStart.roundTally.matchOver) {
+            # Already reported above as "round 2's card with matchOver=false". Saying it a second
+            # time here as "the result is not frozen" would be a wrong diagnosis of the same
+            # fault -- there is no result to freeze on a card that is not a match end.
+            Write-Host "        $($b.Name) after the third Start: $($rows.Count) score row(s); card is not a match end (reported above)" -ForegroundColor DarkGray
         } else {
-            Write-Host "        $($b.Name) after the third Start: $($rows.Count) row(s), all zero" -ForegroundColor DarkGray
+            $ht = [int]$afterStart.roundTally.hiderTotal
+            $st = [int]$afterStart.roundTally.seekerTotal
+            if ($ht -eq 0 -and $st -eq 0) {
+                Add-Failure ("$($b.Name): the match card's own totals went to 0-0 when the scores reset -- the " +
+                             "result is not frozen, so the board loses it the moment the next match begins")
+            }
+            if ([string]$afterStart.roundTally.winnerPeerId -eq "0") {
+                Add-Failure "$($b.Name): the match card's winner went to 0 when the scores reset -- the result is not frozen"
+            }
+            Write-Host ("        $($b.Name) after the third Start: $($rows.Count) score row(s), all zero; " +
+                        "match card still reads $ht-$st, winner $($afterStart.roundTally.winnerPeerId)") -ForegroundColor DarkGray
         }
     }
 
