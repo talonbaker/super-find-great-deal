@@ -9,8 +9,15 @@
 
       1. Every bot process exited cleanly (exit code 0).
       2. Every bot saw all N players (itself + N-1 others).
-      3. Every bot actually moved (its own logged position travelled a minimum
-         distance from spawn), proving live data was replicated, not just spawns.
+      3. Every bot actually moved, measured as the LENGTH OF THE PATH it walked --
+         the sum of the per-sample steps in its own log -- rather than as its net
+         displacement from spawn. That distinction is the difference between a
+         world-independent assertion and one that is really about the size of the
+         room: this suite runs in the supermarket's 10 x 10 m holding room, where
+         a deterministic walk bounces off walls and ends up about 3.3 m from where
+         it started while having covered tens of metres. Net displacement would
+         have to be tuned per world; path length proves the same thing -- live
+         replicated data rather than a spawn packet -- and does not.
       4. For every observer/subject pair, the observer's final recorded position of
          the subject matches the subject's own final self-reported position within
          a tolerance (bots stand still for the last seconds so views converge).
@@ -26,7 +33,25 @@ param(
     [double]$DurationSec = 15,
     [int]$Port = 7777,
     [double]$ToleranceMeters = 0.75,
-    [double]$MinTravelMeters = 5.0,
+    # THE REAL WORLD BY DEFAULT (BASE-1, 2026-09-19), not the code-built "open" testbed this
+    # suite ran in before. The point of this suite is that replication works in the game people
+    # play, and the two worlds differ in exactly the ways that bite: the supermarket's rooms have
+    # walls and a ceiling, its spawn points come from authored markers rather than a phyllotaxis
+    # ring, and there are four of them rather than five. "open" is still reachable with
+    # -World open for a run that wants nothing but flat ground under the bots.
+    [string]$World = "supermarket",
+    # HOW FAR A BOT MUST WALK, and it is per world because it has to be. The deterministic bot
+    # brain walks RADIALLY OUTWARD from the world origin (DeterministicWalkIntentSource takes its
+    # heading from its own spawn position) until it has covered 15 m or run out of time. On the
+    # 64 m "open" slab it covers the lot, which is where 5.0 came from. In the supermarket it
+    # spawns in a 10 x 10 m room, walks into a corner and slides along the wall: 3.33 m, both
+    # bots, repeatably. The bar is therefore the room's, not the slab's.
+    #
+    # 2.0 m is not a weakened assertion. What this check exists to prove is that a bot's position
+    # is LIVE REPLICATED DATA rather than the spawn packet echoed back, and metres of movement
+    # proves that exactly as well as tens of metres do. What would weaken it is a bar so low that
+    # prediction jitter could clear it, and 2.0 m is two orders of magnitude above that.
+    [double]$MinTravelMeters = $(if ($World -eq "open") { 5.0 } else { 2.0 }),
     # Cross-platform Godot resolution: honour SAIL_GODOT/GODOT_BIN (CI points these at the
     # downloaded headless build), else the historical Windows console build, else the Linux
     # headless binary name. This script is standalone (it does not dot-source _Common.ps1), so
@@ -78,7 +103,7 @@ try {
     Write-Host "[3/5] launching dedicated server on udp/$Port..." -ForegroundColor Cyan
     $serverOut = Join-Path $logDir "server.out.log"
     $server = Start-Process -FilePath $GodotExe `
-        -ArgumentList @("--headless", "--path", $root, "--", "--server", "--port", $Port, "--world", "open") `
+        -ArgumentList @("--headless", "--path", $root, "--", "--server", "--port", $Port, "--world", $World) `
         -RedirectStandardOutput $serverOut `
         -RedirectStandardError (Join-Path $logDir "server.err.log") `
         -PassThru -NoNewWindow
@@ -106,7 +131,7 @@ try {
         $bot = Start-Process -FilePath $GodotExe `
             -ArgumentList @("--headless", "--path", $root, "--",
                 "--bot", "--address", "127.0.0.1:$Port", "--name", "Bot$i",
-                "--log", $jsonLog, "--duration", $DurationSec, "--world", "open") `
+                "--log", $jsonLog, "--duration", $DurationSec, "--world", $World) `
             -RedirectStandardOutput (Join-Path $logDir "bot$i.out.log") `
             -RedirectStandardError (Join-Path $logDir "bot$i.err.log") `
             -PassThru -NoNewWindow
@@ -172,7 +197,25 @@ foreach ($b in $bots) {
         Fail "bot$($b.Index) never had a sample containing all $BotCount players (it never saw the full roster)"
     }
 
-    $entry = @{ Index = $b.Index; View = @{}; Names = @{}; OwnFirst = $null; OwnLast = $null }
+    # The PATH this bot walked: the sum of its own per-sample steps, from the first sample that
+    # carries it to the last. Summed here, while every line is still in hand, because assertion 3
+    # below is about how far the bot went and not about where it ended up (see the description).
+    $pathLength = 0.0
+    $prev = $null
+    foreach ($line in $lines) {
+        $sample = $line | ConvertFrom-Json
+        $me = @($sample.peers | Where-Object { [long]$_.id -eq $selfId })
+        if ($me.Count -eq 0) { continue }
+        $cur = $me[0]
+        if ($null -ne $prev) {
+            $sdx = $cur.x - $prev.x
+            $sdz = $cur.z - $prev.z
+            $pathLength += [math]::Sqrt($sdx * $sdx + $sdz * $sdz)
+        }
+        $prev = $cur
+    }
+
+    $entry = @{ Index = $b.Index; View = @{}; Names = @{}; OwnFirst = $null; OwnLast = $null; PathLength = $pathLength }
     foreach ($p in $first.peers) {
         if ([long]$p.id -eq $selfId) { $entry.OwnFirst = $p }
     }
@@ -189,15 +232,16 @@ foreach ($b in $bots) {
 
 $failures = New-Object System.Collections.Generic.List[string]
 
-# 3. Everyone moved.
+# 3. Everyone moved. PATH LENGTH, not net displacement -- see the description.
 foreach ($selfId in $final.Keys) {
     $e = $final[$selfId]
     $dx = $e.OwnLast.x - $e.OwnFirst.x
     $dz = $e.OwnLast.z - $e.OwnFirst.z
-    $travel = [math]::Sqrt($dx * $dx + $dz * $dz)
-    if ($travel -lt $MinTravelMeters) {
-        $failures.Add(("bot{0} only travelled {1:F2}m (< {2}m) - movement/replication suspect" -f $e.Index, $travel, $MinTravelMeters))
+    $displacement = [math]::Sqrt($dx * $dx + $dz * $dz)
+    if ($e.PathLength -lt $MinTravelMeters) {
+        $failures.Add(("bot{0} walked a path of only {1:F2}m (< {2}m) - movement/replication suspect" -f $e.Index, $e.PathLength, $MinTravelMeters))
     }
+    Write-Host ("        bot{0}: path {1:F2}m, net displacement {2:F2}m" -f $e.Index, $e.PathLength, $displacement) -ForegroundColor DarkGray
 }
 
 # 4. Cross-view convergence: observer's view of subject vs subject's own view.

@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Runs the full Watis World headless scene-test suite and reports a single pass/fail.
+    Runs the full Super Find Great Deal headless scene-test suite and reports a single pass/fail.
     Zero human interaction; exit 0 only if every suite passes.
 
 .DESCRIPTION
@@ -32,7 +32,7 @@ param(
 $ErrorActionPreference = "Stop"
 . "$PSScriptRoot\_Common.ps1"
 
-Write-Host "=== Watis World full test suite ===" -ForegroundColor White
+Write-Host "=== Super Find Great Deal full test suite ===" -ForegroundColor White
 Write-Host "acquiring machine-wide full-suite lock..." -ForegroundColor DarkGray
 $suiteMutexWaitStart = Get-Date
 $suiteMutex = Enter-SuiteMutex -WaitTimeoutMinutes $MutexTimeoutMinutes
@@ -70,7 +70,6 @@ try {
         @{ Name = "Netcode: anti-cheat";                 Script = "Run-CheatTest.ps1" }
         @{ Name = "Netcode: arrive latch";               Script = "Run-ArriveLatchTest.ps1" }
         @{ Name = "Steam: transport logic";              Script = "Run-SteamLogicTest.ps1" }
-        @{ Name = "Authored props: adopted";             Script = "Run-AuthoredPropTest.ps1" }
         @{ Name = "Reconnect: grace window";             Script = "Run-ReconnectTest.ps1" }
         @{ Name = "Telemetry: module logic";             Script = "Run-TelemetryTest.ps1" }
         @{ Name = "World: tidal-cycle phase";            Script = "Run-CycleTest.ps1" }
@@ -78,72 +77,29 @@ try {
         @{ Name = "Session: room-code gate";             Script = "Run-RoomCodeTest.ps1" }
         @{ Name = "World: night-cycle bands";            Script = "Run-NightCycleTest.ps1" }
         @{ Name = "World: run driver";                   Script = "Run-RunDriverTest.ps1" }
-        @{ Name = "Net: wire-order probes";              Script = "Run-NetProbeTest.ps1" }
-        @{ Name = "Flow: playthrough spine";             Script = "Run-FlowTest.ps1" }
         @{ Name = "Aim substrate: stance replication";   Script = "Run-AimTest.ps1" }
-        @{ Name = "World: bubble test (BT-0)";           Script = "Run-BubbleTestWorldTest.ps1" }
-        @{ Name = "Water: lake contract (W2)";           Script = "Run-WaterTest.ps1" }
-        @{ Name = "Water: splash VFX + audio (W4)";      Script = "Run-WaterFxTest.ps1" }
         @{ Name = "Voice: proximity gate";               Script = "Run-VoiceGateTest.ps1" }
         @{ Name = "Host: failure routing";               Script = "Run-HostFailureTest.ps1" }
-        @{ Name = "Failure states (1c)";                 Script = "Run-IncapacityTest.ps1" }
         @{ Name = "Graphics: tier writer";               Script = "Run-GraphicsTierTest.ps1" }
-        @{ Name = "UI: flow screens (CORE-B1)";          Script = "Run-ScreenFlowTest.ps1" }
-        @{ Name = "UI: HUD layout law (PLAY-1)";         Script = "Run-HudLayoutTest.ps1" }
-        @{ Name = "Bubbles: shared counter";             Script = "Run-BubbleSyncTest.ps1" }
-        @{ Name = "World: TV portal (BT-10)";            Script = "Run-TvPortalTest.ps1" }
-        @{ Name = "Honk: proximity + anti-spam";         Script = "Run-HonkTest.ps1" }
-        @{ Name = "Bubbles: the last one";               Script = "Run-CelebrateTest.ps1" }
-        # MOVE-1 (2026-09-04): the movement lab and the bike came over from Sail. In Sail these
-        # three carried headers saying they were "deliberately NOT in Run-AllTests.ps1 - a lab
-        # suite for a prototype that ships nowhere". The bike is this repo's core hook and Talon
-        # feel-tests it live, so that reason expired: a bike regression turns the marathon red.
-        # Run-MovementPlayground takes -Headless, which is its scripted capture with no rasterizer
-        # and no PNG assertion, so the marathon keeps its headless zero-interaction promise.
-        @{ Name = "Movement lab: scripted run";          Script = "Run-MovementPlayground.ps1"; Args = @{ Headless = $true } }
-        @{ Name = "Bike: state machine";                 Script = "Run-BikeSelfTest.ps1" }
-        @{ Name = "Bike: handling model";                Script = "Run-BikeHandlingSelfTest.ps1" }
 
-        # --- LEVEL-1 (2026-09-04): three suites ported from Sail with the level content they
-        # prove. APPENDED, per the standing rule. None of them takes part in the join-index
-        # spawn dealing EXCEPT the night gate, which drives bots and is therefore last of all.
+        # --- BASE-1 (2026-09-19): the supermarket world ---
+        # Appended, per the standing rule that a new suite goes LAST rather than into the middle
+        # of the order. It takes no part in the join-index spawn dealing above -- no server, no
+        # bots, no network at all -- so its position is free and the rule is what decides it.
+        @{ Name = "World: supermarket (BASE-1)";         Script = "Run-SupermarketWorldTest.ps1" }
 
-        # --- LD-6 (2026-09-02): the affordance kit's scene self-test ---
-        # No ports, no bots, no dedicated server, no world build - two short python runs and two
-        # headless `--script` boots that instantiate scenes/dev/KitCourse.tscn and quit
-        # themselves.
+        # WHAT WAS REMOVED HERE AT THE FORK (BASE-1, 2026-09-19), so a reader of an old handoff
+        # can tell "deleted" from "lost": the bubble-test world, the shared bubble counter and the
+        # last-bubble celebration, the TV portal, the Puffin Lab, the watcher's night gate, the
+        # water contract and its splash FX, the failure states, the honk, the playthrough-flow
+        # spine and its screens, the HUD layout law, the wire-order probes, the authored-prop
+        # adoption proof, the movement lab and both bike suites, and the affordance-kit course.
+        # Every one of them tested something this repo no longer ships.
         #
-        # The second boot is a POSITIVE CONTROL and is EXPECTED to exit 1: the suite feeds the
-        # self-test a scene the generator emitted with one Wedge deliberately mirrored, and fails
-        # if the self-test accepts it. That control exists because the first KitCourse.tscn
-        # shipped with all 22 of its rotated pieces mirrored and the generator's own validator
-        # passed it - a checker built the way its subject was built agrees with it, wrong sign
-        # and all. See the script header and docs/levels/KIT.md.
-        @{ Name = "Level: the kit (LD-6)";               Script = "Run-KitCourseTest.ps1" }
-
-        # --- EGG-1 (2026-09-02): the Puffin Lab throwback ---
-        # A single headless boot that instantiates scenes/game/world/puffinlab/PuffinLab.tscn,
-        # runs two absence checks (each with its own positive control), measures the live
-        # avatar's capsule against every station of the route, and quits itself.
-        #
-        # It re-measures the fit against the LIVE player model every run, which is the reason it
-        # is in the marathon rather than run once by hand: the ported rooms are scaled to admit a
-        # 1.20 m avatar through a 1.05 m door, and the day the player model changes height this
-        # goes red instead of the easter egg going quietly impassable.
-        @{ Name = "Egg: puffin lab (EGG-1)";             Script = "Run-PuffinLabTest.ps1" }
-
-        # --- EGG-2 (2026-09-02): the night-only creature in the Bubble Test ---
-        # It drives bots, so it belongs LAST among the bot suites. TWO dedicated servers on
-        # 45871/45873 (both outside the 78xx block everything else here uses), one after the
-        # other, never at the same time.
-        #
-        # IT IS A PAIR AND THAT IS THE POINT. The day half is an ABSENCE check -- no sighting at
-        # noon -- and an absence proves nothing without a control, because a broken build, a bot
-        # that never connected and a correctly-gated day all produce the identical empty log. The
-        # midnight half is that control, in the same script, on the same tree, one flag apart, and
-        # the script fails if EITHER half is missing.
-        @{ Name = "Watcher: night gate";                 Script = "Run-WatcherNightGateTest.ps1" }
-        # --- end LEVEL-1 ---
+        # TWO OF THOSE ARE OWED BACK RATHER THAN GONE, and they are named because a following lane
+        # will need them: the AUTHORED-PROP adoption proof belongs with SHELF-1's hundred props,
+        # and Run-CarryNetTest's removed PHASE 3 -- a prop surviving its holder's teleport --
+        # belongs with ROUND-1's phase-driven room changes. See the note in that script.
     )
 
     $results = @()

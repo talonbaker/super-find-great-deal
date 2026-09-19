@@ -108,7 +108,21 @@ public sealed partial class SupermarketWorldSelfTest : Node3D
                 $"room '{room}' has {got.Count} {prefix}_n marker(s); the contract says {want}. "
                 + "A missing marker strands a player and a duplicate desyncs spawn order across "
                 + "peers — both are this check's business.");
-            GD.Print($"{Prefix}   {room,-10} {got.Count}/{want} markers, first at "
+            // THE NUMBERING, not just the count. These markers are sorted by the number in the
+            // name to fix spawn order across peers, so 0..n-1 exactly is the contract: a marker
+            // renamed _3 -> _9 keeps the count and breaks the numbering, and a typo that drops
+            // the underscore silently removes a spawn point. This check catches both.
+            IReadOnlyList<int> indices = _world.MarkerIndicesFor(room);
+            var wanted = new List<int>();
+            for (int i = 0; i < want; i++)
+                wanted.Add(i);
+            Check(indices.Count == want && IsSequence(indices),
+                $"room '{room}' numbers its markers [{string.Join(", ", indices)}]; the contract "
+                + $"is [{string.Join(", ", wanted)}]. Spawn order is the number in the name, and "
+                + "every peer builds its own copy of this world — a gap or a duplicate here is "
+                + "two peers disagreeing about where a player stands.");
+            GD.Print($"{Prefix}   {room,-10} {got.Count}/{want} markers "
+                     + $"[{string.Join(",", indices)}], first at "
                      + (got.Count > 0 ? got[0].ToString() : "(none)"));
         }
 
@@ -175,6 +189,15 @@ public sealed partial class SupermarketWorldSelfTest : Node3D
             GD.Print($"{Prefix}   {path.Substring(path.LastIndexOf('/') + 1),-18} "
                      + $"packed={packedCount} live={liveCount}");
         }
+    }
+
+    /// <summary>True if the list is exactly 0, 1, 2, ... in order.</summary>
+    private static bool IsSequence(IReadOnlyList<int> indices)
+    {
+        for (int i = 0; i < indices.Count; i++)
+            if (indices[i] != i)
+                return false;
+        return true;
     }
 
     private static int CountNodes(Node from)

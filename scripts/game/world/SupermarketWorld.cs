@@ -91,6 +91,7 @@ public partial class SupermarketWorld : Node3D, IGameWorld
     public Godot.Collections.Array<Vector3> SpawnPoints { get; } = new();
 
     private readonly Dictionary<string, List<Vector3>> _byRoom = new();
+    private readonly Dictionary<string, List<int>> _indexByRoom = new();
 
     public override void _Ready()
     {
@@ -130,9 +131,14 @@ public partial class SupermarketWorld : Node3D, IGameWorld
             CollectMarkers(this, prefix, found);
             found.Sort((a, b) => a.Index.CompareTo(b.Index));
             var positions = new List<Vector3>(found.Count);
-            foreach ((int _, Vector3 pos) in found)
+            var indices = new List<int>(found.Count);
+            foreach ((int index, Vector3 pos) in found)
+            {
                 positions.Add(pos);
+                indices.Add(index);
+            }
             _byRoom[room] = positions;
+            _indexByRoom[room] = indices;
         }
     }
 
@@ -151,4 +157,19 @@ public partial class SupermarketWorld : Node3D, IGameWorld
     /// Empty for an unknown key.</summary>
     public static string PrefixFor(string room) =>
         MarkerPrefixes.TryGetValue(room, out string? p) ? p : "";
+
+    /// <summary>
+    /// The marker INDICES found for a room, in the order they were sorted, for the self-test.
+    ///
+    /// <para><b>Why the indices and not just the count.</b> A count alone says nothing about the
+    /// numbering, and the numbering is the whole contract: these markers are sorted by the number
+    /// in the name so that every peer — each of which builds its own copy of this world — agrees
+    /// on spawn ORDER, and <c>Gameplay.SpawnPlayer</c> indexes the array by join order. A marker
+    /// renamed from <c>_3</c> to <c>_9</c> keeps the count at four and is invisible to a count
+    /// check, while a typo that drops the underscore silently removes a spawn point. Requiring
+    /// 0..n-1 exactly catches both, and it is the check that was planted to prove this test can
+    /// fail at all.</para>
+    /// </summary>
+    public IReadOnlyList<int> MarkerIndicesFor(string room) =>
+        _indexByRoom.TryGetValue(room, out List<int>? list) ? list : System.Array.Empty<int>();
 }
