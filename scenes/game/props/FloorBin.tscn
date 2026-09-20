@@ -1,7 +1,8 @@
-[gd_scene load_steps=11 format=3 uid="uid://floorbin0sfgdmvp"]
+[gd_scene load_steps=12 format=3 uid="uid://floorbin0sfgdmvp"]
 
 [ext_resource type="Script" path="res://scripts/game/sandbox/Carryable.cs" id="1_carryable"]
 [ext_resource type="Script" path="res://scripts/game/sandbox/feel/Interactable.cs" id="2_interactable"]
+[ext_resource type="PackedScene" path="res://scenes/game/props/BinMound.tscn" id="3_mound"]
 
 ; A shop-fixture blue-grey: not a wall colour, not a shelf colour, and not any product's colour,
 ; so a bin reads as the one thing in the aisle that is furniture you can pick up. Emission is ON
@@ -151,3 +152,18 @@ material_override = SubResource("Mat_bin")
 
 [node name="Interactable" type="Node" parent="."]
 script = ExtResource("2_interactable")
+
+; STOCK-1 (2026-09-20) -- THE ORANGES. Talon asked for "piles of fruit in bins and crates", and
+; this is where they live: one MultiMesh of 29 produce instances, generated from ShelfStock's
+; arithmetic and asserted against it by StockBakeTests. Read BinMound.tscn's own header for why
+; it carries NO COLLISION -- in one line, because a mound collider would delete the "hide the
+; crate under a tipped bin" affordance SHELF-1's bible check closed INTERACTION S3 on, and there
+; is no half-fill that keeps it.
+;
+; IT IS A CHILD OF THE ROOT, NOT OF Visual. Carryable._Ready looks up "Visual/MeshInstance3D" by
+; NAME to clone its outline shell from, and adds the shell as a sibling inside Visual; a
+; MultiMeshInstance3D in there would be a second mesh in the one place this prefab's own code
+; goes looking. At the root it is invisible to all four of the collider/mesh lookups this
+; prefab's header lists, and its transform is the bin's base, which is the space the mound's
+; own coordinates are in.
+[node name="BinMound" parent="." instance=ExtResource("3_mound")]

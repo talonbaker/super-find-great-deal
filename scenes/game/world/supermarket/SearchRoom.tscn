@@ -1,4 +1,4 @@
-[gd_scene load_steps=40 format=3]
+[gd_scene load_steps=41 format=3]
 
 ; BASE-1 (2026-09-19) — THE SEARCH ROOM. 14 x 10 x 3.5 m interior box, same construction as
 ; HoldingRoom.tscn (read that file's header for the convention and for why nothing here may be
@@ -25,6 +25,7 @@
 [ext_resource type="PackedScene" path="res://scenes/game/props/Can.tscn" id="13_can"]
 [ext_resource type="PackedScene" path="res://scenes/game/props/CerealBox.tscn" id="14_box"]
 [ext_resource type="PackedScene" path="res://scenes/game/props/Produce.tscn" id="15_produce"]
+[ext_resource type="PackedScene" path="res://scenes/game/world/supermarket/StockBulk.tscn" id="16_bulk"]
 
 ; BTN-1 (2026-09-19) — the drop-off bin and the CONFIRM button, both authored at the bottom of
 ; this file so this room's packed-vs-live node count covers them.
@@ -1453,3 +1454,27 @@ pixel_size = 0.0018
 text = "I'M DONE HIDING"
 font_size = 96
 outline_size = 18
+
+; =============================================================================================
+; STOCK-1 (2026-09-20) -- THE BULK STOCK, one instance, at the room's own origin.
+;
+; Talon: "Supermarket shelves are extremely filled: three or four items behind each one in every
+; row; boxes stacked one behind the other; piles of fruit in bins and crates. I need to see MORE
+; overall -- more to hide in, from and around."
+;
+; Everything above this banner is unchanged. The 120 carryable products stay exactly where
+; SHELF-1 put them, with exactly the ids SHELF-1 numbered them, because they are still the front
+; row of every board and still the only things in this room a hand can pick up. What StockBulk
+; adds is the stock BEHIND them -- non-networked, non-physics MultiMesh instances the server
+; never simulates and the wire never carries -- plus two floor pallet stacks against the end
+; walls. SHELF-1 S7 is why it is not more carryables: 130 networked RigidBody3D at rest is
+; already 84 % of the 8 ms server bar on the worse of two runs.
+;
+; IT CHANGES NO PROP ID. PropManager.AdoptAuthoredProps collects NetworkedProp nodes and sorts
+; THOSE by node path; StockBulk contains none, so the block 1000..1129 is untouched. That is
+; asserted by tests/Run-AuthoredPropTest.ps1 and by AuthoredPropOrderTests, not assumed here.
+;
+; The file is GENERATED (SFGD_BAKE_STOCK=1 dotnet test) and checked against the arithmetic that
+; generated it by StockBakeTests. Read ShelfStock.cs, not the floats.
+; =============================================================================================
+[node name="StockBulk" parent="." instance=ExtResource("16_bulk")]
