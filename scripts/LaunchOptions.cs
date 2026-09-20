@@ -649,6 +649,39 @@ public sealed class LaunchOptions
     private readonly List<(string Verb, string Value, double AtSec)> _roundScript = new();
     // --- end ROUND-1 ------------------------------------------------------------------------------
 
+    // --- the round buttons (BTN-1, 2026-09-19) ----------------------------------------------------
+    /// <summary>
+    /// <c>--press "start@6,start@14,confirm@30"</c>: <b>a BOT flag</b> that fires the shipped
+    /// press verb at the given elapsed seconds of this bot's own clock. Entries are
+    /// <c>&lt;start|confirm|end&gt;@&lt;seconds&gt;</c>, comma separated; empty (every real
+    /// launch, and every existing suite) means nothing is scheduled and nothing costs anything.
+    ///
+    /// <para><b>It drives the SHIPPED verb</b> — <c>RoundControls.ClientRequestPress</c>, the
+    /// same method <c>RoundButton.Press</c> calls when a human presses Interact — so what a suite
+    /// built on it exercises is the real gate, the real fact latch and the real broadcast. That
+    /// is the first of the two rules <c>BotHarness</c>'s own comment left for this lane, written
+    /// out of the retired honk probes: a scripted press through a test-only hook proves things
+    /// about the harness.</para>
+    ///
+    /// <para><b>The second rule does not apply here, and it is worth saying why.</b> That comment
+    /// warns that a rule the server enforces and the client MIRRORS needs a deliberately
+    /// non-compliant client to reach the authoritative copy. There is no mirror to defeat:
+    /// <c>RoundButton.Press</c> asks unconditionally, with no local gate and no debounce — the
+    /// client never decides whether a press is allowed — so the shipped verb already reaches the
+    /// server on every press, including the ones that will be refused. This flag can therefore
+    /// stage a refusal by pressing at the wrong moment, which is exactly what the suite does.</para>
+    ///
+    /// <para><b>Elapsed seconds, and the suite must treat them as a BUDGET.</b> Anchoring a
+    /// press on an observed event (the way <c>--carry-place</c> anchors on an observed hold)
+    /// would be better and is not possible for the interesting case: the first press of the
+    /// BTN-1 smoke has to land when the OTHER BOT IS NOT THERE, which is an absence, and the
+    /// only clock either process shares at that point is its own. Every assertion downstream is
+    /// anchored on a server log line instead.</para>
+    /// </summary>
+    public IReadOnlyList<(string Kind, double AtSec)> PressScript => _pressScript;
+    private readonly List<(string Kind, double AtSec)> _pressScript = new();
+    // --- end BTN-1 --------------------------------------------------------------------------------
+
     // --- REACH-1 (2026-09-19): placement integrity layers 2 and 3 ---------------------------------
 
     /// <summary><c>--reach-target &lt;propId&gt;</c>: server-only. Names the prop the round is
@@ -1363,6 +1396,40 @@ public sealed class LaunchOptions
                     break;
                 }
                 // --- end L1 ------------------------------------------------------------------
+                case "--press":
+                {
+                    // "<start|confirm|end>@<seconds>[,...]". A malformed entry is DROPPED with a
+                    // warning rather than defaulted to t=0, the same call --round-script and
+                    // --seed-test-props already make: a press silently firing on the first frame
+                    // is a fixture in the wrong place, and the suite would then fail on the round
+                    // rather than on its own arguments.
+                    foreach (string raw in Next(args, ref i).Split(','))
+                    {
+                        string entry = raw.Trim();
+                        if (entry.Length == 0)
+                            continue;
+                        int at = entry.LastIndexOf('@');
+                        if (at <= 0 || !double.TryParse(entry[(at + 1)..], NumberStyles.Float,
+                                CultureInfo.InvariantCulture, out double sec) || sec < 0)
+                        {
+                            GD.PushWarning($"[buttons] --press: dropped malformed entry '{entry}' " +
+                                           "(expected <start|confirm|end>@<seconds>)");
+                            continue;
+                        }
+                        string kind = entry[..at].Trim().ToLowerInvariant();
+                        if (kind is not ("start" or "confirm" or "end"))
+                        {
+                            GD.PushWarning($"[buttons] --press: dropped entry '{entry}' — " +
+                                           "the buttons are start, confirm and end");
+                            continue;
+                        }
+                        options._pressScript.Add((kind, sec));
+                    }
+                    // Sorted so the harness walks one cursor forward, exactly as CaptureAtSec is.
+                    options._pressScript.Sort((a, b) => a.AtSec.CompareTo(b.AtSec));
+                    break;
+                }
+                // --- end BTN-1 ---------------------------------------------------------------
                 // --- perf followups (2026-08-07) -------------------------------------------
                 case "--net-stats":
                     options.NetStatsLog = Next(args, ref i);

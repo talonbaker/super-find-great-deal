@@ -120,6 +120,16 @@ try {
         # unavoidable; the alternative was four suites on four ports.
         @{ Name = "Reach: placement integrity (REACH-1)"; Script = "Run-ReachTest.ps1" }
 
+        # BTN-1 (2026-09-19). THREE server launches on its own port (7906), one of them with
+        # three bots, so like the suite above it takes part in the join-index spawn dealing and
+        # belongs after everything that does not. About two minutes.
+        #
+        # Its first phase is the only suite in this registry that drives the round WITHOUT
+        # --round-script: a bot walks to the rack, picks an object up and presses a real button,
+        # and the round starts because the button said so. That is the one thing no other suite
+        # here can report on, and it is why this one is worth its two minutes.
+        @{ Name = "Round: buttons + drop-off bin (BTN-1)"; Script = "Run-ButtonsTest.ps1" }
+
         # WHAT WAS REMOVED HERE AT THE FORK (BASE-1, 2026-09-19), so a reader of an old handoff
         # can tell "deleted" from "lost": the bubble-test world, the shared bubble counter and the
         # last-bubble celebration, the TV portal, the Puffin Lab, the watcher's night gate, the
