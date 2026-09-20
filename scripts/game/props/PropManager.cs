@@ -643,8 +643,30 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
         // Resting mutates the registry mid-iteration, but the snapshot itself doesn't need to be
         // a new heap allocation every single tick (see RISK-AUDIT-2026-07-12.md 2.2). Early-out
         // entirely when nothing is Loose - the common case is zero loose props on most ticks.
+        // PROBE-1 (2026-09-20): ASK THE STORE HOW MANY ARE LOOSE INSTEAD OF COUNTING THEM.
+        //
+        // The walk below is O(every prop in the world) and its own comment above says the common
+        // case is that none of them is loose — so on an asleep room it was paying the whole cost
+        // of the loop to learn there was no loop to run, sixty times a second. Worse than the
+        // iteration: `_registry.All` is an IReadOnlyCollection, so `foreach` over it boxes an
+        // enumerator on the heap every tick and copies each 64-byte PropState struct through the
+        // interface. AllValues is the same collection typed concretely, which gets the
+        // dictionary's struct enumerator and allocates nothing.
+        //
+        // The two Remove calls in the `else` branch are pure cleanup of two dictionaries that can
+        // only ever contain ids that WERE loose, so skipping the walk when nothing is loose
+        // cannot leak: the last prop to leave Loose is cleaned up by the pass that saw it leave.
+        // Belt and braces, both dictionaries are cleared on the zero edge.
+        if (PropCostSwitches.LooseIndex && _registry.LooseCount == 0)
+        {
+            if (_looseSettle.Count > 0)
+                _looseSettle.Clear();
+            if (_lastStreamed.Count > 0)
+                _lastStreamed.Clear();
+            return;
+        }
         _loosePropsScratch.Clear();
-        foreach (PropState p in _registry.All)
+        foreach (PropState p in _registry.AllValues)
         {
             if (p.Mode == PropMode.Loose)
                 _loosePropsScratch.Add(p);
