@@ -75,13 +75,20 @@ public sealed class PropRegistry
     }
 
     /// <summary>Releases a held prop into <see cref="PropMode.Loose"/> at <paramref name="at"/>
-    /// (both a drop and a throw go through here; the impulse is applied by the caller). Returns
-    /// false unless the prop is currently held.</summary>
-    public bool Release(int id, Transform3D at)
+    /// (drop, throw and place all go through here; the impulse is applied by the caller).
+    /// Returns false unless the prop is currently held.
+    ///
+    /// <para><paramref name="release"/> records WHICH verb did it (SFX-2). Defaulted, so a
+    /// caller with no verb to report - a fixture, a test - stores
+    /// <see cref="PropRelease.None"/> rather than guessing at one. The stored value is the
+    /// registry's answer to "how did this come to be loose"; what goes on the wire is chosen by
+    /// the broadcast, and the late-join dump deliberately sends None whatever this says (see
+    /// <c>PropManager.SendDumpTo</c>).</para></summary>
+    public bool Release(int id, Transform3D at, PropRelease release = PropRelease.None)
     {
         if (!_props.TryGetValue(id, out PropState s) || s.Mode != PropMode.Held)
             return false;
-        _props[id] = s.AsLoose(at);
+        _props[id] = s.AsLoose(at, release);
         return true;
     }
 

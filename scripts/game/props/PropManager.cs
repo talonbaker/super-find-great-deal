@@ -1,5 +1,6 @@
 using Godot;
 using MpFoundation.Net;
+using MpFoundation.Game.Presentation;
 using MpFoundation.Game.Sandbox;
 
 namespace MpFoundation.Game.Props;
@@ -277,7 +278,11 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
         Transform3D settled = audit.Corrected ? audit.To : at;
         _registry.SetResting(propId, settled);
         node.SettleToRest(settled);
-        Rpc(MethodName.ApplyPropState, propId, (int)PropMode.Resting, 0, settled);
+        // PropRelease.None (SFX-2's table: every Resting broadcast is None). A settle is the END
+        // of a release, not a release — the verb that started this roll was announced when the
+        // prop went Loose, and re-announcing it here would clank a second time on every peer.
+        Rpc(MethodName.ApplyPropState, propId, (int)PropMode.Resting, 0, settled,
+            (int)PropRelease.None);
         _looseSettle.Remove(propId);
         _lastStreamed.Remove(propId);
         RestLatched?.Invoke(propId, audit);
@@ -306,7 +311,10 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
         // HELD, which is correct for it and is exactly what this hook needs to get past — the
         // planted room has no players in it. See PropRegistry.SetLoose's own note.
         _registry.SetLoose(propId, at);
-        Rpc(MethodName.ApplyPropState, propId, (int)PropMode.Loose, 0, at);
+        // PropRelease.None (SFX-2). Nobody dropped, placed or threw this — a scripted impulse
+        // shoved a RESTING prop, which is not one of the four release verbs. The sound this
+        // produces is the impact when it lands, which SFX-2's PropImpact event carries.
+        Rpc(MethodName.ApplyPropState, propId, (int)PropMode.Loose, 0, at, (int)PropRelease.None);
         node.BeginLooseServer(impulse);
     }
 
@@ -404,6 +412,26 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
     // returns them here rather than despawning them (they were never spawner-spawned).
     private readonly System.Collections.Generic.Dictionary<int, Transform3D> _adoptedInitial = new();
 
+    // Server-only impact queue (SFX-2): contacts accepted by Carryable during the last physics
+    // step, waiting to be ranked and announced at the top of the next one. Persistent, like
+    // _loosePropsScratch above and for the same reason - a shelf collapse must not allocate a
+    // fresh list 60 times a second.
+    private readonly System.Collections.Generic.List<ImpactBudget.PendingImpact> _pendingImpacts = new();
+
+    // Running totals for the budget measurement the packet asks for: how many contacts the
+    // server was offered against how many it actually sent. Server-only, printed on the tick
+    // that drops something so a suite can aggregate without a shutdown hook (a --server process
+    // has no BotHarness.Finish to print a summary from).
+    private long _impactsOffered;
+    private long _impactsSent;
+
+    // The largest number of contacts any single tick has offered. Tracked because a cap that is
+    // never reached reports NOTHING, and "the limiter never engaged" is indistinguishable in a
+    // log from "the limiter is not wired up". Measured on the 40-prop heap: the peak offer was
+    // under the cap, so the per-body 0.4 s cooldown -- not this cap -- is what bounds that
+    // fixture. That is a finding, and it needs a number rather than a silence.
+    private int _impactsPeakOffered;
+
     public override void _ExitTree()
     {
         if (Instance == this)
@@ -499,7 +527,7 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
         if (s.Mode == PropMode.Held)
         {
             Transform3D at = NodeFor(propId)?.Body.GlobalTransform ?? s.Transform;
-            Rpc(MethodName.ApplyPropState, propId, (int)PropMode.Resting, 0, at);
+            Rpc(MethodName.ApplyPropState, propId, (int)PropMode.Resting, 0, at, (int)PropRelease.None);
         }
         NodeFor(propId)?.QueueFree();
         return true;
@@ -574,8 +602,10 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
             // budget measures is the real Loose pipeline rather than a test-only shortcut.
             Transform3D pose = node.Body.GlobalTransform;
             _registry.SetHolder(id, 1);
-            _registry.Release(id, pose);
-            Rpc(MethodName.ApplyPropState, id, (int)PropMode.Loose, 0, pose);
+            // Dropped: nothing threw these, they are let go where they were seeded.
+            _registry.Release(id, pose, PropRelease.Dropped);
+            Rpc(MethodName.ApplyPropState, id, (int)PropMode.Loose, 0, pose,
+                (int)PropRelease.Dropped);
             node.DropLooseServer();
             dropped++;
         }
@@ -592,6 +622,11 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
     {
         if (!_isServer)
             return;
+        // BEFORE the loose-prop early-out below, deliberately: contacts are reported during the
+        // previous step's physics flush, and the props that made them may have settled to
+        // Resting since - a can that lands and stops is exactly the case whose clank must not be
+        // swallowed because nothing is Loose any more on the tick we get round to sending it.
+        FlushImpacts();
         StepSeededDrop(delta);
         _streamTick++;
         // Reuse a persistent scratch list instead of allocating a fresh List<PropState> every
@@ -641,7 +676,12 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
                 Transform3D home = oob.To;
                 _registry.SetResting(p.Id, home);
                 node.SettleToRest(home);
-                Rpc(MethodName.ApplyPropState, p.Id, (int)PropMode.Resting, 0, home);
+                // PropRelease.None (SFX-2's table): the kill-plane recovery is a world repair,
+                // not a release verb. Nobody dropped, placed or threw this prop — it fell out of
+                // the world and the server put it back — so the wire carries no event and the
+                // material stays silent. The audit line is the record of the move.
+                Rpc(MethodName.ApplyPropState, p.Id, (int)PropMode.Resting, 0, home,
+                    (int)PropRelease.None);
                 _looseSettle.Remove(p.Id);
                 _lastStreamed.Remove(p.Id);
                 RestLatched?.Invoke(p.Id, oob);
@@ -813,7 +853,7 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
             if (p.Mode == PropMode.Held)
             {
                 Transform3D at = NodeFor(p.Id)?.Body.GlobalTransform ?? p.Transform;
-                Rpc(MethodName.ApplyPropState, p.Id, (int)PropMode.Resting, 0, at);
+                Rpc(MethodName.ApplyPropState, p.Id, (int)PropMode.Resting, 0, at, (int)PropRelease.None);
             }
         }
         foreach (int id in runtimeIds)
@@ -826,7 +866,12 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
         foreach (System.Collections.Generic.KeyValuePair<int, Transform3D> kv in _adoptedInitial)
         {
             _registry.SetResting(kv.Key, kv.Value);
-            Rpc(MethodName.ApplyPropState, kv.Key, (int)PropMode.Resting, 0, kv.Value);
+            // THE RESET EDGE IS None, NOT Dropped (SFX-2, and the packet says so in as many
+            // words). Every prop in the world going back to its authored transform between rounds
+            // is a world REARRANGEMENT; announcing it as forty simultaneous drops would be the
+            // loudest lie this system could tell, in a game where the other player is navigating
+            // by what they can hear through a wall.
+            Rpc(MethodName.ApplyPropState, kv.Key, (int)PropMode.Resting, 0, kv.Value, (int)PropRelease.None);
         }
 
         // 2. The initial dump, again — exactly as session start seeded it. This is the line that
@@ -1009,7 +1054,7 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
             DenyGrab(peer, GrabDenial.Taken); // someone else won the race
             return;
         }
-        Rpc(MethodName.ApplyPropState, propId, (int)PropMode.Held, peer, node.GlobalTransform);
+        Rpc(MethodName.ApplyPropState, propId, (int)PropMode.Held, peer, node.GlobalTransform, (int)PropRelease.None);
     }
 
     /// <summary>
@@ -1070,7 +1115,7 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
         int peer = Multiplayer.GetRemoteSenderId();
         if (peer <= 0 || ControlDenied(peer))
             return;
-        ReleaseHeldInto(peer, DropForwardSpeed, DropUpSpeed);
+        ReleaseHeldInto(peer, DropForwardSpeed, DropUpSpeed, PropRelease.Dropped);
     }
 
     /// <summary>
@@ -1184,8 +1229,11 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
         // that immediately goes wrong (knocked by something already falling) still has somewhere
         // honest for REACH-1 to put it back to.
         node.NoteLastGood(at);
-        _registry.Release(propId, at);
-        Rpc(MethodName.ApplyPropState, propId, (int)PropMode.Loose, 0, at);
+        // PLACED, and this is the funnel the packet names. Everything else about the release is
+        // identical to a drop's; the byte is the only thing that tells the other player's client
+        // to tick the can's rim down instead of whooshing it away.
+        _registry.Release(propId, at, PropRelease.Placed);
+        Rpc(MethodName.ApplyPropState, propId, (int)PropMode.Loose, 0, at, (int)PropRelease.Placed);
         node.PlaceLooseServer(at);
     }
 
@@ -1228,7 +1276,8 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
         if (peer <= 0 || ControlDenied(peer))
             return;
         float scale = ThrowScale;
-        ReleaseHeldInto(peer, ThrowForwardSpeed * scale, ThrowUpSpeed * scale, alongAim: true);
+        ReleaseHeldInto(peer, ThrowForwardSpeed * scale, ThrowUpSpeed * scale,
+            PropRelease.Thrown, alongAim: true);
     }
 
     /// <summary>Headless-test staging knob (--carry-throw-scale on the SERVER, since the server —
@@ -1249,11 +1298,13 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
 
     /// <summary>Server: drop/throw arbitration. Releases whatever is in the peer's hand into
     /// Loose. No-op if there is nothing to release.</summary>
-    private void ReleaseHeldInto(int peer, float forwardSpeed, float upSpeed, bool alongAim = false)
+    private void ReleaseHeldInto(int peer, float forwardSpeed, float upSpeed,
+        PropRelease release, bool alongAim = false)
     {
         if (!_heldByPeer.TryGetValue(peer, out int propId))
             return;
-        ReleaseIntoLooseDirected(propId, peer, forwardSpeed, upSpeed, yawOffsetRad: 0f, alongAim);
+        ReleaseIntoLooseDirected(propId, peer, forwardSpeed, upSpeed, yawOffsetRad: 0f, release,
+            alongAim);
     }
 
     /// <summary>Server: releases ONE prop into Loose at its current held transform, with an
@@ -1287,8 +1338,12 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
     /// alternative — replicating the spring's velocity — would make the length of a throw a number
     /// the client reports about itself, which is the one shape
     /// <c>RISK-AUDIT-2026-07-12.md 4.1</c> says never to trust.</para></param>
+    /// <param name="release">Which verb this was, for the presentation layer on EVERY peer
+    /// (SFX-2). The one place a drop, a throw and a scatter differ that a remote client can
+    /// perceive — the impulse they differ by is the server's own arithmetic and never crosses
+    /// the wire as anything but a transform stream.</param>
     private void ReleaseIntoLooseDirected(int propId, int peer, float forwardSpeed, float upSpeed,
-        float yawOffsetRad, bool alongAim = false)
+        float yawOffsetRad, PropRelease release, bool alongAim = false)
     {
         NetworkedProp? node = NodeFor(propId);
         if (node == null || !_registry.TryGet(propId, out PropState p) || p.Mode != PropMode.Held)
@@ -1311,8 +1366,8 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
             fwd = fwd.Rotated(Vector3.Up, yawOffsetRad);
         Vector3 impulse = fwd * forwardSpeed + Vector3.Up * upSpeed;
         Transform3D at = node.Body.GlobalTransform;
-        _registry.Release(propId, at);
-        Rpc(MethodName.ApplyPropState, propId, (int)PropMode.Loose, 0, at);
+        _registry.Release(propId, at, release);
+        Rpc(MethodName.ApplyPropState, propId, (int)PropMode.Loose, 0, at, (int)release);
         node.BeginLooseServer(impulse);
     }
 
@@ -1326,7 +1381,8 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
     /// other), and that transition must still empty the hand — otherwise <see cref="FindHeldBy"/>
     /// would keep answering with an id whose node has been freed.</summary>
     [Rpc(MultiplayerApi.RpcMode.Authority, TransferMode = MultiplayerPeer.TransferModeEnum.Reliable, CallLocal = true)]
-    private void ApplyPropState(int propId, int mode, int holderPeerId, Transform3D transform)
+    private void ApplyPropState(int propId, int mode, int holderPeerId, Transform3D transform,
+        int release)
     {
         if ((PropMode)mode == PropMode.Held)
         {
@@ -1386,7 +1442,11 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
                 // The reliable transition: begin following the stream. On the server this is
                 // immediately superseded by BeginLooseServer unfreezing the body right after
                 // this call returns.
-                node.BeginLoose(transform);
+                //
+                // SFX-2: and it carries WHY. PropReleaseWire.Decode, not a raw cast — the int is
+                // whatever a peer sent, and an ordinal this build has no member for must become
+                // None (silence) rather than aliasing onto a verb that happens to share its bits.
+                node.BeginLoose(transform, PropReleaseWire.Decode(release));
                 break;
         }
     }
@@ -1400,6 +1460,103 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
     /// itself is the source of truth and never applies its own broadcast (CallLocal is off).</summary>
     [Rpc(MultiplayerApi.RpcMode.Authority, TransferMode = MultiplayerPeer.TransferModeEnum.Unreliable, TransferChannel = NetCodec.PropChannel)]
     private void StreamLoose(int propId, Transform3D t) => NodeFor(propId)?.ApplyLooseStream(t);
+
+    // --- Prop impacts: server -> everyone, unreliable, its own channel (SFX-2) -------------
+    //
+    // WHY THIS EXISTS AT ALL, in one line: in a two-player hide-and-seek game the seeker's only
+    // remote sense of the hider is what they can hear through a wall, and until this packet a
+    // can knocked off a shelf was audible to exactly one player. Godot reports a frozen
+    // kinematic body no contact, and a Loose prop on a non-authority peer is exactly that, so
+    // the other client could not derive the event however hard it looked. SFX-1 measured it,
+    // wrote it up as the one thing it could not close, and printed it from its suite on every
+    // run. The server is the only peer that sees every contact, so the server says what
+    // happened and everybody - the host included - plays it from there.
+
+    /// <summary><b>Server: this prop just took a contact worth hearing.</b> Queued, not sent:
+    /// the whole tick's worth is ranked together in <see cref="FlushImpacts"/>, because "keep
+    /// the loudest four" is not a decision any one contact can take on its own.
+    ///
+    /// <para>The intensity is quantised to its wire byte HERE rather than at send time, so the
+    /// limiter ranks exactly the values the peers will hear - a float ordering that disagreed
+    /// with the byte ordering would drop the wrong can by a rounding step.</para></summary>
+    public void ServerNoteImpact(int propId, float intensity, Vector3 position)
+    {
+        if (!_isServer)
+            return;
+        _pendingImpacts.Add(new ImpactBudget.PendingImpact(
+            propId, ImpactBudget.IntensityToByte(intensity), position));
+    }
+
+    /// <summary>Server: rank the tick's contacts, announce the loudest
+    /// <see cref="ImpactBudget.MaxImpactsPerTick"/>, drop the rest, and say so in the log when
+    /// it drops any. The log line is the measurement the packet asks for and it is per-tick
+    /// rather than a total, because "how bad does one collapse get" is the question and a
+    /// session total cannot answer it.</summary>
+    private void FlushImpacts()
+    {
+        if (_pendingImpacts.Count == 0)
+            return;
+        int offered = _pendingImpacts.Count;
+        if (offered > _impactsPeakOffered)
+        {
+            _impactsPeakOffered = offered;
+            if (ActorFx.LogSfx)
+            {
+                GD.Print($"[sfx] impact-peak offered={offered} budget={ImpactBudget.MaxImpactsPerTick} "
+                    + $"t={Time.GetTicksMsec()}");
+            }
+        }
+        int kept = ImpactBudget.KeepLoudest(_pendingImpacts, ImpactBudget.MaxImpactsPerTick);
+        _impactsOffered += offered;
+        _impactsSent += kept;
+        for (int i = 0; i < kept; i++)
+        {
+            ImpactBudget.PendingImpact e = _pendingImpacts[i];
+            // SFX-2 PLANT ANCHOR - tests/Run-MaterialSfxTest.ps1 -PlantNoImpactEvent replaces
+            // exactly this statement to prove the wire assertions can fail. Keep it one
+            // statement on one line.
+            Rpc(MethodName.PropImpact, e.PropId, (int)e.Intensity, e.Position);
+        }
+        _pendingImpacts.Clear();
+        if (kept < offered && ActorFx.LogSfx)
+        {
+            GD.Print($"[sfx] impact-limit offered={offered} sent={kept} dropped={offered - kept} "
+                + $"cumOffered={_impactsOffered} cumSent={_impactsSent} t={Time.GetTicksMsec()}");
+        }
+    }
+
+    /// <summary>Server -> everyone (including itself, CallLocal): <b>a prop was hit this hard,
+    /// here.</b> Unreliable, on <see cref="NetProfile.PropImpactChannel"/> - see that constant
+    /// for why it is neither reliable nor on the prop channel.
+    ///
+    /// <para><b>CallLocal, so the host plays from the announcement like any other client.</b>
+    /// That is the whole "one path, one sound" rule: <c>Carryable.OnBodyEntered</c> no longer
+    /// plays anything for a networked prop on any peer, so the host cannot hear a hit twice and
+    /// the two players hear the same thing. The cost is that a host's own impact is heard on the
+    /// following physics tick (~16 ms) rather than inside the contact handler, which is under
+    /// the 0.4 s per-body cooldown by a factor of twenty-five and inaudible as timing.</para>
+    ///
+    /// <para><b>The position is a fallback, not the anchor.</b> A peer that has this prop plays
+    /// at ITS OWN copy: the loose stream has already lerped that body to within a few
+    /// centimetres, and anchoring on the local node also anchors any particles on it. The sent
+    /// position is what remains when the node is missing - which in practice means the prop is
+    /// gone on this peer, and a peer with no node has no <c>PresentationProfile</c> either, so
+    /// there is no material voice to play and this early-outs. Stated rather than hidden: the
+    /// "else play at the sent position" arm the packet describes cannot resolve a sound, and
+    /// inventing a generic one would be a can that sounds like a crate.</para></summary>
+    [Rpc(MultiplayerApi.RpcMode.Authority, TransferMode = MultiplayerPeer.TransferModeEnum.Unreliable, TransferChannel = NetProfile.PropImpactChannel, CallLocal = true)]
+    private void PropImpact(int propId, int intensityByte, Vector3 position)
+    {
+        NetworkedProp? node = NodeFor(propId);
+        if (node == null || !GodotObject.IsInstanceValid(node.Body))
+        {
+            if (ActorFx.LogSfx)
+                GD.Print($"[sfx] impact-orphan prop={propId} at ({position.X:F2},{position.Y:F2},{position.Z:F2})");
+            return;
+        }
+        node.PlayWireImpact(
+            ImpactBudget.ByteToIntensity((byte)Mathf.Clamp(intensityByte, 0, 255)));
+    }
 
     // --- Server: peer lifecycle -----------------------------------------------------------
 
@@ -1436,7 +1593,7 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
                 ? DropTransformFor(avatar)
                 : (NodeFor(id)?.HomeTransform ?? Transform3D.Identity);
             _registry.SetResting(id, at);
-            Rpc(MethodName.ApplyPropState, id, (int)PropMode.Resting, 0, at);
+            Rpc(MethodName.ApplyPropState, id, (int)PropMode.Resting, 0, at, (int)PropRelease.None);
         }
     }
 
@@ -1468,8 +1625,11 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
             // 2.39996 rad — the golden angle. Deterministic (no RNG on the server's authoritative
             // path, so every peer's replay of this is identical) and non-repeating, so two props
             // never leave along the same bearing however many a future carry rule allows.
+            // Dropped, not Thrown: nobody threw these. Something knocked the holder down (or
+            // burst a door open) and everything in their hands left involuntarily, which is the
+            // packet's "the burst's forced drop".
             ReleaseIntoLooseDirected(id, peerId, ScatterForwardSpeed, ScatterUpSpeed,
-                yawOffsetRad: index * 2.39996f);
+                yawOffsetRad: index * 2.39996f, release: PropRelease.Dropped);
             index++;
         }
     }
@@ -1565,7 +1725,13 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
                 // stood still. See PropRegistry.Wake's own doc comment.
                 Transform3D wokeAt = node.Body.GlobalTransform;
                 _registry.Wake(p.Id, wokeAt);
-                Rpc(MethodName.ApplyPropState, p.Id, (int)PropMode.Loose, 0, wokeAt);
+                // PropRelease.None (SFX-2). The burst SHOVES a resting prop; it does not release
+                // one, and DOOR-1's bang already owns that instant. Announcing a shelf's worth of
+                // woken props as Dropped would be forty release announcements landing on the tick
+                // the round hangs on — the same lie SFX-2 refuses for the reset edge. What these
+                // props are heard doing is LANDING, which PropImpact carries on its own channel.
+                Rpc(MethodName.ApplyPropState, p.Id, (int)PropMode.Loose, 0, wokeAt,
+                    (int)PropRelease.None);
                 node.BeginLooseServer(deltaV);
             }
             else
@@ -1605,7 +1771,16 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
         if (!_isServer)
             return;
         foreach (PropState p in _registry.All)
-            RpcId(peerId, MethodName.ApplyPropState, p.Id, (int)p.Mode, p.HolderPeerId, p.Transform);
+        {
+            // PropRelease.None, UNCONDITIONALLY, and not p.Release (SFX-2). A dump describes the
+            // world a joiner is arriving into; the throw that started a roll happened before this
+            // peer existed, and replaying it now would be a sound with no cause — a can clanking
+            // in an empty aisle the moment you connect. The registry keeps the verb because the
+            // state is the truth about how the prop came to be loose; the WIRE here carries an
+            // event, and there is no event.
+            RpcId(peerId, MethodName.ApplyPropState, p.Id, (int)p.Mode, p.HolderPeerId, p.Transform,
+                (int)PropRelease.None);
+        }
     }
 
     /// <summary>Server: ids of every prop peerId currently holds (single-slot in practice, so
@@ -1659,7 +1834,8 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
             return;
         if (!_registry.SetHolder(propId, peerId))
             return;
-        Rpc(MethodName.ApplyPropState, propId, (int)PropMode.Held, peerId, node.GlobalTransform);
+        Rpc(MethodName.ApplyPropState, propId, (int)PropMode.Held, peerId, node.GlobalTransform,
+            (int)PropRelease.None);
     }
 
     // Ground position a dropped/released prop rests at: in front of and at the holder's feet.

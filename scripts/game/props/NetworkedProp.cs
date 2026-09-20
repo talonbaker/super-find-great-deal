@@ -137,6 +137,9 @@ public partial class NetworkedProp : Node3D
         // offline/sandbox path's fallback) must stand down, or the two independently race the
         // same threshold on the same body and fight over where it lands.
         Body.OwnedByNetwork = true;
+        // SFX-2: and its contacts are ANNOUNCED, not played where they happen. See
+        // Carryable.ImpactReporter and ReportImpact below.
+        Body.ImpactReporter = ReportImpact;
 
         // Resting default: frozen kinematic at the prop's place on every peer. The SERVER alone
         // unfreezes and simulates loose props and streams their transforms; clients stay frozen
@@ -290,7 +293,14 @@ public partial class NetworkedProp : Node3D
         _netHolder = null;
         ClearSpring();
         _looseFollowing = false;
-        Body.OnDropped();          // rejoins physics locally, but we immediately pin it below:
+        // SILENT (SFX-2). This runs on EVERY peer for every Resting transition — a settle, a
+        // disconnect release, the round's reset edge — and it used to reach physics through
+        // Body.OnDropped(), which fires ActorEvent.Dropped. The toss arc that call applies is
+        // discarded on the next four lines; the announcement was not, so a reset fanned a "drop"
+        // to every peer for every prop in the world. Inaudible only because nothing maps Dropped
+        // to a sound today. The release VERB now rides the state change as PropRelease and is
+        // announced once, in BeginLoose, where a release actually happens.
+        Body.RejoinPhysicsSilently();  // rejoins physics locally, but we immediately pin it below:
         Body.Freeze = true;
         Body.FreezeMode = RigidBody3D.FreezeModeEnum.Kinematic;
         Body.LinearVelocity = Vector3.Zero;
@@ -319,7 +329,7 @@ public partial class NetworkedProp : Node3D
         HolderPeerId = 0;
         _netHolder = null;
         ClearSpring();
-        Body.ReleaseAtRestServer();
+        Body.RejoinPhysicsSilently();
     }
 
     /// <summary>
@@ -352,7 +362,7 @@ public partial class NetworkedProp : Node3D
     /// (never simulates itself on a non-authority peer) and starts following the per-tick stream.
     /// This is the ONLY thing that may turn <see cref="_looseFollowing"/> on — see
     /// <see cref="ApplyLooseStream"/> for why the per-tick stream must never do so itself.</summary>
-    public void BeginLoose(Transform3D t)
+    public void BeginLoose(Transform3D t, PropRelease release)
     {
         HolderPeerId = 0;
         _netHolder = null;
@@ -367,21 +377,33 @@ public partial class NetworkedProp : Node3D
         // can leaves a hand in silence. Measured, not assumed — the first run of
         // tests/Run-MaterialSfxTest.ps1 logged the pickups on a client and none of the throws.
         //
-        // A PLACE ALSO ARRIVES HERE, and a peer cannot tell it from a throw. That is a fact
-        // about the wire rather than a shortcut: CARRY-1's own handoff records that "at
-        // ApplyPropState a place and a drop are the same Held->Loose transition and are
-        // indistinguishable there". Separating them costs one bit on that RPC. Until somebody
-        // spends it, every release plays the same brief shared Whoosh, which is the one sound in
-        // this palette that is a fact about the ARM rather than about the object — so it is the
-        // least wrong thing to play when the object's own verb is unknown. The deliberate
-        // set-down tick (ActorEvent.Placed) stays on the server's PlaceLooseServer path, where
-        // the verb IS known, and is therefore host-only today. Written down rather than hidden.
+        // SFX-2 SPENT THE BIT. SFX-1 had to play the shared Whoosh for every release, because
+        // CARRY-1's own handoff recorded that "at ApplyPropState a place and a drop are the same
+        // Held->Loose transition and are indistinguishable there" — so a careful set-down and a
+        // throw sounded identical to everyone, and the material's settle tick was host-only.
+        // The verb now rides the transition as one byte (PropRelease) and this is where it is
+        // spent: the SAME every-peer point, so the tick and the whoosh reach the other player on
+        // the same path the release itself does.
+        //
+        // None fires NOTHING, and that arm is not a defensive default — it is the late-join
+        // snapshot and the round's reset edge, both of which describe a STATE rather than report
+        // an event. A snapshot that replayed the throw which started a roll two minutes ago would
+        // be a sound with no cause.
+        //
         // `this`, NOT GetParent(). Carryable's own fires pass ITS parent, which is this node —
         // so passing this node's parent would anchor the sound one level too high, on the shared
         // Props root. Measured: the first run logged every release as `src=Props` instead of
         // `src=<propId>`, which is a real defect and not only a logging one, because ActorFx's
         // context is also the particle anchor and every prop in the world would have shared it.
-        ActorFx.Fire(this, Body.Profile, ActorEvent.Thrown, Body.GlobalPosition);
+        ActorEvent? announce = release switch
+        {
+            PropRelease.Thrown => ActorEvent.Thrown,
+            PropRelease.Placed => ActorEvent.Placed,
+            PropRelease.Dropped => ActorEvent.Dropped,
+            _ => null,
+        };
+        if (announce is { } evt)
+            ActorFx.Fire(this, Body.Profile, evt, Body.GlobalPosition);
         _looseFollowing = true;
         _netLooseTarget = t;
         if (!Body.Freeze)
@@ -467,4 +489,28 @@ public partial class NetworkedProp : Node3D
         Basis pose = mount.Basis.Orthonormalized() * _springHolder.HeldPropLocalRotation * hold;
         Body.GlobalTransform = _spring!.Step(dt, HandAnchor(), pose, SpringHeft);
     }
+
+    /// <summary><b>This prop just took a contact worth hearing</b> — the body's own handler
+    /// calls this instead of playing anything (SFX-2; see <see cref="Carryable.ImpactReporter"/>).
+    ///
+    /// <para><b>Server only, and the early-out is the design rather than a guard.</b> Only the
+    /// server simulates a Loose prop, so only the server's copy of this body is ever asked about
+    /// a contact at all — a client's is frozen kinematic and Godot reports it nothing. A client
+    /// reaching here would therefore be a contact between two bodies neither of which is
+    /// simulating, which is not an event about the world; and if it announced anything, the
+    /// server's announcement and its own would both play.</para>
+    ///
+    /// <para>The position is read here rather than passed from the contact handler because the
+    /// two are the same tick and this is the transform the server will also stream — so the
+    /// sound and the prop cannot disagree about where the hit was.</para></summary>
+    private void ReportImpact(float intensity)
+    {
+        if (!IsServer)
+            return;
+        PropManager.Instance?.ServerNoteImpact(PropId, intensity, Body.GlobalPosition);
+    }
+
+    /// <summary>Play the server's announced impact on this peer's own copy of the prop
+    /// (SFX-2). Delegates to the body because the profile and the position live there.</summary>
+    public void PlayWireImpact(float intensity) => Body.PlayWireImpact(intensity);
 }
