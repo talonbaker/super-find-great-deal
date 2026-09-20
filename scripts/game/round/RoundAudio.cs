@@ -173,7 +173,7 @@ public partial class RoundAudio : Node
             foreach (RoundCue cue in RoundAudioCues.ForEdge(_last, view))
                 Fire(cue);
             foreach (RoundClock clock in Clocks)
-                clock.Apply(view);
+                clock.Apply(view, driver.NameOf, driver.Tuning);
         }
 
         _last = view;

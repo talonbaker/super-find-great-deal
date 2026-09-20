@@ -274,15 +274,36 @@ public static class HideSeekText
         if (view.LastTally is not { } card)
             return string.Empty;
 
-        return view.Phase switch
+        return ChooseMatchSentence(view) switch
         {
-            HideSeekPhase.Tally => card.MatchOver
-                ? MatchTallyLine(card, nameOf, LeaverOf(view, card))
-                : RoundTallyLine(card, nameOf, tuning, LeaverOf(view, card)),
-            HideSeekPhase.Holding when card.MatchOver => MatchHoldingLine(card, nameOf),
+            MatchSentence.MatchTally => MatchTallyLine(card, nameOf, LeaverOf(view, card)),
+            MatchSentence.RoundTally => RoundTallyLine(card, nameOf, tuning, LeaverOf(view, card)),
+            MatchSentence.MatchHolding => MatchHoldingLine(card, nameOf),
             _ => string.Empty,
         };
     }
+
+    /// <summary><b>Which KIND of match-shaped sentence this view calls for</b>, or
+    /// <see cref="MatchSentence.None"/>. Extracted from <see cref="MatchLine"/>'s body at INT-0B
+    /// (2026-09-19) and called by BOTH it and the clock's own
+    /// <see cref="ClockLine(in HideSeekView, Func{int, string}, in HideSeekTuning)"/>, so the two
+    /// renderers cannot come to different conclusions about whether a MATCH just ended. The
+    /// phase rules live here once; each renderer chooses only how much room it has to say it
+    /// in.</summary>
+    private enum MatchSentence { None, RoundTally, MatchTally, MatchHolding }
+
+    /// <inheritdoc cref="MatchSentence"/>
+    private static MatchSentence ChooseMatchSentence(in HideSeekView view) =>
+        view.LastTally is not { } card
+            ? MatchSentence.None
+            : view.Phase switch
+            {
+                HideSeekPhase.Tally => card.MatchOver
+                    ? MatchSentence.MatchTally
+                    : MatchSentence.RoundTally,
+                HideSeekPhase.Holding when card.MatchOver => MatchSentence.MatchHolding,
+                _ => MatchSentence.None,
+            };
 
     /// <inheritdoc cref="MatchLine"/>
     private static int LeaverOf(in HideSeekView view, in HideSeekTally card)
@@ -348,6 +369,11 @@ public static class HideSeekText
     /// <para><b>Every arm is short on purpose.</b> <see cref="RoundClockLayout.FitPixelSize"/>
     /// shrinks the label to keep a long line inside the panel, so a wordy arm here does not
     /// overflow the clock — it makes the clock unreadable at eight metres, which is worse.</para>
+    ///
+    /// <para><b>This overload knows nothing about matches; the one below it does.</b> Prefer
+    /// <see cref="ClockLine(in HideSeekView, Func{int, string}, in HideSeekTuning)"/> in the
+    /// game — it takes the KIND of sentence from MATCH-1's chooser, so the wall and the strip
+    /// cannot disagree about whether a match ended (INT-0B, 2026-09-19).</para>
     /// </summary>
     public static string ClockLine(HideSeekPhase phase, float remainingSec, int towersCompleted,
         HideSeekTally? tally) => phase switch
@@ -362,6 +388,100 @@ public static class HideSeekText
                 : $"HID {Math.Max(card.HiderGained, 0)} · SEEK {Math.Max(card.SeekerGained, 0)}",
         _ => string.Empty,
     };
+
+    /// <summary>
+    /// <b>The clock's second line, match-aware</b> (INT-0B, 2026-09-19 — packet ruling 3). This
+    /// is the overload the game calls.
+    ///
+    /// <para><b>The KIND of sentence comes from MATCH-1's chooser</b>
+    /// (<c>ChooseMatchSentence</c>, the same <c>card.MatchOver</c> branch
+    /// <see cref="MatchLine"/> takes), so the wall and the strip cannot disagree about whether a
+    /// MATCH just ended. Before this existed they could and did: at a match end the strip read
+    /// <c>MATCH 1 · BEN WINS 173–171</c> while the wall still read <c>HID 1 · SEEK 168</c>, and
+    /// in the holding room afterwards the strip carried the result and the wall was blank.</para>
+    ///
+    /// <para><b>The WORDS are still the clock's own, and the rule above it stands: this carries
+    /// one value and never a sentence.</b> It does not route through
+    /// <see cref="StripLine(in HideSeekView, int, Func{int, string}, in HideSeekTuning)"/> and
+    /// must not. MATCH-1's tally sentence is 57 characters
+    /// (<c>ROUND 1 OF 2 · ADA hid · 3 sorted · found at 1:12 · BEN +48</c>) against a panel that
+    /// holds <see cref="RoundClockLayout.ReferenceChars"/> = 7 at full size and refuses to shrink
+    /// past <see cref="RoundClockLayout.MinScale"/> = 0.35 — so it renders at 2.85x the panel's
+    /// width, and lowering the floor to fit puts the glyphs at about five pixels of a
+    /// 1152-line frame at eight metres. The chooser is shared; the copy is not.</para>
+    ///
+    /// <list type="bullet">
+    /// <item><b>Tally, match over</b> — <c>BEN WINS</c>, or <c>DRAW</c> when there is no winner.
+    /// No totals: the two numbers are on the strip, and what the wall is for at that instant is
+    /// the one word both players look up for.</item>
+    /// <item><b>Tally, mid-match</b> — today's <c>HID 3 · SEEK 168</c>, unchanged.</item>
+    /// <item><b>Holding after a match</b> — <c>BEN WON</c> / <c>DRAW</c>, the result still
+    /// standing while somebody decides to press Start. <b>A disconnect does not suppress it</b>,
+    /// which is MATCH-1's own rule for this phase: the match is over with the totals as they
+    /// stand, and hiding them tells the survivor nothing they do not know.</item>
+    /// <item><b>Holding otherwise</b> — blank, as before.</item>
+    /// <item><b>Ended on a disconnect (either Tally arm)</b> — <c>BEN LEFT</c> when the leaver
+    /// can be recovered from the score map the way <see cref="MatchLine"/> recovers it, and
+    /// CLOCK-1's <c>ENDED EARLY</c> when it cannot. Two zeroes still look like two people who
+    /// tried; a name is better than a word when there is one.</item>
+    /// <item>Every other phase — the plain overload above, byte for byte.</item>
+    /// </list>
+    /// </summary>
+    public static string ClockLine(in HideSeekView view, Func<int, string>? nameOf,
+        in HideSeekTuning tuning)
+    {
+        MatchSentence kind = ChooseMatchSentence(view);
+        if (kind == MatchSentence.None || view.LastTally is not { } card)
+            return ClockLine(view.Phase, view.RemainingSec, view.TowersCompleted, view.LastTally);
+
+        return kind switch
+        {
+            MatchSentence.MatchTally => card.EndedByDisconnect
+                ? LeftLine(view, card, nameOf)
+                : card.WinnerPeerId == 0
+                    ? "DRAW"
+                    : $"{ClockName(nameOf, card.WinnerPeerId)} WINS",
+
+            // The result stands through a disconnect here — MATCH-1's MatchHoldingLine makes the
+            // same call for the same reason, and a wall that disagreed with the strip about THAT
+            // is the defect this overload exists to close.
+            MatchSentence.MatchHolding => card.WinnerPeerId == 0
+                ? "DRAW"
+                : $"{ClockName(nameOf, card.WinnerPeerId)} WON",
+
+            MatchSentence.RoundTally when card.EndedByDisconnect => LeftLine(view, card, nameOf),
+
+            _ => ClockLine(view.Phase, view.RemainingSec, view.TowersCompleted, view.LastTally),
+        };
+    }
+
+    /// <summary>How many characters of a player's name the wall gets. Six, because the longest
+    /// arm that carries one is <c>&lt;NAME&gt; WINS</c> and the panel can only rescue
+    /// <see cref="RoundClockLayout.ReferenceChars"/> / <see cref="RoundClockLayout.MinScale"/>
+    /// characters before the line is drawn outside it.
+    ///
+    /// <para>A truncated name is the right trade HERE and only here: the strip beside the player
+    /// carries the full one, and the wall's job at that instant is "which of us", which six
+    /// characters answers. <c>PLAYER 1196225384</c> truncating to <c>PLAYER</c> is the worst
+    /// case and is still the honest answer the fallback was already giving.</para></summary>
+    private const int ClockNameMaxChars = 6;
+
+    /// <inheritdoc cref="ClockNameMaxChars"/>
+    private static string ClockName(Func<int, string>? nameOf, int peerId)
+    {
+        string full = PlayerName(nameOf, peerId);
+        return full.Length <= ClockNameMaxChars ? full : full[..ClockNameMaxChars].TrimEnd();
+    }
+
+    /// <summary>The disconnect arm, with the leaver recovered exactly as <see cref="MatchLine"/>
+    /// recovers it. Falls back to CLOCK-1's own <c>ENDED EARLY</c> when the card's two role
+    /// holders are both present or both gone, because naming nobody is worse than a word.</summary>
+    private static string LeftLine(in HideSeekView view, in HideSeekTally card,
+        Func<int, string>? nameOf)
+    {
+        int leaver = LeaverOf(view, card);
+        return leaver == 0 ? "ENDED EARLY" : $"{ClockName(nameOf, leaver)} LEFT";
+    }
 }
 
 /// <summary>

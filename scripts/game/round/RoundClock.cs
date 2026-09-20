@@ -174,7 +174,14 @@ public partial class RoundClock : Node3D
     /// <param name="view">The peer's own folded view — the same value the HUD strip reads, from
     /// the same message, which is what makes the two readouts agree by construction rather than
     /// by both being careful.</param>
-    public void Apply(in HideSeekView view)
+    /// <param name="nameOf">The session's display-name resolver
+    /// (<c>HideSeekDriver.Instance.NameOf</c>), for the match arms' one name. Null is legal and
+    /// falls back through <c>HideSeekText.PlayerName</c>, as everywhere else.</param>
+    /// <param name="tuning">The driver's own tuning (<c>HideSeekDriver.Instance.Tuning</c>), not
+    /// <c>HideSeekTuning.Current</c> — MATCH-1's rule, so a readout can never be stepping to a
+    /// different object from the one the driver is.</param>
+    public void Apply(in HideSeekView view, Func<int, string>? nameOf,
+        in HideSeekTuning tuning)
     {
         if (_phaseLabel == null || _timerLabel == null)
             return;
@@ -182,8 +189,11 @@ public partial class RoundClock : Node3D
         Visible = true;
 
         string phaseText = HideSeekText.PhaseName(view.Phase);
-        string timerText = HideSeekText.ClockLine(view.Phase, view.RemainingSec,
-            view.TowersCompleted, view.LastTally);
+        // The match-aware overload (INT-0B, packet ruling 3). The KIND of sentence is MATCH-1's
+        // chooser's, so this wall and the strip cannot disagree about whether a match just
+        // ended; the WORDS are still the clock's own short forms, because MATCH-1's sentence is
+        // 57 characters against a panel that holds seven. See HideSeekText.ClockLine's doc.
+        string timerText = HideSeekText.ClockLine(view, nameOf, tuning);
 
         if (phaseText != _lastPhaseText)
         {

@@ -102,6 +102,12 @@ public class RoundClockTests
         // The panel is sized for ReferenceChars and FitPixelSize refuses to shrink past
         // MinScale, so a line longer than this is drawn OUTSIDE the panel no matter what. This
         // is the bound that makes the copy choices above load-bearing rather than taste.
+        //
+        // INT-0B (2026-09-19, packet ruling 3): the match-aware overload's arms are bounded
+        // HERE too, and that is the whole reason the clock renders its own short forms instead
+        // of MATCH-1's sentence. The names below are the WORST case the resolver can produce --
+        // no display name at all, so PlayerName falls back to "PLAYER <peerId>" -- because a
+        // name that has not replicated yet is exactly when a readout is most wanted.
         int worst = (int)(RoundClockLayout.ReferenceChars / RoundClockLayout.MinScale);
         var lines = new List<string>
         {
@@ -109,10 +115,170 @@ public class RoundClockTests
             HideSeekText.ClockLine(HideSeekPhase.Together, 0f, 255, null),
             HideSeekText.ClockLine(HideSeekPhase.Tally, 6f, 0, Card(255, 255)),
             HideSeekText.ClockLine(HideSeekPhase.Tally, 6f, 0, Card(0, 0, disconnect: true)),
+
+            // Every arm of the match-aware overload, with unresolved names.
+            Clock(HideSeekPhase.Tally, MatchCard(winner: Seeker), NoNames, Both),
+            Clock(HideSeekPhase.Tally, MatchCard(winner: 0), NoNames, Both),
+            Clock(HideSeekPhase.Tally, MatchCard(disconnect: true), NoNames, HiderOnly),
+            Clock(HideSeekPhase.Tally, RoundCard(255, 255), NoNames, Both),
+            Clock(HideSeekPhase.Tally, RoundCard(disconnect: true), NoNames, HiderOnly),
+            Clock(HideSeekPhase.Holding, MatchCard(winner: Seeker), NoNames, Both),
+            Clock(HideSeekPhase.Holding, MatchCard(winner: 0), NoNames, Both),
+            Clock(HideSeekPhase.Together, MatchCard(winner: Seeker), NoNames, Both),
+            Clock(HideSeekPhase.Seeking, MatchCard(winner: Seeker), NoNames, Both),
         };
         foreach (string line in lines)
             Assert.True(line.Length <= worst,
                 $"\"{line}\" is {line.Length} chars; the panel can only rescue {worst}");
+    }
+
+    // =====================================================================================
+    // 1b. ClockLine(view, nameOf, tuning) — the match-aware overload (INT-0B, ruling 3)
+    //
+    // The KIND of sentence is MATCH-1's chooser's, so the wall and the strip cannot disagree
+    // about whether a MATCH ended. The WORDS are the clock's own, because MATCH-1's sentence is
+    // 57 characters against a panel that holds seven — see the overload's doc.
+    // =====================================================================================
+
+    private const int Hider = 11;
+    private const int Seeker = 22;
+    private static readonly int[] Both = { Hider, Seeker };
+    private static readonly int[] HiderOnly = { Hider };
+
+    /// <summary>The worst case the name resolver can give: nothing, so PlayerName falls back.</summary>
+    private static readonly Func<int, string>? NoNames = null;
+
+    private static string Names(int id) =>
+        id == Hider ? "ADA" : id == Seeker ? "BEN" : string.Empty;
+
+    private static HideSeekTally RoundCard(int hid = 3, int seek = 168, bool disconnect = false) =>
+        new(RoundIndex: 1, HiderPeerId: Hider, HiderGained: hid, SeekerPeerId: Seeker,
+            SeekerGained: seek, EndedByDisconnect: disconnect, MatchOver: false, MatchIndex: 1,
+            WinnerPeerId: 0, HiderTotal: hid, SeekerTotal: seek);
+
+    private static HideSeekTally MatchCard(int winner = Seeker, bool disconnect = false) =>
+        new(RoundIndex: 2, HiderPeerId: Seeker, HiderGained: 1, SeekerPeerId: Hider,
+            SeekerGained: 168, EndedByDisconnect: disconnect, MatchOver: true, MatchIndex: 1,
+            WinnerPeerId: winner, HiderTotal: 173, SeekerTotal: 171);
+
+    private static string Clock(HideSeekPhase phase, HideSeekTally? card,
+        Func<int, string>? nameOf, int[] present, float remainingSec = 0f, int towers = 3)
+    {
+        ImmutableDictionary<int, int> scores = ImmutableDictionary<int, int>.Empty;
+        foreach (int p in present)
+            scores = scores.SetItem(p, 0);
+        var view = new HideSeekView(phase, 2, remainingSec, Hider, Seeker, scores,
+            HideSeekRefusal.None, towers, HideSeekWire.NoFoundTick, card);
+        return HideSeekText.ClockLine(view, nameOf, HideSeekTuning.Default);
+    }
+
+    [Fact]
+    public void ClockLine_SaysWhoWonTheMatch_WhereItUsedToSayARoundCard()
+    {
+        // THE DEFECT THIS CLOSES, in one assertion: before the match-aware overload the strip
+        // read "MATCH 1 · BEN WINS 173–171" and the wall read "HID 1 · SEEK 168" at the same
+        // instant — two readouts of one card disagreeing about whether a MATCH had ended.
+        Assert.Equal("BEN WINS", Clock(HideSeekPhase.Tally, MatchCard(), Names, Both));
+        Assert.Equal("DRAW", Clock(HideSeekPhase.Tally, MatchCard(winner: 0), Names, Both));
+    }
+
+    [Fact]
+    public void ClockLine_LeavesAMidMatchTallyExactlyAsClock1ShippedIt()
+    {
+        // The other half of the chooser: a round that is NOT a match end still says the card's
+        // two numbers. CLOCK-1's copy, unchanged, and the packet is explicit that it stays.
+        Assert.Equal("HID 3 · SEEK 168", Clock(HideSeekPhase.Tally, RoundCard(), Names, Both));
+    }
+
+    [Fact]
+    public void ClockLine_CarriesTheResultIntoHolding_AndIsBlankWhenThereIsNoneToCarry()
+    {
+        Assert.Equal("BEN WON", Clock(HideSeekPhase.Holding, MatchCard(), Names, Both));
+        Assert.Equal("DRAW", Clock(HideSeekPhase.Holding, MatchCard(winner: 0), Names, Both));
+
+        // Holding after an ORDINARY round, and Holding with no card at all: blank, as before.
+        Assert.Equal(string.Empty, Clock(HideSeekPhase.Holding, RoundCard(), Names, Both));
+        Assert.Equal(string.Empty, Clock(HideSeekPhase.Holding, null, Names, Both));
+    }
+
+    [Fact]
+    public void ClockLine_NamesTheLeaver_AndFallsBackToClock1sWordWhenItCannot()
+    {
+        // The leaver is recovered off the score map exactly as MatchLine recovers it: the card's
+        // role holder with no row is the one who is gone. Only when exactly one is missing.
+        Assert.Equal("ADA LEFT",
+            Clock(HideSeekPhase.Tally, RoundCard(disconnect: true), Names, new[] { Seeker }));
+        Assert.Equal("BEN LEFT",
+            Clock(HideSeekPhase.Tally, MatchCard(disconnect: true), Names, new[] { Hider }));
+
+        // Both still present, or both gone: naming nobody is worse than a word.
+        Assert.Equal("ENDED EARLY",
+            Clock(HideSeekPhase.Tally, RoundCard(disconnect: true), Names, Both));
+        Assert.Equal("ENDED EARLY",
+            Clock(HideSeekPhase.Tally, MatchCard(disconnect: true), Names, Array.Empty<int>()));
+    }
+
+    [Fact]
+    public void ClockLine_HoldingKeepsTheResultThroughADisconnect_AsMatchLineDoes()
+    {
+        // MATCH-1's own rule for this phase (MatchHoldingLine): the match is over with the
+        // totals as they stand, and "someone left" tells the survivor nothing they do not know
+        // while hiding the score still on the board. The wall must not disagree with the strip
+        // about that either.
+        Assert.Equal("BEN WON",
+            Clock(HideSeekPhase.Holding, MatchCard(disconnect: true), Names, new[] { Hider }));
+    }
+
+    [Theory]
+    [InlineData(HideSeekPhase.Hiding)]
+    [InlineData(HideSeekPhase.Seeking)]
+    [InlineData(HideSeekPhase.Together)]
+    public void ClockLine_IsTheOldOverloadEverywhereTheChooserHasNothingToSay(HideSeekPhase phase)
+    {
+        // Byte for byte, even with a match-over card sitting in the view — the chooser speaks in
+        // Tally and in Holding and nowhere else, and a clock that showed a result mid-round
+        // would be announcing the LAST match over the top of this one.
+        string expected = HideSeekText.ClockLine(phase, 31f, 3, MatchCard());
+        Assert.Equal(expected, Clock(phase, MatchCard(), Names, Both, remainingSec: 31f));
+    }
+
+    [Fact]
+    public void ClockLine_TruncatesALongNameRatherThanOverflowingThePanel()
+    {
+        // Six characters, and the strip beside the player still carries the full name. The
+        // fallback is the worst case and is what an unreplicated name produces.
+        Assert.Equal("LONGER WINS",
+            Clock(HideSeekPhase.Tally, MatchCard(), _ => "LONGERTHANTHEPANEL", Both));
+        Assert.Equal($"PLAYER WINS", Clock(HideSeekPhase.Tally, MatchCard(), NoNames, Both));
+    }
+
+    [Fact]
+    public void ClockLine_AndTheStrip_AlwaysAgreeAboutWhetherAMatchEnded()
+    {
+        // The property the whole overload exists for, stated as one: wherever MATCH-1's strip
+        // says a MATCH ended, the wall says so too, and wherever it does not, the wall does not.
+        // Asserted over every phase and both card kinds rather than at the two points above.
+        foreach (HideSeekPhase phase in Enum.GetValues<HideSeekPhase>())
+        {
+            foreach (HideSeekTally card in new[] { RoundCard(), MatchCard() })
+            {
+                ImmutableDictionary<int, int> scores = ImmutableDictionary<int, int>.Empty
+                    .SetItem(Hider, 0).SetItem(Seeker, 0);
+                var view = new HideSeekView(phase, 2, 0f, Hider, Seeker, scores,
+                    HideSeekRefusal.None, 3, HideSeekWire.NoFoundTick, card);
+
+                string strip = HideSeekText.StripLine(view, Hider, Names, HideSeekTuning.Default);
+                string wall = HideSeekText.ClockLine(view, Names, HideSeekTuning.Default);
+
+                bool stripSaysMatchEnded = strip.Contains("WINS") || strip.Contains("WON")
+                    || strip.Contains("DRAW");
+                bool wallSaysMatchEnded = wall.Contains("WINS") || wall.Contains("WON")
+                    || wall.Contains("DRAW");
+                Assert.True(stripSaysMatchEnded == wallSaysMatchEnded,
+                    $"{phase}, matchOver={card.MatchOver}: strip \"{strip}\" and wall \"{wall}\" "
+                    + "disagree about whether a match ended");
+            }
+        }
     }
 
     // =====================================================================================
