@@ -1,0 +1,51 @@
+[gd_scene load_steps=6 format=3 uid="uid://sphere0foundation"]
+
+[ext_resource type="Script" path="res://scripts/game/sandbox/Carryable.cs" id="1_carryable"]
+[ext_resource type="Script" path="res://scripts/game/sandbox/feel/Interactable.cs" id="2_interactable"]
+
+[sub_resource type="SphereMesh" id="SphereMesh_ball"]
+radius = 0.26
+height = 0.52
+
+[sub_resource type="SphereShape3D" id="SphereShape3D_ball"]
+radius = 0.26
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_ball"]
+resource_local_to_scene = true
+albedo_color = Color(0.87, 0.69, 0.13, 1)
+roughness = 0.35
+metallic = 0.4
+emission_enabled = true
+emission = Color(0.87, 0.69, 0.13, 1)
+emission_energy_multiplier = 2.5
+
+[node name="Sphere" type="RigidBody3D"]
+script = ExtResource("1_carryable")
+kind = 1
+tint = Color(0.87, 0.69, 0.13, 1)
+linear_damp = 2.0
+angular_damp = 2.0
+
+[node name="Visual" type="Node3D" parent="."]
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Visual"]
+mesh = SubResource("SphereMesh_ball")
+material_override = SubResource("StandardMaterial3D_ball")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("SphereShape3D_ball")
+
+; CARRY-1 (2026-09-19) — THE FEEL COMPONENT. Every prop in this game is a RigidBody3D carrying
+; BOTH NetworkedProp (its authority: who holds it, where the server says it is) and Interactable
+; (its feel: how heavy it reads in the hand, where it rides, how it is posed). The split is the
+; whole architecture — the authority layer never asks how a thing feels and the feel layer never
+; decides who owns it — and it only works if both are actually on the prop.
+;
+; What it is read for here: HeftKg (this body's own Mass, times HeftScale) is the single number
+; the carry spring turns into lag, droop, swing and squash, so a heavy prop lags in the hand AND
+; thuds when it lands from the same value. HoldOffset/HoldRotationDegrees are where and how it
+; rides. Nothing else on this component runs in-game: the hover hull is the lab's, and a
+; networked grab goes through Carryable, never through Interactable.OnGrabbed.
+
+[node name="Interactable" type="Node" parent="."]
+script = ExtResource("2_interactable")

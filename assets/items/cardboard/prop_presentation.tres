@@ -1,0 +1,55 @@
+[gd_resource type="Resource" load_steps=7 format=3]
+
+[ext_resource type="Script" path="res://scripts/game/presentation/PresentationProfile.cs" id="1"]
+[ext_resource type="Script" path="res://scripts/game/presentation/EventResponse.cs" id="2"]
+
+; CARDBOARD — the cereal box (SFX-1, 2026-09-19).
+;
+; Sound ordinals: 29 CardPick, 30 CardThud, 31 CardSettle, 35 Whoosh (shared).
+; Event ordinals: 6 PickedUp, 8 Thrown, 9 Impact, 14 Placed.
+; Both enums are append-only .tres contracts — see Sfx and ActorEvent. NEVER renumber.
+;
+; NOTHING HERE RINGS, at any intensity, and Impact maps exactly ONE response — no high-intensity
+; layer. That is the cardboard rule stated in data: the moment a box rings it is a tin, and the
+; cheapest way for that to happen by accident is somebody adding a "bigger hit" layer here that
+; has a tone in it. CardThud's own 0.15 s rustle tail is what a harder hit gets more of, through
+; IntensityVolumeBoostDb, and IntensityPitchRange is NEGATIVE (-0.14): more of the panel moving
+; means a lower bop, which is the opposite of what tin does and is the point.
+;
+; The pickup is 0.2 s of band-passed noise with a 20 ms attack and no tone whatsoever — contents
+; shifting. A faster attack would read as a click, which is why the number is in the recipe's
+; doc and not just in its code.
+
+[sub_resource type="Resource" id="card_pick"]
+script = ExtResource("2")
+Event = 6
+Sound = 29
+VolumeDb = -8.0
+PitchJitter = 0.1
+
+[sub_resource type="Resource" id="card_thud"]
+script = ExtResource("2")
+Event = 9
+Sound = 30
+VolumeDb = -8.0
+PitchJitter = 0.07
+IntensityVolumeBoostDb = 7.0
+IntensityPitchRange = -0.14
+
+[sub_resource type="Resource" id="card_settle"]
+script = ExtResource("2")
+Event = 14
+Sound = 31
+VolumeDb = -11.0
+PitchJitter = 0.1
+
+[sub_resource type="Resource" id="card_whoosh"]
+script = ExtResource("2")
+Event = 8
+Sound = 35
+VolumeDb = -13.0
+PitchJitter = 0.1
+
+[resource]
+script = ExtResource("1")
+Responses = [SubResource("card_pick"), SubResource("card_thud"), SubResource("card_settle"), SubResource("card_whoosh")]

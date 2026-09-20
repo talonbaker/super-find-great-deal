@@ -1,0 +1,32 @@
+[gd_scene load_steps=5 format=3]
+
+; BASE-1 (2026-09-19) — THE WORLD SEAM. This file instances the three room scenes and AUTHORS NO
+; GEOMETRY OF ITS OWN, so each room has exactly one owner and one file; a later lane changes a
+; room by opening that room.
+;
+; 40 M APART ALONG +X, AND THE NUMBER IS LOAD-BEARING. Proximity voice cuts off at 24 m
+; (VoiceProximityGate, on by default for this world), so 40 m of separation makes "the hider
+; cannot hear the seeker through the wall" a property of the geometry rather than of a gate
+; somebody could switch off. It also keeps one room's OmniLight out of the next room. If you move
+; a room, SupermarketWorldSelfTest's separation check is what tells you the round still works.
+;
+; The rooms are not connected. Players are moved between them by an authoritative teleport on a
+; round-phase change (RoomTeleport, wired by ROUND-1), never by walking; the only door that ever
+; opens is the burst door DOOR-1 puts in TaskRoom's WallZPos.
+
+[ext_resource type="Script" path="res://scripts/game/world/SupermarketWorld.cs" id="1_world"]
+[ext_resource type="PackedScene" path="res://scenes/game/world/supermarket/HoldingRoom.tscn" id="2_holding"]
+[ext_resource type="PackedScene" path="res://scenes/game/world/supermarket/SearchRoom.tscn" id="3_search"]
+[ext_resource type="PackedScene" path="res://scenes/game/world/supermarket/TaskRoom.tscn" id="4_task"]
+
+[node name="Supermarket" type="Node3D"]
+script = ExtResource("1_world")
+
+[node name="HoldingRoom" parent="." instance=ExtResource("2_holding")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
+
+[node name="SearchRoom" parent="." instance=ExtResource("3_search")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 40, 0, 0)
+
+[node name="TaskRoom" parent="." instance=ExtResource("4_task")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 80, 0, 0)

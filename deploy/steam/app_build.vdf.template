@@ -1,0 +1,16 @@
+// SteamPipe app build script (template). Do not edit in place with real IDs — Upload-Steam.ps1
+// copies this to a temp file and substitutes %APP_ID%/%DEPOT_ID_CLIENT% from its parameters,
+// so no real Steamworks IDs ever need to be committed here.
+"AppBuild"
+{
+	"AppID"		"%APP_ID%"
+	"Desc"		"%BUILD_DESC%"
+
+	"ContentRoot"	"%CONTENT_ROOT%"
+	"BuildOutput"	"%BUILD_OUTPUT%"
+
+	"Depots"
+	{
+		"%DEPOT_ID_CLIENT%"	"depot_build_client.vdf"%DEPOT_MAC_LINE%
+	}
+}

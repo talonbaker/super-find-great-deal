@@ -1,0 +1,200 @@
+[gd_scene load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/FeedbackPanel.cs" id="1_dlg"]
+[ext_resource type="Script" path="res://scripts/ui/MenuButton.cs" id="2_btn"]
+
+[sub_resource type="ButtonGroup" id="ButtonGroup_overall"]
+[sub_resource type="ButtonGroup" id="ButtonGroup_performance"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_selected"]
+content_margin_left = 18.0
+content_margin_top = 11.0
+content_margin_right = 18.0
+content_margin_bottom = 11.0
+bg_color = Color(0.60784316, 0.627451, 0.89411765, 0.4)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.60784316, 0.627451, 0.89411765, 1)
+corner_radius_top_left = 999
+corner_radius_top_right = 999
+corner_radius_bottom_right = 999
+corner_radius_bottom_left = 999
+
+[node name="FeedbackPanel" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_dlg")
+
+[node name="Scrim" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="Center" type="CenterContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="Panel" type="VBoxContainer" parent="Center"]
+custom_minimum_size = Vector2(520, 0)
+theme_override_constants/separation = 16
+
+[node name="Title" type="Label" parent="Center/Panel"]
+layout_mode = 2
+theme_type_variation = &"SectionLabel"
+text = "FEEDBACK"
+horizontal_alignment = 1
+
+[node name="Body" type="Label" parent="Center/Panel"]
+layout_mode = 2
+theme_type_variation = &"Body"
+autowrap_mode = 3
+horizontal_alignment = 1
+text = "Quick and optional — tap what fits, skip the rest. Anonymous."
+
+[node name="Q1" type="VBoxContainer" parent="Center/Panel"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="Center/Panel/Q1"]
+layout_mode = 2
+theme_type_variation = &"Body"
+text = "How was it overall?"
+
+[node name="Options" type="HBoxContainer" parent="Center/Panel/Q1"]
+layout_mode = 2
+alignment = 1
+theme_override_constants/separation = 8
+
+[node name="Opt1" type="Button" parent="Center/Panel/Q1/Options"]
+layout_mode = 2
+theme_type_variation = &"SecondaryAction"
+theme_override_styles/pressed = SubResource("StyleBoxFlat_selected")
+theme_override_styles/hover_pressed = SubResource("StyleBoxFlat_selected")
+toggle_mode = true
+button_group = SubResource("ButtonGroup_overall")
+text = "1"
+metadata/value = 1
+
+[node name="Opt2" type="Button" parent="Center/Panel/Q1/Options"]
+layout_mode = 2
+theme_type_variation = &"SecondaryAction"
+theme_override_styles/pressed = SubResource("StyleBoxFlat_selected")
+theme_override_styles/hover_pressed = SubResource("StyleBoxFlat_selected")
+toggle_mode = true
+button_group = SubResource("ButtonGroup_overall")
+text = "2"
+metadata/value = 2
+
+[node name="Opt3" type="Button" parent="Center/Panel/Q1/Options"]
+layout_mode = 2
+theme_type_variation = &"SecondaryAction"
+theme_override_styles/pressed = SubResource("StyleBoxFlat_selected")
+theme_override_styles/hover_pressed = SubResource("StyleBoxFlat_selected")
+toggle_mode = true
+button_group = SubResource("ButtonGroup_overall")
+text = "3"
+metadata/value = 3
+
+[node name="Opt4" type="Button" parent="Center/Panel/Q1/Options"]
+layout_mode = 2
+theme_type_variation = &"SecondaryAction"
+theme_override_styles/pressed = SubResource("StyleBoxFlat_selected")
+theme_override_styles/hover_pressed = SubResource("StyleBoxFlat_selected")
+toggle_mode = true
+button_group = SubResource("ButtonGroup_overall")
+text = "4"
+metadata/value = 4
+
+[node name="Opt5" type="Button" parent="Center/Panel/Q1/Options"]
+layout_mode = 2
+theme_type_variation = &"SecondaryAction"
+theme_override_styles/pressed = SubResource("StyleBoxFlat_selected")
+theme_override_styles/hover_pressed = SubResource("StyleBoxFlat_selected")
+toggle_mode = true
+button_group = SubResource("ButtonGroup_overall")
+text = "5"
+metadata/value = 5
+
+[node name="Q2" type="VBoxContainer" parent="Center/Panel"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="Center/Panel/Q2"]
+layout_mode = 2
+theme_type_variation = &"Body"
+text = "Did it run smoothly?"
+
+[node name="Options" type="HBoxContainer" parent="Center/Panel/Q2"]
+layout_mode = 2
+alignment = 1
+theme_override_constants/separation = 8
+
+[node name="Opt1" type="Button" parent="Center/Panel/Q2/Options"]
+layout_mode = 2
+theme_type_variation = &"SecondaryAction"
+theme_override_styles/pressed = SubResource("StyleBoxFlat_selected")
+theme_override_styles/hover_pressed = SubResource("StyleBoxFlat_selected")
+toggle_mode = true
+button_group = SubResource("ButtonGroup_performance")
+text = "Smooth"
+metadata/value = "Smooth"
+
+[node name="Opt2" type="Button" parent="Center/Panel/Q2/Options"]
+layout_mode = 2
+theme_type_variation = &"SecondaryAction"
+theme_override_styles/pressed = SubResource("StyleBoxFlat_selected")
+theme_override_styles/hover_pressed = SubResource("StyleBoxFlat_selected")
+toggle_mode = true
+button_group = SubResource("ButtonGroup_performance")
+text = "Some stutter"
+metadata/value = "Some stutter"
+
+[node name="Opt3" type="Button" parent="Center/Panel/Q2/Options"]
+layout_mode = 2
+theme_type_variation = &"SecondaryAction"
+theme_override_styles/pressed = SubResource("StyleBoxFlat_selected")
+theme_override_styles/hover_pressed = SubResource("StyleBoxFlat_selected")
+toggle_mode = true
+button_group = SubResource("ButtonGroup_performance")
+text = "Ran badly"
+metadata/value = "Ran badly"
+
+[node name="Q3" type="VBoxContainer" parent="Center/Panel"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="Center/Panel/Q3"]
+layout_mode = 2
+theme_type_variation = &"Body"
+text = "Anything else?"
+
+[node name="Edit" type="TextEdit" parent="Center/Panel/Q3"]
+custom_minimum_size = Vector2(0, 180)
+layout_mode = 2
+placeholder_text = "Type here…"
+
+[node name="Buttons" type="HBoxContainer" parent="Center/Panel"]
+layout_mode = 2
+alignment = 1
+theme_override_constants/separation = 16
+
+[node name="SendButton" type="Button" parent="Center/Panel/Buttons"]
+layout_mode = 2
+theme_type_variation = &"PrimaryAction"
+text = "Send"
+script = ExtResource("2_btn")
+
+[node name="SkipButton" type="Button" parent="Center/Panel/Buttons"]
+layout_mode = 2
+theme_type_variation = &"TertiaryAction"
+text = "Skip"
+script = ExtResource("2_btn")

@@ -1,0 +1,84 @@
+[gd_scene load_steps=8 format=3 uid="uid://endcap0sfgdmvp"]
+
+; SHELF-1 (2026-09-19) — AN END-CAP: the short display that closes the end of an aisle and faces
+; the cross-aisle. ShelfUnit.tscn's construction exactly, 1.40 m long instead of 2.30 — read that
+; file's header for the shelf heights, the missing back panel and the grey, all of which are the
+; same here and are deliberately not restated so the two cannot drift.
+;
+; 1.40 m long (x) x 1.80 m tall (y) x 0.50 m deep (z), origin at the FLOOR, centred.
+;
+; IT IS INSTANCED ROTATED 90 deg ABOUT Y in SearchRoom.tscn, so its length runs along the room's
+; z and its 0.50 m depth faces the cross-aisle. The bay is symmetric about both horizontal axes
+; (uprights at +/-0.67, boards centred), so +90 and -90 occupy the IDENTICAL volume — which is
+; the one reason the basis-row trap in .claude/rules/godot-scenes.md cannot bite here. It still
+; got a headed look; see docs/qa/2026-09-19-shelf-1/.
+;
+; LEVEL geometry, no script, listed in SupermarketWorldSelfTest.SectionScenes for the reason
+; ShelfUnit.tscn's header gives.
+
+[sub_resource type="StandardMaterial3D" id="Mat_shelf"]
+resource_name = "shelving (light neutral grey)"
+albedo_color = Color(0.7, 0.71, 0.74, 1)
+roughness = 0.85
+metallic = 0.0
+
+[sub_resource type="BoxMesh" id="BoxMesh_upright"]
+size = Vector3(0.06, 1.8, 0.5)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_upright"]
+size = Vector3(0.06, 1.8, 0.5)
+
+[sub_resource type="BoxMesh" id="BoxMesh_board"]
+size = Vector3(1.4, 0.05, 0.5)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_board"]
+size = Vector3(1.4, 0.05, 0.5)
+
+[node name="EndCap" type="StaticBody3D"]
+
+[node name="UprightNeg" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.67, 0.9, 0)
+shape = SubResource("BoxShape3D_upright")
+
+[node name="UprightPos" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.67, 0.9, 0)
+shape = SubResource("BoxShape3D_upright")
+
+[node name="Board0" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.4, 0)
+shape = SubResource("BoxShape3D_board")
+
+[node name="Board1" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.95, 0)
+shape = SubResource("BoxShape3D_board")
+
+[node name="Board2" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
+shape = SubResource("BoxShape3D_board")
+
+[node name="Visual" type="Node3D" parent="."]
+
+[node name="MeshUprightNeg" type="MeshInstance3D" parent="Visual"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.67, 0.9, 0)
+mesh = SubResource("BoxMesh_upright")
+surface_material_override/0 = SubResource("Mat_shelf")
+
+[node name="MeshUprightPos" type="MeshInstance3D" parent="Visual"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.67, 0.9, 0)
+mesh = SubResource("BoxMesh_upright")
+surface_material_override/0 = SubResource("Mat_shelf")
+
+[node name="MeshBoard0" type="MeshInstance3D" parent="Visual"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.4, 0)
+mesh = SubResource("BoxMesh_board")
+surface_material_override/0 = SubResource("Mat_shelf")
+
+[node name="MeshBoard1" type="MeshInstance3D" parent="Visual"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.95, 0)
+mesh = SubResource("BoxMesh_board")
+surface_material_override/0 = SubResource("Mat_shelf")
+
+[node name="MeshBoard2" type="MeshInstance3D" parent="Visual"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
+mesh = SubResource("BoxMesh_board")
+surface_material_override/0 = SubResource("Mat_shelf")

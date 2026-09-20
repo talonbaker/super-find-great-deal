@@ -1,0 +1,709 @@
+[gd_scene load_steps=43 format=3]
+
+; BASE-1 (2026-09-19) — THE HOLDING ROOM. 10 x 10 x 3.5 m interior box: floor, four walls,
+; ceiling, one light, four spawn markers. Every session starts here and every late joiner lands
+; here, so SupermarketWorld.SpawnPoints is exactly this room's markers.
+;
+; AUTHORED, NOT BUILT. Nothing in this level is constructed in code
+; (.claude/rules/godot-scenes.md; Talon, 2026-08-27). SupermarketWorldSelfTest counts this file's
+; PACKED nodes against the same scene's LIVE nodes and fails on any difference, so a later lane
+; that adds a bench in _Ready turns the suite red rather than passing review.
+;
+; GEOMETRY CONVENTION, the same in all three rooms so they can be read against each other:
+;   - the interior floor surface is y = 0 and the ceiling's underside is y = 3.5;
+;   - slabs and walls are 0.4 m thick and overlap at the corners (10.8 = 10 + 2 x 0.4), so there
+;     is no hairline seam for a fast body to squeeze through;
+;   - every StaticBody3D carries one BoxShape3D and one BoxMesh of the SAME size. Collision and
+;     render being one number is what stops a wall you can see through and a wall you cannot.
+;
+; THE TINT IS FUNCTIONAL. Each room is a different flat grey so a capture, a bug report or a
+; playtest video says which room it was taken in without a caption. Do not unify them.
+
+; BTN-1 (2026-09-19) — the rack, its three objects and the START button. Scripts and prop scenes
+; are referenced here; every node they drive is authored at the bottom of this file, so the
+; packed-vs-live node count SupermarketWorldSelfTest takes of this room covers all of it.
+
+[ext_resource type="Script" path="res://scripts/game/round/ObjectRack.cs" id="3_rack"]
+[ext_resource type="Script" path="res://scripts/game/props/NetworkedProp.cs" id="4_netprop"]
+[ext_resource type="PackedScene" path="res://scenes/game/props/DealCan.tscn" id="5_dealcan"]
+[ext_resource type="PackedScene" path="res://scenes/game/props/DealBox.tscn" id="6_dealbox"]
+[ext_resource type="PackedScene" path="res://scenes/game/props/DealProduce.tscn" id="7_dealproduce"]
+[ext_resource type="Script" path="res://scripts/game/round/RoundButton.cs" id="8_button"]
+[ext_resource type="PackedScene" path="res://scenes/game/world/supermarket/RoundClock.tscn" id="9_clock"]
+
+; HOLD-1 (2026-09-19) - the board, and the practice corner's furniture. The board is a prefab for
+; RoundClock.tscn's reason (one file, one edit, and it is listed in
+; SupermarketWorldSelfTest.SectionScenes); the crates are the game's own Crate.tscn, because the
+; whole point of a practice corner is that what you learn on transfers.
+
+[ext_resource type="PackedScene" path="res://scenes/game/world/supermarket/HoldingBoard.tscn" id="10_board"]
+[ext_resource type="PackedScene" path="res://scenes/game/props/Crate.tscn" id="11_crate"]
+[ext_resource type="Script" path="res://scripts/game/sandbox/feel/InteractionSlot.cs" id="12_slot"]
+
+[sub_resource type="StandardMaterial3D" id="Mat_floor"]
+resource_name = "holding room floor (cool grey)"
+albedo_color = Color(0.34, 0.36, 0.4, 1)
+roughness = 0.9
+
+[sub_resource type="StandardMaterial3D" id="Mat_wall"]
+resource_name = "holding room walls (cool grey)"
+albedo_color = Color(0.46, 0.48, 0.52, 1)
+roughness = 0.95
+
+[sub_resource type="BoxMesh" id="BoxMesh_slab"]
+size = Vector3(10.8, 0.4, 10.8)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_slab"]
+size = Vector3(10.8, 0.4, 10.8)
+
+[sub_resource type="BoxMesh" id="BoxMesh_wall_x"]
+size = Vector3(0.4, 3.5, 10.8)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_wall_x"]
+size = Vector3(0.4, 3.5, 10.8)
+
+[sub_resource type="BoxMesh" id="BoxMesh_wall_z"]
+size = Vector3(10.8, 3.5, 0.4)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_wall_z"]
+size = Vector3(10.8, 3.5, 0.4)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_bounds"]
+size = Vector3(10.0, 3.5, 10.0)
+
+; --- BTN-1: the rack's carpentry and the button's parts ---------------------------------------
+; Every mesh and its collider are the SAME size, the convention this level's header states: one
+; number for what you can see and what you can walk into.
+
+[sub_resource type="StandardMaterial3D" id="Mat_rack"]
+resource_name = "object rack (pale shelf)"
+albedo_color = Color(0.62, 0.6, 0.55, 1)
+roughness = 0.8
+
+[sub_resource type="BoxMesh" id="BoxMesh_shelf"]
+size = Vector3(2, 0.08, 0.4)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_shelf"]
+size = Vector3(2, 0.08, 0.4)
+
+[sub_resource type="BoxMesh" id="BoxMesh_riser"]
+size = Vector3(2, 0.95, 0.12)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_riser"]
+size = Vector3(2, 0.95, 0.12)
+
+; The button plate. 0.34 m square and 0.12 m deep: big enough to be unmistakably a control at
+; first-person distance, shallow enough that it reads as mounted ON the wall rather than as a
+; pillar stuck to it.
+[sub_resource type="BoxMesh" id="BoxMesh_btn"]
+size = Vector3(0.34, 0.34, 0.12)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_btn"]
+size = Vector3(0.34, 0.34, 0.12)
+
+; The cap. A CylinderMesh's axis is its own +Y, so every Cap node is rotated a quarter turn about
+; X to lie along the button's +Z — the twelve floats (1,0,0, 0,0,-1, 0,1,0) are that rotation
+; written as basis ROWS, which is what a .tscn stores (.claude/rules/godot-scenes.md). At rest it
+; stands 4 cm proud of the plate; RoundButton.CapTravelM is 4 cm, so a press takes it flush and
+; the travel is legible without measuring.
+[sub_resource type="CylinderMesh" id="CylinderMesh_cap"]
+top_radius = 0.1
+bottom_radius = 0.1
+height = 0.06
+radial_segments = 24
+
+; The lamp. A slot rather than a dot: a thin bright bar reads as on/off at a glance and in
+; greyscale, and RoundButton drives its VALUE as well as its hue (never colour alone).
+[sub_resource type="BoxMesh" id="BoxMesh_lamp"]
+size = Vector3(0.26, 0.05, 0.02)
+
+[sub_resource type="StandardMaterial3D" id="Mat_btn_base"]
+resource_name = "round button plate"
+albedo_color = Color(0.21, 0.22, 0.24, 1)
+roughness = 0.7
+metallic = 0.3
+
+[sub_resource type="StandardMaterial3D" id="Mat_btn_cap"]
+resource_local_to_scene = true
+resource_name = "round button cap"
+albedo_color = Color(0.85, 0.85, 0.83, 1)
+roughness = 0.45
+emission_enabled = true
+emission = Color(0.85, 0.85, 0.83, 1)
+emission_energy_multiplier = 0.2
+
+[sub_resource type="StandardMaterial3D" id="Mat_btn_lamp"]
+resource_local_to_scene = true
+resource_name = "round button lamp"
+albedo_color = Color(0.13, 0.14, 0.13, 1)
+roughness = 0.35
+emission_enabled = true
+emission = Color(0.13, 0.14, 0.13, 1)
+emission_energy_multiplier = 0.05
+
+; --- HOLD-1: the practice corner's own resources ---------------------------------------------
+;
+; TWO GREYS, both deliberately different from the room's floor (0.34, 0.36, 0.40) and walls, so
+; the corner reads as furniture rather than as part of the box. The pad's ring is the one thing
+; here with any saturation: it is the only surface in the room that means something.
+
+[sub_resource type="StandardMaterial3D" id="Mat_practice"]
+resource_name = "practice furniture (warm neutral, against the room's cool grey)"
+albedo_color = Color(0.46, 0.44, 0.41, 1)
+roughness = 0.9
+
+; Unshaded and alpha-blended, matching the material InteractionSlot builds for its own marker:
+; the ring's colour IS the slot's state (free / occupied / rejected flash) and it must not also
+; change as a player walks past the room light. resource_local_to_scene because the class
+; repaints this instance and a shared material would make every slot in the game flash together.
+[sub_resource type="StandardMaterial3D" id="Mat_pad"]
+resource_name = "practice snap pad ring (colour is the slot's state)"
+resource_local_to_scene = true
+transparency = 1
+shading_mode = 0
+albedo_color = Color(0.42, 0.62, 0.52, 0.75)
+
+; The table: 0.80 deep x 0.70 tall x 3.00 long, standing against the -X wall. 0.70 is a work
+; surface at hand height for a 1.04 m eyeline, which is what "low table" has to mean for a game
+; whose whole verb is picking things up and setting them down.
+[sub_resource type="BoxMesh" id="BoxMesh_table"]
+size = Vector3(0.8, 0.7, 3.0)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_table"]
+size = Vector3(0.8, 0.7, 3.0)
+
+; The target box: 0.70 m square outside, 0.62 m clear inside, walls 0.22 m tall. Sized off the
+; things it is a target FOR -- a 0.44 m crate drops in with 0.09 m of margin all round, which is
+; a target you can hit without it being a funnel. Same construction as BTN-1's drop-off bin (real
+; walls, not a trigger volume), one StaticBody3D rather than five because nothing here has to
+; move or be disabled independently.
+[sub_resource type="BoxMesh" id="BoxMesh_tb_floor"]
+size = Vector3(0.7, 0.04, 0.7)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_tb_floor"]
+size = Vector3(0.7, 0.04, 0.7)
+
+[sub_resource type="BoxMesh" id="BoxMesh_tb_wall_x"]
+size = Vector3(0.04, 0.22, 0.7)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_tb_wall_x"]
+size = Vector3(0.04, 0.22, 0.7)
+
+[sub_resource type="BoxMesh" id="BoxMesh_tb_wall_z"]
+size = Vector3(0.7, 0.22, 0.04)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_tb_wall_z"]
+size = Vector3(0.7, 0.22, 0.04)
+
+; The pad's ring, AUTHORED rather than left to InteractionSlot's own marker. That class builds a
+; torus in _Ready, which is a node this level did not declare -- and
+; SupermarketWorldSelfTest counts this room's PACKED nodes against its LIVE ones and fails on any
+; difference (.claude/rules/godot-scenes.md; CLOCK-1 measured exactly this with a planted child).
+; So the node below sets show_marker = false and carries its own ring at the same radius. The
+; ring is flat on the table and 12 mm proud of it, and drawn at InteractionSlot's own default
+; radius of 0.32 m -- see the Pad node below for why not one property on it is authored.
+[sub_resource type="TorusMesh" id="TorusMesh_pad"]
+inner_radius = 0.2816
+outer_radius = 0.32
+rings = 32
+ring_segments = 8
+
+[node name="HoldingRoom" type="Node3D"]
+
+[node name="Floor" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.2, 0)
+
+[node name="Collision" type="CollisionShape3D" parent="Floor"]
+shape = SubResource("BoxShape3D_slab")
+
+[node name="Mesh" type="MeshInstance3D" parent="Floor"]
+mesh = SubResource("BoxMesh_slab")
+surface_material_override/0 = SubResource("Mat_floor")
+
+[node name="Ceiling" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3.7, 0)
+
+[node name="Collision" type="CollisionShape3D" parent="Ceiling"]
+shape = SubResource("BoxShape3D_slab")
+
+[node name="Mesh" type="MeshInstance3D" parent="Ceiling"]
+mesh = SubResource("BoxMesh_slab")
+surface_material_override/0 = SubResource("Mat_wall")
+
+[node name="WallXPos" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5.2, 1.75, 0)
+
+[node name="Collision" type="CollisionShape3D" parent="WallXPos"]
+shape = SubResource("BoxShape3D_wall_x")
+
+[node name="Mesh" type="MeshInstance3D" parent="WallXPos"]
+mesh = SubResource("BoxMesh_wall_x")
+surface_material_override/0 = SubResource("Mat_wall")
+
+[node name="WallXNeg" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5.2, 1.75, 0)
+
+[node name="Collision" type="CollisionShape3D" parent="WallXNeg"]
+shape = SubResource("BoxShape3D_wall_x")
+
+[node name="Mesh" type="MeshInstance3D" parent="WallXNeg"]
+mesh = SubResource("BoxMesh_wall_x")
+surface_material_override/0 = SubResource("Mat_wall")
+
+[node name="WallZPos" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.75, 5.2)
+
+[node name="Collision" type="CollisionShape3D" parent="WallZPos"]
+shape = SubResource("BoxShape3D_wall_z")
+
+[node name="Mesh" type="MeshInstance3D" parent="WallZPos"]
+mesh = SubResource("BoxMesh_wall_z")
+surface_material_override/0 = SubResource("Mat_wall")
+
+[node name="WallZNeg" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.75, -5.2)
+
+[node name="Collision" type="CollisionShape3D" parent="WallZNeg"]
+shape = SubResource("BoxShape3D_wall_z")
+
+[node name="Mesh" type="MeshInstance3D" parent="WallZNeg"]
+mesh = SubResource("BoxMesh_wall_z")
+surface_material_override/0 = SubResource("Mat_wall")
+
+[node name="RoomLight" type="OmniLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3, 0)
+light_energy = 2.2
+omni_range = 16.0
+shadow_enabled = false
+
+[node name="HoldingSpawn_0" type="Marker3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.5, 1.1, -2.5)
+
+[node name="HoldingSpawn_1" type="Marker3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.5, 1.1, -2.5)
+
+[node name="HoldingSpawn_2" type="Marker3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.5, 1.1, 2.5)
+
+[node name="HoldingSpawn_3" type="Marker3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.5, 1.1, 2.5)
+
+; CARRY-1 (2026-09-19) — ROOM BOUNDS. The authored volume placement integrity layer 1 tests
+; against (program doc §5b, a ruling from Talon): a prop may only be SET DOWN somewhere whose
+; collision shape lies wholly inside one of these. It is the room's INTERIOR — floor top to
+; ceiling underside, wall inner face to wall inner face — not the room's footprint, so a crate
+; pushed half into a wall is outside it by construction.
+;
+; The GROUP is what PlacementIntegrity queries; the name is for whoever opens this scene looking
+; for it. Groups go in the [node] header (.claude/rules/godot-scenes.md) — wired anywhere else
+; they fail silently and look exactly like a feature that does nothing.
+;
+; It monitors nothing and is on no layer. It is a shape and a transform that the server reads
+; directly; pairing it with every body that walks through it would be per-frame broadphase work
+; for an answer nobody asks for.
+
+[node name="RoomBounds" type="Area3D" parent="." groups=["room_bounds"]]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.75, 0)
+monitoring = false
+monitorable = false
+collision_layer = 0
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape3D" parent="RoomBounds"]
+shape = SubResource("BoxShape3D_bounds")
+
+; CLOCK-1 (2026-09-19) — THE ROUND CLOCK. One instance of RoundClock.tscn, high on the -Z wall's
+; inner face (the wall is at z = -5.2 and is 0.4 m thick, so its inner face is z = -5.0) looking
+; at the centre of the room. Identity basis: a Label3D faces +Z with no rotation, which is into
+; the room from this wall.
+;
+; y = 2.35 puts the panel's centre 1.31 m above the 1.04 m eyeline and its top 0.55 m clear of the
+; ceiling, so it is looked UP at from anywhere in the room and is not something a body walks into
+; -- it carries no collision at all (see RoundClock.tscn).
+;
+; WHICH ROOM THE CLOCK THINKS IT IS IN IS NOT AUTHORED HERE, and that is not an oversight.
+; It was, on the first cut -- a `room = "..."` line on the instance below, against an [Export] on
+; RoundClock -- and it read back EMPTY on all three clocks. Godot does not apply a nested
+; PackedScene instance's exported C# script properties on this project's Godot/Mono build; the
+; native properties on the same line (transform, mesh, mass) are unaffected, which is why this
+; fails silently. PropManager.AuthoredKindOf and Carryable.LoadLiftM record the same trap from
+; 2026-07 and 2026-09. RoundClock derives the room by walking up to THIS scene's root name, which
+; is a native property and survives instancing.
+
+[node name="RoundClock" parent="." instance=ExtResource("9_clock")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.35, -4.94)
+
+; BTN-1 (2026-09-19) — THE OBJECT RACK. The shelf of three near-misses the hider chooses from,
+; and the reason the holding room exists as a room rather than as a lobby.
+;
+; SAME COLOUR, SAME SIZE CLASS, A SHAPE APART (program §0). The three objects are the ONLY thing
+; either player learns about the target before the seek: the hider takes one, the other two stay
+; here, and the seeker walks up and looks at what is left. That is why they are authored side by
+; side at eye-line rather than in a bin — the shelf is a readout.
+;
+; THE IDS ARE THE NODE ORDER, AND THAT IS LOAD-BEARING TWICE. PropManager.AdoptAuthoredProps
+; assigns authored ids by sorting on NODE PATH, identically on every peer, so Deal_0/1/2 here
+; adopt as 1000/1001/1002 and the search room's four crates follow at 1003..1006. Two consequences
+; a later lane must know:
+;   - RENAMING one of these, or adding a fourth, RENUMBERS the search room's props. It already
+;     did once: this rack is why tests/Run-PlaceTest.ps1's four prop ids moved from 1000..1003 to
+;     1003..1006 (see that file's header and the BTN-1 handoff). SHELF-1's hundred will move them
+;     again. A suite that hardcodes an authored prop id is a suite that breaks when a level grows.
+;   - ObjectRack answers "is this one of mine" from its own CHILDREN, never from a literal, so
+;     nothing in code has to be updated when they move.
+;
+; SHELF-1 REPLACES THE THREE scenes/game/props/Deal*.tscn FILES IN PLACE. Nothing in this scene
+; changes when it does: the instance paths and the node names are the contract.
+;
+; y = 0.99 is the shelf's top surface (0.95 centre + 0.04 half-thickness). Each object's own
+; half-height is added to that so it RESTS on the shelf rather than floating or intersecting —
+; the can and the produce are 0.2 m tall (half 0.10) and the box is 0.26 m tall (half 0.13).
+
+[node name="ObjectRack" type="Node3D" parent="." groups=["object_rack"]]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -4.6)
+script = ExtResource("3_rack")
+
+[node name="Shelf" type="StaticBody3D" parent="ObjectRack"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.95, 0)
+
+[node name="Collision" type="CollisionShape3D" parent="ObjectRack/Shelf"]
+shape = SubResource("BoxShape3D_shelf")
+
+[node name="Mesh" type="MeshInstance3D" parent="ObjectRack/Shelf"]
+mesh = SubResource("BoxMesh_shelf")
+surface_material_override/0 = SubResource("Mat_rack")
+
+[node name="Riser" type="StaticBody3D" parent="ObjectRack"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.475, -0.14)
+
+[node name="Collision" type="CollisionShape3D" parent="ObjectRack/Riser"]
+shape = SubResource("BoxShape3D_riser")
+
+[node name="Mesh" type="MeshInstance3D" parent="ObjectRack/Riser"]
+mesh = SubResource("BoxMesh_riser")
+surface_material_override/0 = SubResource("Mat_rack")
+
+[node name="Deal_0" type="Node3D" parent="ObjectRack"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.6, 1.09, 0)
+script = ExtResource("4_netprop")
+
+[node name="Body" parent="ObjectRack/Deal_0" instance=ExtResource("5_dealcan")]
+
+[node name="Deal_1" type="Node3D" parent="ObjectRack"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.09, 0)
+script = ExtResource("4_netprop")
+
+[node name="Body" parent="ObjectRack/Deal_1" instance=ExtResource("7_dealproduce")]
+
+; Deal_2 is the BOX and it is the one nearest the button, deliberately: it is the object
+; tests/Run-ButtonsTest.ps1 has its hider take, because a box settles where it is put and a
+; sphere rolls, and because the shortest walk from the rack to START is the most reliable
+; staging. Nothing in the GAME depends on which of the three is where — SHELF-1 may reorder
+; them — but that suite names prop 1002, so a reorder is a suite edit.
+
+[node name="Deal_2" type="Node3D" parent="ObjectRack"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.6, 1.12, 0)
+script = ExtResource("4_netprop")
+
+[node name="Body" parent="ObjectRack/Deal_2" instance=ExtResource("6_dealbox")]
+
+; BTN-1 (2026-09-19) — THE START BUTTON, beside the rack on the same wall.
+;
+; MOUNTING CONVENTION, the same for all three round buttons in this level: the node's local +Z
+; points OUT of the surface it is mounted on, into the room. RoundButton presses its cap along
+; local −Z, so that one rule makes the cap go INTO the wall on every wall without a per-instance
+; special case. This one sits on WallZNeg, whose inner face is z = −5.0, and faces +Z — which is
+; the identity basis, so its twelve Transform3D floats are the identity and there is nothing to
+; get wrong. (The other two are rotated; see their own headers, and remember that those twelve
+; floats are basis ROWS — .claude/rules/godot-scenes.md.)
+;
+; x = 1.2 puts the plate (0.34 wide, so x ∈ [1.03, 1.37]) just clear of the shelf's end at x = 1
+; and — this is the part that was MEASURED rather than eyeballed — inside the 1.6 m press radius
+; of somebody standing at the rack. A player who has just taken an object off the shelf stands
+; about 1.9 m from here, which is inside the radius plus the server's latency tolerance and is
+; why they do not have to walk anywhere to start the round. Moving this button away from the
+; rack costs that, and the symptom is a Start that answers STEP CLOSER TO THE BUTTON.
+; y = 1.15 is a hair above the 1.1 m spawn height, i.e. chest height in first person.
+;
+; THE GROUPS ARE THE WIRING. "pressable" is what InteractHighlighter polls, so without it the
+; button has no shimmer, no key chip and no press at all; "round_button_start" is what the script
+; reads its KIND from, because a nested instance's exported fields read back as C# defaults on
+; this Godot/Mono build. Groups go in the [node] header or they fail silently.
+;
+; THE LABEL SAYS NO KEY. "START", and nothing else — the live glyph is InteractPrompt's, resolved
+; from the InputMap. A mesh that said "PRESS E" is the third of the three playtest failures this
+; packet exists to remove, in a build where E is rebindable.
+
+[node name="StartButton" type="StaticBody3D" parent="." groups=["pressable", "round_button", "round_button_start"]]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.2, 1.15, -4.94)
+script = ExtResource("8_button")
+
+[node name="Collision" type="CollisionShape3D" parent="StartButton"]
+shape = SubResource("BoxShape3D_btn")
+
+[node name="Base" type="MeshInstance3D" parent="StartButton"]
+mesh = SubResource("BoxMesh_btn")
+surface_material_override/0 = SubResource("Mat_btn_base")
+
+[node name="Cap" type="MeshInstance3D" parent="StartButton"]
+transform = Transform3D(1, 0, 0, 0, 0, -1, 0, 1, 0, 0, 0.03, 0.07)
+mesh = SubResource("CylinderMesh_cap")
+material_override = SubResource("Mat_btn_cap")
+
+[node name="Lamp" type="MeshInstance3D" parent="StartButton"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.125, 0.07)
+mesh = SubResource("BoxMesh_lamp")
+material_override = SubResource("Mat_btn_lamp")
+
+[node name="Label" type="Label3D" parent="StartButton"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.26, 0.07)
+pixel_size = 0.0018
+text = "START"
+font_size = 96
+outline_size = 18
+
+; HOLD-1 (2026-09-19) - THE BOARD. Who is in this game, what they are about to do, what they have
+; scored, and what just happened. On the -Z wall's inner face (z = -5.0) with the identity basis,
+; because a Label3D with no rotation faces +Z and that is into the room from this wall.
+;
+; WHY THIS WALL. Every HoldingSpawn marker faces -Z (Gameplay.SpawnPositionFor sets a position
+; and no rotation, and an avatar's default forward is -Z), so this is the wall a player is
+; already looking at the moment they arrive, and it is the wall they stand at to press START. The
+; -Z wall now reads left to right: BOARD, then the RACK with the clock above it, then START, then
+; the loop sign. x = -3.1 puts the 3.6 m panel at x in [-4.9, -1.3] -- 0.3 m clear of the rack's
+; -1.0 and nowhere near the START button at x = 1.2, whose 1.6 m press radius BTN-1's handoff
+; says to keep clear of (that rule is about PRESSABLES, and this panel has none -- but it is also
+; simply not in it).
+;
+; y = 1.55 puts the panel's centre half a metre above the 1.04 m eyeline and its bottom edge at
+; y = 0.45, so the rows sit at eye level and nothing is read past the top of the frame. It has no
+; collision at all (see HoldingBoard.tscn), so it is not something a body can catch on.
+
+[node name="HoldingBoard" parent="." instance=ExtResource("10_board")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.1, 1.55, -4.94)
+
+; HOLD-1 - THE LOOP, IN FIVE LINES, on the same wall as everything else a new player needs.
+;
+; The words are CLAUDE.md's "The game" section compressed to fit; the five numbered beats are the
+; five in that list and in the same order. Kept to 35 characters on the longest line because that
+; is what the wall has room for beside the START button: font_size 26 at the default pixel_size
+; 0.005 is 0.13 m of glyph, and at this font's measured 0.64 advance-per-height (CLOCK-1's
+; render measurement) 35 characters is 2.91 m, so the sign spans x in [1.75, 4.66] -- clear of
+; the START plate's right edge at x = 1.37 and of the wall at x = 5.
+;
+; A Label3D and no panel behind it: this is a sign painted on the wall, and a second slab beside
+; the board would make the room look like a noticeboard rather than a room.
+
+[node name="LoopSign" type="Label3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3.2, 1.75, -4.94)
+text = "1  PICK AN OBJECT OFF THE RACK
+2  HIDE IT IN THE SHOP (30 S)
+3  SEEKER HUNTS - HIDER STACKS
+4  IT LANDS IN THE BIN: DOOR BURSTS
+5  TALLY - SWAP - AGAIN"
+font_size = 26
+line_spacing = 6
+
+; HOLD-1 - THE PRACTICE CORNER. Dead time becomes onboarding time: while you wait, and while the
+; seeker is shut in here for the whole of Hiding, there are things to pick up, turn, put down,
+; put INTO something, and throw.
+;
+; WHERE, AND WHY NOT ANYWHERE ELSE. Against the -X wall on the room's midline. The four
+; HoldingSpawn markers are at (+/-2.5, 1.1, +/-2.5) and the -Z wall is full (board, rack, START,
+; sign), which leaves the -X and +X walls; -X is the one you turn to from the rack rather than
+; the one behind you. Nearest spawn marker to anything here is 1.68 m from a crate and 1.93 m
+; from the table, both clear of the 0.36 m avatar capsule by a wide margin, so nobody ever lands
+; inside the furniture.
+;
+; EVERY OBJECT HERE IS A REAL NetworkedProp, the same class as the rack's three and the shop's
+; hundred and thirty. That is the whole point: what you learn on these transfers, because they
+; are not a mock of the carry system, they ARE it. They also go home on their own -- the props
+; return to these authored transforms on the round reset edge, with no code in this lane, because
+; PropManager.ResetForNewPlaythrough restores every ADOPTED prop to its adoption-time transform
+; and Gameplay already calls it from HideSeekDriver.ResetRequested. The corner is therefore tidy
+; at the start of every round whatever the last two players did to it.
+;
+; THE CONTAINER'S NAME IS LOAD-BEARING, exactly as SHELF-1's "Stock" is in the search room.
+; PropManager.AdoptAuthoredProps hands out ids in ordinal NODE-PATH sort order, so these eleven
+; props sit between the rack's three and the search room's. "PracticeCorner" sorts AFTER
+; "ObjectRack" ('P' > 'O'), which is what keeps the rack at 1000..1002 and keeps BTN-1's
+; "rack holds prop ids [1000, 1001, 1002]" assertion true. What it CANNOT do is keep the search
+; room's ids still: "HoldingRoom" is a prefix of every path in this file and sorts before
+; "SearchRoom", so no container name in this room can sort after a room that comes later in the
+; alphabet. The search room's block therefore moves up by eleven, and the suites that named an
+; id by literal now DERIVE it from the server's own adoption log instead -- which is the durable
+; fix BTN-1's handoff asked the next lane that moved them to spend the lines on.
+;
+; Names are zero-padded for SHELF-1's reason: an ordinal sort puts Cube_10 between Cube_1 and
+; Cube_2, so an unpadded set would be deterministic, identical on every peer, and wrong about
+; which object a level author was looking at.
+
+[node name="PracticeCorner" type="Node3D" parent="."]
+
+[node name="Cube_00" type="Node3D" parent="PracticeCorner"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.55, 0.22, -0.9)
+script = ExtResource("4_netprop")
+
+[node name="Body" parent="PracticeCorner/Cube_00" instance=ExtResource("11_crate")]
+
+[node name="Cube_01" type="Node3D" parent="PracticeCorner"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.55, 0.22, -0.3)
+script = ExtResource("4_netprop")
+
+[node name="Body" parent="PracticeCorner/Cube_01" instance=ExtResource("11_crate")]
+
+[node name="Cube_02" type="Node3D" parent="PracticeCorner"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.55, 0.22, 0.3)
+script = ExtResource("4_netprop")
+
+[node name="Body" parent="PracticeCorner/Cube_02" instance=ExtResource("11_crate")]
+
+[node name="Cube_03" type="Node3D" parent="PracticeCorner"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.55, 0.22, 0.9)
+script = ExtResource("4_netprop")
+
+[node name="Body" parent="PracticeCorner/Cube_03" instance=ExtResource("11_crate")]
+
+[node name="Cube_04" type="Node3D" parent="PracticeCorner"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.0, 0.22, -0.9)
+script = ExtResource("4_netprop")
+
+[node name="Body" parent="PracticeCorner/Cube_04" instance=ExtResource("11_crate")]
+
+[node name="Cube_05" type="Node3D" parent="PracticeCorner"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.0, 0.22, -0.3)
+script = ExtResource("4_netprop")
+
+[node name="Body" parent="PracticeCorner/Cube_05" instance=ExtResource("11_crate")]
+
+[node name="Cube_06" type="Node3D" parent="PracticeCorner"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.0, 0.22, 0.3)
+script = ExtResource("4_netprop")
+
+[node name="Body" parent="PracticeCorner/Cube_06" instance=ExtResource("11_crate")]
+
+[node name="Cube_07" type="Node3D" parent="PracticeCorner"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.0, 0.22, 0.9)
+script = ExtResource("4_netprop")
+
+[node name="Body" parent="PracticeCorner/Cube_07" instance=ExtResource("11_crate")]
+
+
+; The three near-misses, one of each shape, at the table's -Z end. The same three prefabs the
+; rack holds, so a player who has turned one over here recognises it on the rack. Resting y is
+; the table's 0.70 m top plus each prop's own half-height, read off its collider: can 0.06,
+; produce 0.08 (sphere r 0.08), box 0.14.
+
+[node name="Near_00" type="Node3D" parent="PracticeCorner"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4.55, 0.76, -1.1)
+script = ExtResource("4_netprop")
+
+[node name="Body" parent="PracticeCorner/Near_00" instance=ExtResource("5_dealcan")]
+
+[node name="Near_01" type="Node3D" parent="PracticeCorner"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4.55, 0.78, -0.8)
+script = ExtResource("4_netprop")
+
+[node name="Body" parent="PracticeCorner/Near_01" instance=ExtResource("7_dealproduce")]
+
+[node name="Near_02" type="Node3D" parent="PracticeCorner"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4.55, 0.84, -0.5)
+script = ExtResource("4_netprop")
+
+[node name="Body" parent="PracticeCorner/Near_02" instance=ExtResource("6_dealbox")]
+
+; THE SNAP PAD, and it carries a MEASUREMENT this repo did not have before.
+;
+; NOT ONE PROPERTY IS SET ON THIS NODE, on purpose. The first cut set radius, rest_height,
+; snap_rotation and show_marker = false on it, INLINE (the script assigned directly, not a nested
+; PackedScene instance -- the one shape CLOCK-1's trap was documented against). EVERY ONE OF THEM
+; WAS DROPPED. The room went 87 packed / 88 live because show_marker never arrived and
+; InteractionSlot built its own ring in _Ready. So this build drops an exported C# property set
+; in a .tscn in BOTH shapes, not only on a nested instance, and the rule is simply: an [Export]
+; is not a level-authoring surface in this project. That is a fourth entry in the ledger
+; alongside PropManager.AuthoredKindOf, Carryable.LoadLiftM and RoundClock.Room.
+;
+; What this pad is therefore made of: InteractionSlot's C# DEFAULTS (radius 0.32 m, vertical
+; reach 1.1 m, snap_rotation true, rest_height 0) and a child named SlotMarker that the LEVEL
+; authors. InteractionSlot._Ready now adopts a child of that name instead of building one, which
+; is a native node name rather than an exported property and therefore cannot be dropped. The
+; ring below is drawn at the class's own 0.32 m default radius so the thing a player sees is the
+; thing the server measures.
+;
+; The pad only snaps because the SERVER knows about it. InteractionSlot is a client-side lab type
+; (CARRY-1's handoff), so Gameplay registers a PracticePadValidator over every slot it finds in
+; the world; that validator answers Snap(pad.RestPose(...)) inside the catch volume and passes
+; everything else straight through, so free placement everywhere else in the game is untouched.
+
+[node name="Pad" type="Node3D" parent="PracticeCorner"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4.55, 0.7, 1.15)
+script = ExtResource("12_slot")
+
+[node name="SlotMarker" type="MeshInstance3D" parent="PracticeCorner/Pad"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.012, 0)
+mesh = SubResource("TorusMesh_pad")
+material_override = SubResource("Mat_pad")
+
+[node name="Table" type="StaticBody3D" parent="PracticeCorner"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4.55, 0, 0)
+
+[node name="Collision" type="CollisionShape3D" parent="PracticeCorner/Table"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.35, 0)
+shape = SubResource("BoxShape3D_table")
+
+[node name="Mesh" type="MeshInstance3D" parent="PracticeCorner/Table"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.35, 0)
+mesh = SubResource("BoxMesh_table")
+surface_material_override/0 = SubResource("Mat_practice")
+
+; THE TARGET BOX, on the table between the near-misses and the pad. Free placement: whatever you
+; can get in there, stays there. It is the control the pad is measured against -- one place where
+; putting a thing down does exactly what you did, and one where the game moves it for you.
+
+[node name="TargetBox" type="StaticBody3D" parent="PracticeCorner"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4.55, 0.7, 0.4)
+
+[node name="CollisionFloor" type="CollisionShape3D" parent="PracticeCorner/TargetBox"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.02, 0)
+shape = SubResource("BoxShape3D_tb_floor")
+
+[node name="MeshFloor" type="MeshInstance3D" parent="PracticeCorner/TargetBox"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.02, 0)
+mesh = SubResource("BoxMesh_tb_floor")
+surface_material_override/0 = SubResource("Mat_practice")
+
+[node name="CollisionXNeg" type="CollisionShape3D" parent="PracticeCorner/TargetBox"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.33, 0.13, 0)
+shape = SubResource("BoxShape3D_tb_wall_x")
+
+[node name="MeshXNeg" type="MeshInstance3D" parent="PracticeCorner/TargetBox"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.33, 0.13, 0)
+mesh = SubResource("BoxMesh_tb_wall_x")
+surface_material_override/0 = SubResource("Mat_practice")
+
+[node name="CollisionXPos" type="CollisionShape3D" parent="PracticeCorner/TargetBox"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.33, 0.13, 0)
+shape = SubResource("BoxShape3D_tb_wall_x")
+
+[node name="MeshXPos" type="MeshInstance3D" parent="PracticeCorner/TargetBox"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.33, 0.13, 0)
+mesh = SubResource("BoxMesh_tb_wall_x")
+surface_material_override/0 = SubResource("Mat_practice")
+
+[node name="CollisionZNeg" type="CollisionShape3D" parent="PracticeCorner/TargetBox"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.13, -0.33)
+shape = SubResource("BoxShape3D_tb_wall_z")
+
+[node name="MeshZNeg" type="MeshInstance3D" parent="PracticeCorner/TargetBox"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.13, -0.33)
+mesh = SubResource("BoxMesh_tb_wall_z")
+surface_material_override/0 = SubResource("Mat_practice")
+
+[node name="CollisionZPos" type="CollisionShape3D" parent="PracticeCorner/TargetBox"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.13, 0.33)
+shape = SubResource("BoxShape3D_tb_wall_z")
+
+[node name="MeshZPos" type="MeshInstance3D" parent="PracticeCorner/TargetBox"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.13, 0.33)
+mesh = SubResource("BoxMesh_tb_wall_z")
+surface_material_override/0 = SubResource("Mat_practice")

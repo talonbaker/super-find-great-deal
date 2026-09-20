@@ -1,0 +1,15 @@
+// SteamPipe depot build script (template) for the Windows client depot. See app_build.vdf.template
+// for how %DEPOT_ID_CLIENT% gets substituted — this file's own %DEPOT_ID_CLIENT% must match the
+// key used there, which Upload-Steam.ps1 guarantees since it substitutes both from the same value.
+"DepotBuildConfig"
+{
+	"DepotID"	"%DEPOT_ID_CLIENT%"
+	"ContentRoot"	"%CONTENT_ROOT_CLIENT%"
+
+	"FileMapping"
+	{
+		"LocalPath"	"*"
+		"DepotPath"	"."
+		"recursive"	"1"
+	}
+}

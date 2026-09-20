@@ -1,0 +1,684 @@
+[gd_scene load_steps=41 format=3]
+
+[ext_resource type="Script" path="res://scripts/game/world/BurstDoor.cs" id="1_burstdoor"]
+
+; BASE-1 (2026-09-19) — THE TASK ROOM. 10 x 10 x 3.5 m interior box, same construction as
+; HoldingRoom.tscn (read that file's header for the convention and for why nothing here may be
+; built in code), PLUS a 3 x 3 x 3.5 m vestibule attached to the +Z wall.
+;
+; THE VESTIBULE IS WHERE THE SEEKER LANDS, AND "BurstDoor" IS THE WALL THAT STOPS BEING ONE.
+; The seeker is teleported into the vestibule on the Found tick, already facing in, and the wall
+; between them and the hiders bursts open.
+;
+; DOOR-1 (2026-09-19) REPLACED "WallZPos" WITH "BurstDoor", and the replacement keeps BASE-1's
+; rule: from the task room it still reads as a full wall. The leaf fills the opening flush and
+; carries the same albedo family as the walls, so a hider who looks at it sees a panel, not a
+; door with a gap around it — BASE-1's reasoning, unchanged: a hider who can see a way in has
+; already been told where the ending comes from, and the whole beat is that the instant is
+; unknowable.
+;
+; WHAT THE PARTS ARE, AND WHY THERE ARE FOUR OF THEM.
+;   FrameXNeg / FrameXPos / FrameLintel  the wall that is STILL a wall. Together they are exactly
+;                                        the old WallZPos minus a 1.6 x 2.2 m hole, so the room is
+;                                        no leakier than it was.
+;   Hinge + Leaf                         the moving part: an empty at the hinge edge with a MESH
+;                                        and NO COLLIDER hanging off it. BurstDoor tweens the
+;                                        Hinge's Y rotation. A tween and not a hinge joint,
+;                                        because program section 5 says a joint tunnels, and the
+;                                        one thing it would tunnel through is a player.
+;   Blocker                              the only collision this door has: a StaticBody3D filling
+;                                        the opening, whose shape is DISABLED on the burst frame
+;                                        on every peer and re-enabled at the end of the reset
+;                                        close. Never moved, so it can never sweep through anyone.
+;
+; The leaf swings toward -Z, into the task room, into the hiders. At +110 deg about +Y the leaf's
+; far edge lands at roughly (-1.33, *, 3.73) in this room's local space — inside the room and
+; well clear of the frame. All twelve floats of every Transform3D below are basis ROWS
+; (.claude/rules/godot-scenes.md); every one here is the identity basis plus a translation.
+;
+; The vestibule is sealed on its other three sides and has its own dimmer light, so a hider in
+; the main room sees nothing of it even for the frames between the teleport and the burst.
+
+; BTN-1 (2026-09-19) — the END ROUND button, authored at the bottom of this file so this room's
+; packed-vs-live node count covers it.
+
+[ext_resource type="Script" path="res://scripts/game/round/RoundButton.cs" id="1_button"]
+[ext_resource type="PackedScene" path="res://scenes/game/world/supermarket/RoundClock.tscn" id="9_clock"]
+[ext_resource type="PackedScene" path="res://scenes/game/world/supermarket/SupplyCrate.tscn" id="10_crate"]
+[ext_resource type="PackedScene" path="res://scenes/game/world/supermarket/SortBin.tscn" id="11_bin"]
+[ext_resource type="Script" path="res://scripts/game/props/NetworkedProp.cs" id="12_netprop"]
+[ext_resource type="Script" path="res://scripts/game/round/SortItem.cs" id="13_sortitem"]
+[ext_resource type="Script" path="res://scripts/game/world/SortRoom.cs" id="14_sortroom"]
+[ext_resource type="PackedScene" path="res://scenes/game/props/SortCube.tscn" id="15_cube"]
+[ext_resource type="PackedScene" path="res://scenes/game/props/SortBall.tscn" id="16_ball"]
+[ext_resource type="PackedScene" path="res://scenes/game/props/SortCan.tscn" id="17_can"]
+
+[sub_resource type="StandardMaterial3D" id="Mat_floor"]
+resource_name = "task room floor (warm grey)"
+albedo_color = Color(0.38, 0.33, 0.3, 1)
+roughness = 0.9
+
+[sub_resource type="StandardMaterial3D" id="Mat_wall"]
+resource_name = "task room walls (warm grey)"
+albedo_color = Color(0.54, 0.47, 0.42, 1)
+roughness = 0.95
+
+[sub_resource type="BoxMesh" id="BoxMesh_slab"]
+size = Vector3(10.8, 0.4, 10.8)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_slab"]
+size = Vector3(10.8, 0.4, 10.8)
+
+[sub_resource type="BoxMesh" id="BoxMesh_wall_x"]
+size = Vector3(0.4, 3.5, 10.8)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_wall_x"]
+size = Vector3(0.4, 3.5, 10.8)
+
+[sub_resource type="BoxMesh" id="BoxMesh_wall_z"]
+size = Vector3(10.8, 3.5, 0.4)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_wall_z"]
+size = Vector3(10.8, 3.5, 0.4)
+
+[sub_resource type="BoxMesh" id="BoxMesh_vest_slab"]
+size = Vector3(3.8, 0.4, 3.4)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_vest_slab"]
+size = Vector3(3.8, 0.4, 3.4)
+
+[sub_resource type="BoxMesh" id="BoxMesh_vest_wall_x"]
+size = Vector3(0.4, 3.5, 3.4)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_vest_wall_x"]
+size = Vector3(0.4, 3.5, 3.4)
+
+[sub_resource type="BoxMesh" id="BoxMesh_vest_wall_z"]
+size = Vector3(3.8, 3.5, 0.4)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_vest_wall_z"]
+size = Vector3(3.8, 3.5, 0.4)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_bounds"]
+size = Vector3(10.0, 3.5, 10.0)
+
+; DOOR-1 (2026-09-19) — the burst door's own resources.
+;
+; The arithmetic, once, so nobody has to re-derive it: the old +Z wall was 10.8 x 3.5 x 0.4
+; centred at (0, 1.75, 5.2), i.e. x in [-5.4, 5.4] and y in [0, 3.5]. The opening is
+; x in [-0.8, 0.8], y in [0, 2.2]. So each side piece is 4.6 wide (5.4 - 0.8) centred at
+; +/-3.1, and the lintel is 1.6 wide by 1.3 high (3.5 - 2.2) centred at y = 2.85.
+
+[sub_resource type="StandardMaterial3D" id="Mat_door"]
+resource_name = "burst door leaf (the walls' own family, a shade darker)"
+albedo_color = Color(0.46, 0.4, 0.36, 1)
+roughness = 0.85
+
+[sub_resource type="BoxMesh" id="BoxMesh_door_side"]
+size = Vector3(4.6, 3.5, 0.4)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_door_side"]
+size = Vector3(4.6, 3.5, 0.4)
+
+[sub_resource type="BoxMesh" id="BoxMesh_door_lintel"]
+size = Vector3(1.6, 1.3, 0.4)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_door_lintel"]
+size = Vector3(1.6, 1.3, 0.4)
+
+; The leaf is 4 cm narrower and 2 cm shorter than the opening so it never z-fights the frame,
+; and 0.14 m thick inside a 0.4 m wall so it sits recessed like a real door in a reveal.
+[sub_resource type="BoxMesh" id="BoxMesh_door_leaf"]
+size = Vector3(1.56, 2.18, 0.14)
+
+; The blocker fills the WHOLE opening, including the 4 cm the leaf leaves: a gap a player can
+; be pushed into is a gap they can be stuck in.
+[sub_resource type="BoxShape3D" id="BoxShape3D_door_blocker"]
+size = Vector3(1.6, 2.2, 0.4)
+
+; --- BTN-1: the button's parts. Same recipe as the other two rooms' — a shared prefab would be
+; the obvious move and is the wrong one here: SupermarketWorldSelfTest compares each room's
+; PACKED node count against its LIVE one, and an instanced sub-scene contributes one node to the
+; packed side and all of its children to the live side. Authoring the plate in each room keeps
+; the check honest AND keeps the rule the check exists for — every part of a level is authored in
+; its own scene file, openable in the editor.
+
+[sub_resource type="BoxMesh" id="BoxMesh_btn"]
+size = Vector3(0.34, 0.34, 0.12)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_btn"]
+size = Vector3(0.34, 0.34, 0.12)
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_cap"]
+top_radius = 0.1
+bottom_radius = 0.1
+height = 0.06
+radial_segments = 24
+
+[sub_resource type="BoxMesh" id="BoxMesh_lamp"]
+size = Vector3(0.26, 0.05, 0.02)
+
+[sub_resource type="StandardMaterial3D" id="Mat_btn_base"]
+resource_name = "round button plate"
+albedo_color = Color(0.21, 0.22, 0.24, 1)
+roughness = 0.7
+metallic = 0.3
+
+[sub_resource type="StandardMaterial3D" id="Mat_btn_cap"]
+resource_local_to_scene = true
+resource_name = "round button cap"
+albedo_color = Color(0.85, 0.85, 0.83, 1)
+roughness = 0.45
+emission_enabled = true
+emission = Color(0.85, 0.85, 0.83, 1)
+emission_energy_multiplier = 0.2
+
+[sub_resource type="StandardMaterial3D" id="Mat_btn_lamp"]
+resource_local_to_scene = true
+resource_name = "round button lamp"
+albedo_color = Color(0.13, 0.14, 0.13, 1)
+roughness = 0.35
+emission_enabled = true
+emission = Color(0.13, 0.14, 0.13, 1)
+emission_energy_multiplier = 0.05
+
+[node name="TaskRoom" type="Node3D"]
+
+[node name="Floor" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.2, 0)
+
+[node name="Collision" type="CollisionShape3D" parent="Floor"]
+shape = SubResource("BoxShape3D_slab")
+
+[node name="Mesh" type="MeshInstance3D" parent="Floor"]
+mesh = SubResource("BoxMesh_slab")
+surface_material_override/0 = SubResource("Mat_floor")
+
+[node name="Ceiling" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3.7, 0)
+
+[node name="Collision" type="CollisionShape3D" parent="Ceiling"]
+shape = SubResource("BoxShape3D_slab")
+
+[node name="Mesh" type="MeshInstance3D" parent="Ceiling"]
+mesh = SubResource("BoxMesh_slab")
+surface_material_override/0 = SubResource("Mat_wall")
+
+[node name="WallXPos" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5.2, 1.75, 0)
+
+[node name="Collision" type="CollisionShape3D" parent="WallXPos"]
+shape = SubResource("BoxShape3D_wall_x")
+
+[node name="Mesh" type="MeshInstance3D" parent="WallXPos"]
+mesh = SubResource("BoxMesh_wall_x")
+surface_material_override/0 = SubResource("Mat_wall")
+
+[node name="WallXNeg" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5.2, 1.75, 0)
+
+[node name="Collision" type="CollisionShape3D" parent="WallXNeg"]
+shape = SubResource("BoxShape3D_wall_x")
+
+[node name="Mesh" type="MeshInstance3D" parent="WallXNeg"]
+mesh = SubResource("BoxMesh_wall_x")
+surface_material_override/0 = SubResource("Mat_wall")
+
+[node name="BurstDoor" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 5.2)
+script = ExtResource("1_burstdoor")
+
+[node name="FrameXNeg" type="StaticBody3D" parent="BurstDoor"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.1, 1.75, 0)
+
+[node name="Collision" type="CollisionShape3D" parent="BurstDoor/FrameXNeg"]
+shape = SubResource("BoxShape3D_door_side")
+
+[node name="Mesh" type="MeshInstance3D" parent="BurstDoor/FrameXNeg"]
+mesh = SubResource("BoxMesh_door_side")
+surface_material_override/0 = SubResource("Mat_wall")
+
+[node name="FrameXPos" type="StaticBody3D" parent="BurstDoor"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3.1, 1.75, 0)
+
+[node name="Collision" type="CollisionShape3D" parent="BurstDoor/FrameXPos"]
+shape = SubResource("BoxShape3D_door_side")
+
+[node name="Mesh" type="MeshInstance3D" parent="BurstDoor/FrameXPos"]
+mesh = SubResource("BoxMesh_door_side")
+surface_material_override/0 = SubResource("Mat_wall")
+
+[node name="FrameLintel" type="StaticBody3D" parent="BurstDoor"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.85, 0)
+
+[node name="Collision" type="CollisionShape3D" parent="BurstDoor/FrameLintel"]
+shape = SubResource("BoxShape3D_door_lintel")
+
+[node name="Mesh" type="MeshInstance3D" parent="BurstDoor/FrameLintel"]
+mesh = SubResource("BoxMesh_door_lintel")
+surface_material_override/0 = SubResource("Mat_wall")
+
+[node name="Hinge" type="Node3D" parent="BurstDoor"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.8, 0, 0)
+
+[node name="Leaf" type="MeshInstance3D" parent="BurstDoor/Hinge"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.78, 1.1, 0)
+mesh = SubResource("BoxMesh_door_leaf")
+surface_material_override/0 = SubResource("Mat_door")
+
+[node name="Blocker" type="StaticBody3D" parent="BurstDoor"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.1, 0)
+
+[node name="Collision" type="CollisionShape3D" parent="BurstDoor/Blocker"]
+shape = SubResource("BoxShape3D_door_blocker")
+
+[node name="WallZNeg" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.75, -5.2)
+
+[node name="Collision" type="CollisionShape3D" parent="WallZNeg"]
+shape = SubResource("BoxShape3D_wall_z")
+
+[node name="Mesh" type="MeshInstance3D" parent="WallZNeg"]
+mesh = SubResource("BoxMesh_wall_z")
+surface_material_override/0 = SubResource("Mat_wall")
+
+[node name="RoomLight" type="OmniLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3, 0)
+light_energy = 2.2
+omni_range = 16.0
+shadow_enabled = false
+
+[node name="TaskSpawn_0" type="Marker3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.5, 1.1, -2.5)
+
+[node name="TaskSpawn_1" type="Marker3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.5, 1.1, -2.5)
+
+[node name="TaskSpawn_2" type="Marker3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.5, 1.1, 2.5)
+
+[node name="TaskSpawn_3" type="Marker3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.5, 1.1, 2.5)
+
+[node name="VestibuleFloor" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.2, 7.1)
+
+[node name="Collision" type="CollisionShape3D" parent="VestibuleFloor"]
+shape = SubResource("BoxShape3D_vest_slab")
+
+[node name="Mesh" type="MeshInstance3D" parent="VestibuleFloor"]
+mesh = SubResource("BoxMesh_vest_slab")
+surface_material_override/0 = SubResource("Mat_floor")
+
+[node name="VestibuleCeiling" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3.7, 7.1)
+
+[node name="Collision" type="CollisionShape3D" parent="VestibuleCeiling"]
+shape = SubResource("BoxShape3D_vest_slab")
+
+[node name="Mesh" type="MeshInstance3D" parent="VestibuleCeiling"]
+mesh = SubResource("BoxMesh_vest_slab")
+surface_material_override/0 = SubResource("Mat_wall")
+
+[node name="VestibuleWallXPos" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.7, 1.75, 7.1)
+
+[node name="Collision" type="CollisionShape3D" parent="VestibuleWallXPos"]
+shape = SubResource("BoxShape3D_vest_wall_x")
+
+[node name="Mesh" type="MeshInstance3D" parent="VestibuleWallXPos"]
+mesh = SubResource("BoxMesh_vest_wall_x")
+surface_material_override/0 = SubResource("Mat_wall")
+
+[node name="VestibuleWallXNeg" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.7, 1.75, 7.1)
+
+[node name="Collision" type="CollisionShape3D" parent="VestibuleWallXNeg"]
+shape = SubResource("BoxShape3D_vest_wall_x")
+
+[node name="Mesh" type="MeshInstance3D" parent="VestibuleWallXNeg"]
+mesh = SubResource("BoxMesh_vest_wall_x")
+surface_material_override/0 = SubResource("Mat_wall")
+
+[node name="VestibuleWallZPos" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.75, 8.6)
+
+[node name="Collision" type="CollisionShape3D" parent="VestibuleWallZPos"]
+shape = SubResource("BoxShape3D_vest_wall_z")
+
+[node name="Mesh" type="MeshInstance3D" parent="VestibuleWallZPos"]
+mesh = SubResource("BoxMesh_vest_wall_z")
+surface_material_override/0 = SubResource("Mat_wall")
+
+[node name="VestibuleLight" type="OmniLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3, 6.9)
+light_energy = 1.1
+omni_range = 6.0
+shadow_enabled = false
+
+[node name="Vestibule_0" type="Marker3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.1, 6.9)
+
+; CARRY-1 (2026-09-19) — ROOM BOUNDS. The authored volume placement integrity layer 1 tests
+; against (program doc §5b, a ruling from Talon): a prop may only be SET DOWN somewhere whose
+; collision shape lies wholly inside one of these. It is the room's INTERIOR — floor top to
+; ceiling underside, wall inner face to wall inner face — not the room's footprint, so a crate
+; pushed half into a wall is outside it by construction.
+;
+; The GROUP is what PlacementIntegrity queries; the name is for whoever opens this scene looking
+; for it. Groups go in the [node] header (.claude/rules/godot-scenes.md) — wired anywhere else
+; they fail silently and look exactly like a feature that does nothing.
+;
+; It monitors nothing and is on no layer. It is a shape and a transform that the server reads
+; directly; pairing it with every body that walks through it would be per-frame broadphase work
+; for an answer nobody asks for.
+
+[node name="RoomBounds" type="Area3D" parent="." groups=["room_bounds"]]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.75, 0)
+monitoring = false
+monitorable = false
+collision_layer = 0
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape3D" parent="RoomBounds"]
+shape = SubResource("BoxShape3D_bounds")
+
+; CLOCK-1 (2026-09-19) — THE ROUND CLOCK. One instance of RoundClock.tscn, high on the -Z wall's
+; inner face (the wall is at z = -5.2 and is 0.4 m thick, so its inner face is z = -5.0) looking
+; at the centre of the room. Identity basis: a Label3D faces +Z with no rotation, which is into
+; the room from this wall.
+;
+; y = 2.35 puts the panel's centre 1.31 m above the 1.04 m eyeline and its top 0.55 m clear of the
+; ceiling, so it is looked UP at from anywhere in the room and is not something a body walks into
+; -- it carries no collision at all (see RoundClock.tscn).
+;
+; WHICH ROOM THE CLOCK THINKS IT IS IN IS NOT AUTHORED HERE, and that is not an oversight.
+; It was, on the first cut -- a `room = "..."` line on the instance below, against an [Export] on
+; RoundClock -- and it read back EMPTY on all three clocks. Godot does not apply a nested
+; PackedScene instance's exported C# script properties on this project's Godot/Mono build; the
+; native properties on the same line (transform, mesh, mass) are unaffected, which is why this
+; fails silently. PropManager.AuthoredKindOf and Carryable.LoadLiftM record the same trap from
+; 2026-07 and 2026-09. RoundClock derives the room by walking up to THIS scene's root name, which
+; is a native property and survives instancing.
+
+[node name="RoundClock" parent="." instance=ExtResource("9_clock")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.35, -4.94)
+
+
+; BTN-1 (2026-09-19) — THE END ROUND BUTTON, on the +X wall beside the burst-door wall.
+;
+; BESIDE IT, NOT ON IT, and that is the packet's word taken literally for a reason. WallZPos is
+; the wall DOOR-1 replaces with the burst door; a control mounted on the thing that is about to
+; fly open would be a control that moves, and at the one moment both players are looking at it.
+; This sits on the +X wall a metre and a half short of that corner, where the seeker walking in
+; through the door and the hider standing at their tower can both reach it.
+;
+; MOUNTING: local +Z out of the wall — see HoldingRoom.tscn's StartButton header. This wall faces
+; −X, so the basis is a quarter turn the other way and its twelve floats are (0,0,−1, 0,1,0,
+; 1,0,0), written as basis ROWS (.claude/rules/godot-scenes.md). x = 4.94 is the wall's inner
+; face (5.0) minus the plate's half-depth.
+;
+; EITHER PLAYER MAY PRESS IT (IRoundFactSource.AnyPressedEnd, verbatim): the beat after the
+; startle belongs to both of them, and whoever has had enough of it ends it.
+
+[node name="EndButton" type="StaticBody3D" parent="." groups=["pressable", "round_button", "round_button_end"]]
+transform = Transform3D(0, 0, -1, 0, 1, 0, 1, 0, 0, 4.94, 1.15, 3.6)
+script = ExtResource("1_button")
+
+[node name="Collision" type="CollisionShape3D" parent="EndButton"]
+shape = SubResource("BoxShape3D_btn")
+
+[node name="Base" type="MeshInstance3D" parent="EndButton"]
+mesh = SubResource("BoxMesh_btn")
+surface_material_override/0 = SubResource("Mat_btn_base")
+
+[node name="Cap" type="MeshInstance3D" parent="EndButton"]
+transform = Transform3D(1, 0, 0, 0, 0, -1, 0, 1, 0, 0, 0.03, 0.07)
+mesh = SubResource("CylinderMesh_cap")
+material_override = SubResource("Mat_btn_cap")
+
+[node name="Lamp" type="MeshInstance3D" parent="EndButton"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.125, 0.07)
+mesh = SubResource("BoxMesh_lamp")
+material_override = SubResource("Mat_btn_lamp")
+
+[node name="Label" type="Label3D" parent="EndButton"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.26, 0.07)
+pixel_size = 0.0018
+text = "END ROUND"
+font_size = 96
+outline_size = 18
+
+; TASK-1 (2026-09-19) -- THE SORTING JOB. Everything below is the hider job: a supply crate of
+; eighteen sortables, three bins along the +Z wall, and one poll node.
+;
+; THE RULE OF THE ROUND IS NOT AUTHORED HERE AND MUST NOT BE. SortRule.For(round) is odd -> sort
+; by COLOUR, even -> sort by SHAPE, derived on every peer from the round index the wire already
+; carries. Nothing in this file says which round is which, so the level cannot disagree with the
+; loop about what the bins are asking for.
+;
+; NEITHER OF A SORTABLE TWO FACTS IS AN [Export], AND BOTH LIVE IN NATIVE PROPERTIES.
+;   COLOUR is the suffix of the NetworkedProp node name -- Sort_000_Red. A node name survives
+;          instancing; an exported C# script property on a node inside an instanced sub-scene does
+;          NOT on this Godot/Mono build, and TaskRoom.tscn is instanced into Supermarket.tscn.
+;          That trap has now been paid for four times: PropManager.AuthoredKindOf (Crate.tscn
+;          kind/tint, 2026-07), Carryable.LoadLiftM, RoundClock.Room (CLOCK-1 3.1) and
+;          BurstDoor room-light lookup (CARRY-1 section 6).
+;   SHAPE  is the Body COLLIDER, through Carryable.ShapeFromCollider -- the same table that
+;          decides the prop wire kind and its SFX-1 material, so the sound and the sort can
+;          never disagree about what an object is. Cube -> cubic box -> Crate -> Wood;
+;          ball -> 0.08 m sphere -> Produce; can -> cylinder -> Can -> Tin. The three therefore
+;          also SOUND different, which is the packet own reason for choosing these shapes.
+;
+; THE NUMBERING IS THE ID ORDER. PropManager.AdoptAuthoredProps sorts by NODE PATH, and
+; "SearchRoom" sorts before "TaskRoom", so SearchRoom.tscn four crates keep ids 1000-1003 and
+; these eighteen are 1004-1021 in the order written below. Renaming or reordering one renumbers
+; the rest; tests/Run-SortTest.ps1 names ids, so it would notice.
+;
+; STRUCTURE, and it is not optional: a NetworkedProp (Node3D + script) whose child is literally
+; named "Body" and instances one of the three prefabs, plus a SortItem child. NetworkedProp._Ready
+; binds the Body rather than building one.
+;
+; THE CRATE IS NOT PRE-SORTED. The eighteen are interleaved on the 6 x 3 grid so no row and no
+; column is a group under either rule -- a crate that arrived already sorted by colour would hand
+; the player the answer to round 1 and make round 2 read as a trick.
+;
+; WHERE THINGS ARE. The crate is at (-2, 0, 1) and the bins are at x = 1.2 / 2.0 / 2.8, z = 4.6 --
+; about 5 m apart, so a trip is a real walk and being found mid-carry is the ordinary case rather
+; than bad luck. The bins are all inside DOOR-1 BurstRadiusM (3.0 m from the doorway at
+; (0, 1.1, 5.2)): measured from an object resting in one, 1.39 m / 2.12 m / 2.89 m. The crate is
+; about 7 m away and outside it on purpose -- the burst disturbs the WORK, not the supply.
+; The bins sit to the +X side of the doorway, clear of the leaf swing (which reaches x = -1.33).
+;
+; All twelve floats of every Transform3D below are basis ROWS (.claude/rules/godot-scenes.md);
+; every one is the identity basis plus a translation.
+
+[node name="SupplyCrate" parent="." instance=ExtResource("10_crate")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2, 0, 1)
+
+[node name="Sort_000_Red" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.55, 0.695, 0.68)
+script = ExtResource("12_netprop")
+
+[node name="Body" parent="Sort_000_Red" instance=ExtResource("15_cube")]
+
+[node name="SortItem" type="Node" parent="Sort_000_Red"]
+script = ExtResource("13_sortitem")
+
+[node name="Sort_001_Blue" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.33, 0.7, 0.68)
+script = ExtResource("12_netprop")
+
+[node name="Body" parent="Sort_001_Blue" instance=ExtResource("16_ball")]
+
+[node name="SortItem" type="Node" parent="Sort_001_Blue"]
+script = ExtResource("13_sortitem")
+
+[node name="Sort_002_Yellow" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.11, 0.69, 0.68)
+script = ExtResource("12_netprop")
+
+[node name="Body" parent="Sort_002_Yellow" instance=ExtResource("17_can")]
+
+[node name="SortItem" type="Node" parent="Sort_002_Yellow"]
+script = ExtResource("13_sortitem")
+
+[node name="Sort_003_Blue" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.89, 0.695, 0.68)
+script = ExtResource("12_netprop")
+
+[node name="Body" parent="Sort_003_Blue" instance=ExtResource("15_cube")]
+
+[node name="SortItem" type="Node" parent="Sort_003_Blue"]
+script = ExtResource("13_sortitem")
+
+[node name="Sort_004_Yellow" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.67, 0.7, 0.68)
+script = ExtResource("12_netprop")
+
+[node name="Body" parent="Sort_004_Yellow" instance=ExtResource("16_ball")]
+
+[node name="SortItem" type="Node" parent="Sort_004_Yellow"]
+script = ExtResource("13_sortitem")
+
+[node name="Sort_005_Red" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.45, 0.69, 0.68)
+script = ExtResource("12_netprop")
+
+[node name="Body" parent="Sort_005_Red" instance=ExtResource("17_can")]
+
+[node name="SortItem" type="Node" parent="Sort_005_Red"]
+script = ExtResource("13_sortitem")
+
+[node name="Sort_006_Yellow" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.55, 0.695, 1)
+script = ExtResource("12_netprop")
+
+[node name="Body" parent="Sort_006_Yellow" instance=ExtResource("15_cube")]
+
+[node name="SortItem" type="Node" parent="Sort_006_Yellow"]
+script = ExtResource("13_sortitem")
+
+[node name="Sort_007_Red" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.33, 0.7, 1)
+script = ExtResource("12_netprop")
+
+[node name="Body" parent="Sort_007_Red" instance=ExtResource("16_ball")]
+
+[node name="SortItem" type="Node" parent="Sort_007_Red"]
+script = ExtResource("13_sortitem")
+
+[node name="Sort_008_Blue" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.11, 0.69, 1)
+script = ExtResource("12_netprop")
+
+[node name="Body" parent="Sort_008_Blue" instance=ExtResource("17_can")]
+
+[node name="SortItem" type="Node" parent="Sort_008_Blue"]
+script = ExtResource("13_sortitem")
+
+[node name="Sort_009_Red" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.89, 0.695, 1)
+script = ExtResource("12_netprop")
+
+[node name="Body" parent="Sort_009_Red" instance=ExtResource("15_cube")]
+
+[node name="SortItem" type="Node" parent="Sort_009_Red"]
+script = ExtResource("13_sortitem")
+
+[node name="Sort_010_Blue" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.67, 0.7, 1)
+script = ExtResource("12_netprop")
+
+[node name="Body" parent="Sort_010_Blue" instance=ExtResource("16_ball")]
+
+[node name="SortItem" type="Node" parent="Sort_010_Blue"]
+script = ExtResource("13_sortitem")
+
+[node name="Sort_011_Yellow" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.45, 0.69, 1)
+script = ExtResource("12_netprop")
+
+[node name="Body" parent="Sort_011_Yellow" instance=ExtResource("17_can")]
+
+[node name="SortItem" type="Node" parent="Sort_011_Yellow"]
+script = ExtResource("13_sortitem")
+
+[node name="Sort_012_Blue" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.55, 0.695, 1.32)
+script = ExtResource("12_netprop")
+
+[node name="Body" parent="Sort_012_Blue" instance=ExtResource("15_cube")]
+
+[node name="SortItem" type="Node" parent="Sort_012_Blue"]
+script = ExtResource("13_sortitem")
+
+[node name="Sort_013_Yellow" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.33, 0.7, 1.32)
+script = ExtResource("12_netprop")
+
+[node name="Body" parent="Sort_013_Yellow" instance=ExtResource("16_ball")]
+
+[node name="SortItem" type="Node" parent="Sort_013_Yellow"]
+script = ExtResource("13_sortitem")
+
+[node name="Sort_014_Red" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.11, 0.69, 1.32)
+script = ExtResource("12_netprop")
+
+[node name="Body" parent="Sort_014_Red" instance=ExtResource("17_can")]
+
+[node name="SortItem" type="Node" parent="Sort_014_Red"]
+script = ExtResource("13_sortitem")
+
+[node name="Sort_015_Yellow" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.89, 0.695, 1.32)
+script = ExtResource("12_netprop")
+
+[node name="Body" parent="Sort_015_Yellow" instance=ExtResource("15_cube")]
+
+[node name="SortItem" type="Node" parent="Sort_015_Yellow"]
+script = ExtResource("13_sortitem")
+
+[node name="Sort_016_Red" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.67, 0.7, 1.32)
+script = ExtResource("12_netprop")
+
+[node name="Body" parent="Sort_016_Red" instance=ExtResource("16_ball")]
+
+[node name="SortItem" type="Node" parent="Sort_016_Red"]
+script = ExtResource("13_sortitem")
+
+[node name="Sort_017_Blue" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.45, 0.69, 1.32)
+script = ExtResource("12_netprop")
+
+[node name="Body" parent="Sort_017_Blue" instance=ExtResource("17_can")]
+
+[node name="SortItem" type="Node" parent="Sort_017_Blue"]
+script = ExtResource("13_sortitem")
+
+; THE THREE BINS. Identical instances of SortBin.tscn; the only thing that distinguishes them is
+; the NODE NAME, which is where the slot comes from (SortBin.SlotFromName). Slot 0 asks for RED on
+; an odd round and CUBE on an even one, and the boxes never move -- re-labelling rather than
+; re-arranging is what makes the second round of a match hard in the right way.
+;
+; Identity basis: the plate, the label and the icons already carry their own 180 degree yaw inside
+; SortBin.tscn so they read from -Z, which is the side of the wall the room is on.
+
+[node name="SortBin_0" parent="." instance=ExtResource("11_bin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.2, 0, 4.6)
+
+[node name="SortBin_1" parent="." instance=ExtResource("11_bin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2, 0, 4.6)
+
+[node name="SortBin_2" parent="." instance=ExtResource("11_bin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.8, 0, 4.6)
+
+; ONE POLL FOR THE WHOLE JOB. SortRoom walks this room for its bins and its SortItems, steps the
+; engine-free SortTally, and registers itself with HideSeekDriver as the IRoundFactSource that
+; answers SortsCompleted. It is a plain Node: it needs no transform, it builds nothing, and every
+; peer runs one (only the server answer is folded into the wire -- see SortRoom class doc).
+
+[node name="SortRoom" type="Node" parent="."]
+script = ExtResource("14_sortroom")

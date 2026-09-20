@@ -1,0 +1,74 @@
+[gd_scene load_steps=9 format=3]
+
+; REACH-1 (2026-09-19) — A CLOSED MOVABLE BOX. HollowShell.tscn plus a floor plate, so the object
+; inside it is enclosed on all six sides by something the seeker can pick up.
+;
+; §5b's fifth planted case is "inside a closed movable box (allowed)", and it is the case that
+; states the rule most sharply: EVERY eye ray hits this box first and not one of them reaches the
+; object, and the hide is still legal — because the first hit is a MOVABLE prop. A layer 3 that
+; only counted a direct line to the target would refuse the best hide in the game.
+;
+; Interior 0.84 x 0.54 x 0.84 (the floor plate eats 0.08 of the height), which clears a 0.44 m
+; crate. See HollowShell.tscn's header for why the lid is the first collider.
+
+[ext_resource type="Script" path="res://scripts/game/sandbox/Carryable.cs" id="1_carryable"]
+[ext_resource type="Script" path="res://scripts/game/sandbox/feel/Interactable.cs" id="2_interactable"]
+
+[sub_resource type="BoxMesh" id="BoxMesh_shell"]
+size = Vector3(1, 0.7, 1)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_lid"]
+size = Vector3(1, 0.08, 1)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_side_x"]
+size = Vector3(0.08, 0.62, 1)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_side_z"]
+size = Vector3(0.84, 0.62, 0.08)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_floor"]
+size = Vector3(0.84, 0.08, 0.84)
+
+[sub_resource type="StandardMaterial3D" id="Mat_shell"]
+albedo_color = Color(0.24, 0.42, 0.68, 1)
+roughness = 0.8
+
+[node name="ClosedShell" type="RigidBody3D"]
+mass = 3.0
+script = ExtResource("1_carryable")
+kind = 0
+tint = Color(0.24, 0.42, 0.68, 1)
+
+[node name="Visual" type="Node3D" parent="."]
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Visual"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.35, 0)
+mesh = SubResource("BoxMesh_shell")
+material_override = SubResource("Mat_shell")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.66, 0)
+shape = SubResource("BoxShape3D_lid")
+
+[node name="SideXPos" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.46, 0.31, 0)
+shape = SubResource("BoxShape3D_side_x")
+
+[node name="SideXNeg" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.46, 0.31, 0)
+shape = SubResource("BoxShape3D_side_x")
+
+[node name="SideZPos" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.31, 0.46)
+shape = SubResource("BoxShape3D_side_z")
+
+[node name="SideZNeg" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.31, -0.46)
+shape = SubResource("BoxShape3D_side_z")
+
+[node name="ShellFloor" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.04, 0)
+shape = SubResource("BoxShape3D_floor")
+
+[node name="Interactable" type="Node" parent="."]
+script = ExtResource("2_interactable")

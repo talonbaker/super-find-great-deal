@@ -1,0 +1,74 @@
+[gd_resource type="Resource" load_steps=11 format=3]
+
+[ext_resource type="Script" path="res://scripts/game/presentation/PresentationProfile.cs" id="1"]
+[ext_resource type="Script" path="res://scripts/game/presentation/EventResponse.cs" id="2"]
+
+[sub_resource type="Resource" id="step_pad"]
+script = ExtResource("2")
+Event = 0
+Sound = 10
+VolumeDb = -19.0
+PitchJitter = 0.14
+IntensityVolumeBoostDb = 3.0
+
+[sub_resource type="Resource" id="step_squeak"]
+script = ExtResource("2")
+Event = 0
+Sound = 11
+VolumeDb = -22.0
+PitchJitter = 0.16
+IntensityVolumeBoostDb = 5.0
+
+[sub_resource type="Resource" id="jump"]
+script = ExtResource("2")
+Event = 1
+Sound = 1
+VolumeDb = -12.0
+PitchJitter = 0.1
+
+[sub_resource type="Resource" id="bump"]
+script = ExtResource("2")
+Event = 3
+Sound = 3
+VolumeDb = -6.0
+PitchJitter = 0.08
+
+[sub_resource type="Resource" id="land_pad"]
+script = ExtResource("2")
+Event = 2
+Sound = 2
+VolumeDb = -10.0
+PitchJitter = 0.08
+IntensityVolumeBoostDb = 4.0
+
+[sub_resource type="Resource" id="land_squeak"]
+script = ExtResource("2")
+Event = 2
+Sound = 12
+VolumeDb = -18.0
+PitchJitter = 0.12
+
+[sub_resource type="Resource" id="land_dust"]
+script = ExtResource("2")
+Event = 2
+Sound = 0
+MinIntensity = 0.428
+PuffCount = 5
+PuffColor = Color(0.93, 0.87, 0.74, 0.85)
+PuffSize = 0.05
+PuffSpeed = 0.9
+PuffLifetime = 0.4
+
+[sub_resource type="Resource" id="flash"]
+script = ExtResource("2")
+Event = 12
+Sound = 13
+VolumeDb = -8.0
+PitchJitter = 0.05
+LightEnergy = 6.0
+LightRange = 20.0
+LightDuration = 0.12
+
+[resource]
+script = ExtResource("1")
+Responses = [SubResource("step_pad"), SubResource("step_squeak"), SubResource("jump"), SubResource("bump"), SubResource("land_pad"), SubResource("land_squeak"), SubResource("land_dust"), SubResource("flash")]

@@ -1,0 +1,46 @@
+; BT-9. THE IRIDESCENT THREAD -- the whole UI thread, in one material.
+;
+; Talon: "apply a light, subtle iridescent thread across this build's UI ... Keep it small -- not a
+; big overhaul ... Defer to standard UX/UI best practice for exactly where and how much."
+;
+; WHERE IT MAY GO -- A RULE, NOT A PREFERENCE, AND IT IS WHAT KEEPS IT SMALL:
+;   **The thread only ever touches non-interactive identity elements. It never touches a control,
+;   a state, or a focus indicator.**
+; Two placements are authorised and no third exists without a new direction:
+;   1. The title screen's wordmark UNDERLINE -- a 2-3 px rule beneath the wordmark.
+;   2. The HUD's bubble ICON fill (BT-8 applies it; set `band_axis` to (0.7, 0.7) there, because a
+;      diagonal band reads better than either axis inside a small round glyph).
+;
+; The obvious alternative -- the start button's focus ring -- was CONSIDERED AND REFUSED. The
+; reasoning is in `ui_iridescent.gdshader`'s header in full; in short: a focus ring is the entire
+; cursor for keyboard and controller users, this shader's colour drifts so its contrast against any
+; background is a moving number (UI components owe 3:1), and it animates continuously, which is the
+; exact case reduced-motion settings exist for. Decoration does not go on the one element that has
+; to be unambiguous.
+;
+; REDUCED MOTION / CAPTURES: set `drift_speed` to 0.0, or -- in spectrum-slice mode -- simply stop
+; advancing `phase`. Either freezes it to a static gradient and changes nothing else, which is both
+; the accessible state and the reproducible-screenshot state.
+;
+; NO OVERRIDES. The shader's defaults ARE the tuned values (saturation 0.30, alpha 0.55, one
+; 20-second drift cycle) and each placement sets what it needs on its OWN duplicate. Overriding
+; here would make this file a third opinion.
+;
+; WHAT EACH PLACEMENT SETS, 2026-08-28 (MENU-1 -- placement 1 was finally built):
+;   HUD bubble icon (scripts/ui/hud/BubbleIcon.cs): band_axis (0.7,0.7), alpha 1.0, value 1.0, and
+;     drift_speed 0 under reduced motion. UNCHANGED by MENU-1 -- the shader gained a spectrum-slice
+;     mode whose every uniform defaults to off, so this placement's output is what BT-9 shipped.
+;   Wordmark underline (scripts/ui/campfire/WordmarkRule.cs): the new slice mode. span_nm 58 (the
+;     agreed "zoomed in piece of the spectrum"), alpha 0.30 with highlight_gain 0.34 so the
+;     travelling peak is the agreed 0.64, grey_point 1.0 because this frame is light and a rule
+;     pulled toward white reads as a tint rather than as a grey line, opd_scale 2.5629 so the rule
+;     is physically the same film as the menu's bubbles, and `phase` fed every frame from the menu's
+;     own bubble phase -- which is what makes Talon's "make that move along with the bubble"
+;     literally true rather than merely simultaneous.
+[gd_resource type="ShaderMaterial" load_steps=2 format=3]
+
+[ext_resource type="Shader" path="res://resources/shaders/ui_iridescent.gdshader" id="1_thread"]
+
+[resource]
+render_priority = 0
+shader = ExtResource("1_thread")

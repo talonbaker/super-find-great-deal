@@ -1,0 +1,56 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/game/Gameplay.cs" id="1_game"]
+[ext_resource type="PackedScene" path="res://scenes/ui/PauseOverlay.tscn" id="2_pause"]
+
+[node name="Gameplay" type="Node3D"]
+script = ExtResource("1_game")
+
+[node name="Players" type="Node3D" parent="."]
+
+[node name="PlayerSpawner" type="MultiplayerSpawner" parent="."]
+spawn_path = NodePath("../Players")
+
+[node name="Props" type="Node3D" parent="."]
+
+[node name="PropSpawner" type="MultiplayerSpawner" parent="."]
+spawn_path = NodePath("../Props")
+
+[node name="Entities" type="Node3D" parent="."]
+
+[node name="EntitySpawner" type="MultiplayerSpawner" parent="."]
+spawn_path = NodePath("../Entities")
+
+[node name="Hud" type="CanvasLayer" parent="."]
+
+[node name="ConnectingLabel" type="Label" parent="Hud"]
+visible = false
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -120.0
+offset_top = -20.0
+offset_right = 120.0
+offset_bottom = 20.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_font_sizes/font_size = 28
+text = "Connecting..."
+horizontal_alignment = 1
+
+[node name="RoomCodeLabel" type="Label" parent="Hud"]
+visible = false
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 16.0
+offset_top = -42.0
+offset_right = 300.0
+offset_bottom = -14.0
+grow_vertical = 0
+theme_override_font_sizes/font_size = 20
+text = "Room: -----"
+
+[node name="PauseOverlay" parent="." instance=ExtResource("2_pause")]

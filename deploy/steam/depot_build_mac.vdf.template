@@ -1,0 +1,29 @@
+// SteamPipe depot build script (template) for the macOS client depot. See app_build.vdf.template
+// for how %DEPOT_ID_MAC% gets substituted. Only rendered when Upload-Steam.ps1 is given a
+// -DepotIdMac; a Windows-only upload never touches this file and its app_build.vdf stays
+// byte-identical to the pre-Mac pipeline.
+//
+// ContentRoot is the EXTRACTED bundle, not deploy\Export-MacClient.ps1's .zip - SteamPipe uploads
+// a file tree. The extraction has to happen on a filesystem that carries the POSIX executable
+// bit: Contents/MacOS/watis_game is mode 0755 inside the .zip, and an extraction onto NTFS
+// drops that, which a Mac tester only discovers as "you do not have permission to open". Extract
+// and upload this depot from WSL (Linux steamcmd), the way the 2026-07-24 pipeline did:
+//
+//   wsl -d Ubuntu -- bash -lc 'mkdir -p ~/mac-depot && cd ~/mac-depot \
+//     && cp /mnt/c/repos/Watis_Game/build/mac-client/watis_game.zip . && unzip -q -o watis_game.zip'
+//
+// ...then point this ContentRoot at that WSL path and run steamcmd there. Upload-Steam.ps1
+// refuses a LIVE mac upload from Windows for exactly this reason; its dry run still renders
+// this file so the IDs and the app_build wiring can be checked.
+"DepotBuildConfig"
+{
+	"DepotID"	"%DEPOT_ID_MAC%"
+	"ContentRoot"	"%CONTENT_ROOT_MAC%"
+
+	"FileMapping"
+	{
+		"LocalPath"	"*"
+		"DepotPath"	"."
+		"recursive"	"1"
+	}
+}

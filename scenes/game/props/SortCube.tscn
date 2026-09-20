@@ -1,0 +1,57 @@
+[gd_scene load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://scripts/game/sandbox/Carryable.cs" id="1_carryable"]
+[ext_resource type="Script" path="res://scripts/game/sandbox/feel/Interactable.cs" id="2_interactable"]
+
+[sub_resource type="BoxMesh" id="BoxMesh_sortcube"]
+size = Vector3(0.15, 0.15, 0.15)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_sortcube"]
+size = Vector3(0.15, 0.15, 0.15)
+
+; NO COLOUR HERE, AND THAT IS THE WHOLE POINT OF THIS PREFAB EXISTING ONCE INSTEAD OF THREE TIMES.
+; A sortable's colour IS the rule -- "put the red ones in the red bin" -- so the value the player
+; sees and the value SortRule.Matches tests have to be one value, not two that agree. SortItem
+; paints this material from SortPalette at _Ready off the enum it derived, so there is no authored
+; albedo anywhere that could drift from the rule. It therefore ships WHITE (the engine default,
+; so there is no line to write): a sortable whose SortItem never ran renders white and screams,
+; which is the same choice RoundClock.tscn's panel makes and for the same reason.
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_sortcube"]
+resource_local_to_scene = true
+roughness = 0.55
+metallic = 0.0
+
+; TASK-1 (2026-09-19). A sortable CUBE: 0.15 m on a side, 0.5 kg.
+;
+; STRUCTURE IS CAN.TSCN'S, EXACTLY -- a RigidBody3D root carrying Carryable, a Visual/
+; MeshInstance3D pair, a CollisionShape3D, and an Interactable child. TaskRoom.tscn places it the
+; way SearchRoom.tscn places a crate: a Node3D with the NetworkedProp script whose child is
+; literally named "Body" and instances this scene.
+;
+; THE COLLIDER IS THE SHAPE FACT. A CUBIC BoxShape3D resolves to Carryable.Shape.Crate through
+; Carryable.ShapeFromCollider ("are all three extents equal"), which makes the wire kind Crate,
+; the material Wood, and SortItem.ShapeOf answer SortShape.Cube. One native property, four
+; readers, and none of them can disagree. `kind` below is documentation only: a nested
+; PackedScene instance's exported C# script properties are NOT applied on this build
+; (PropManager.AuthoredKindOf, CARRY-1 section 6), which is exactly why nothing depends on it.
+;
+; NO `layers` LINE ON THE MESH. Render layer 19 is FP-1's first-person self-cull and a prop on it
+; vanishes from the hands of whoever is carrying it, for that player only (INT-0 section 3.4).
+[node name="SortCube" type="RigidBody3D"]
+mass = 0.5
+script = ExtResource("1_carryable")
+kind = 0
+
+[node name="Visual" type="Node3D" parent="."]
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Visual"]
+mesh = SubResource("BoxMesh_sortcube")
+material_override = SubResource("StandardMaterial3D_sortcube")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("BoxShape3D_sortcube")
+
+; The feel component -- see Crate.tscn's own note. HeftKg reads this body's Mass, so the 0.5 kg
+; above is what makes a cube read heavier in the hand than the 0.25 kg ball beside it.
+[node name="Interactable" type="Node" parent="."]
+script = ExtResource("2_interactable")

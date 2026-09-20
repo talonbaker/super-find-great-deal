@@ -1,0 +1,34 @@
+# Godot
+.godot/
+*.translation
+
+# .NET
+bin/
+obj/
+.vs/
+*.user
+
+# Test artifacts and headed-capture output (regenerated on demand)
+tests/logs/
+captures/
+
+# Local agent settings and worktrees; shared tooling under .claude/ IS tracked
+.claude/*
+!.claude/skills/
+!.claude/rules/
+!.claude/settings.json
+!.claude/hooks/
+
+# Export/deploy outputs
+build/
+
+# Steam local-dev App ID and rendered SteamPipe scripts (contain real IDs)
+steam_appid.txt
+deploy/steam/_generated/
+
+# Python bytecode (skill scripts)
+__pycache__/
+*.pyc
+
+# Blender's backup files
+*.blend1
