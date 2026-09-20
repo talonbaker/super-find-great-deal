@@ -133,6 +133,48 @@ public static class StockBake
         return bays;
     }
 
+    private static readonly Regex FacingHeader = new(
+        "^\[node name=\"(?<n>(Can|Box|Produce)_\d{3})\" type=\"Node3D\" parent=\"Stock\"\]",
+        RegexOptions.Compiled);
+
+    /// <summary>
+    /// SHELF-1's authored CARRYABLE products, read out of the same scene file the bays come from.
+    ///
+    /// <para>These are what the bulk is carved around. They are not decoration to this generator:
+    /// they are 120 networked RigidBody3D standing on the boards the bulk fills, and filler laid
+    /// over one would leave it permanently inside static geometry -- a rest audit reporting
+    /// StaticOverlap forever and a hider refused the Confirm on any of the forty-eight cans.</para>
+    ///
+    /// <para>The twelve in the BINS are read too and simply match no bay, which is the right
+    /// answer rather than a special case.</para>
+    /// </summary>
+    public static List<StockRoom.RoomFacing> ReadFacings(string repoRoot)
+    {
+        string[] lines = File.ReadAllLines(Path.Combine(repoRoot, SearchRoomPath));
+        var facings = new List<StockRoom.RoomFacing>();
+        for (int i = 0; i < lines.Length; i++)
+        {
+            Match m = FacingHeader.Match(lines[i]);
+            if (!m.Success)
+                continue;
+            for (int j = i + 1; j < lines.Length && j < i + 4; j++)
+            {
+                Match t = TransformLine.Match(lines[j]);
+                if (!t.Success)
+                    continue;
+                string[] parts = t.Groups["f"].Value.Split(',');
+                if (parts.Length != 12)
+                    break;
+                facings.Add(new StockRoom.RoomFacing(m.Groups["n"].Value,
+                    float.Parse(parts[9].Trim(), CultureInfo.InvariantCulture),
+                    float.Parse(parts[10].Trim(), CultureInfo.InvariantCulture),
+                    float.Parse(parts[11].Trim(), CultureInfo.InvariantCulture)));
+                break;
+            }
+        }
+        return facings;
+    }
+
     private static string Between(string s, string a, string b)
     {
         int i = s.IndexOf(a, StringComparison.Ordinal);
@@ -273,6 +315,7 @@ emission_energy_multiplier = 0.12
     {
         int cans = CountOf(stock.Instances, StockMaterial.Can);
         int boxes = CountOf(stock.Instances, StockMaterial.Box);
+        int produce = CountOf(stock.Instances, StockMaterial.Produce);
 
         // Dedupe the collision shapes by size — a shop floor has a few dozen distinct run
         // lengths and several hundred runs, so sharing the BoxShape3D resources turns ~270
@@ -310,8 +353,8 @@ emission_energy_multiplier = 0.12
 
         // load_steps = sub-resources + 1. Godot recomputes it on save; it only has to be >= the
         // real count for a load, and an exact number is what the engine itself writes.
-        int subResources = 6 + shapeIds.Count; // 3 meshes+3 materials is 6; 2 MultiMeshes below
-        int loadSteps = subResources + 2 + 1;
+        int subResources = 6 + shapeIds.Count; // three meshes + three materials, plus the shapes
+        int loadSteps = subResources + 3 + 1;  // + three MultiMeshes + the scene itself
 
         return $"""
 [gd_scene load_steps={loadSteps} format=3 uid="uid://stockbulk0sfgdmvp"]
@@ -335,6 +378,13 @@ emission_energy_multiplier = 0.12
 ; stock the server never simulates and the wire never carries: {cans + boxes} instances in TWO
 ; MultiMesh draws, using the carryable prefabs' own meshes, materials and sizes so nothing reads
 ; as fake, with the carryable facings still on the front of every board where a hand reaches.
+;
+; THE 120 CARRYABLE FACINGS ARE CARVED OUT OF IT, and that is load-bearing rather than tidy.
+; SHELF-1's products are networked RigidBody3D standing on these same boards; static filler
+; laid over one would leave a prop permanently inside static geometry -- every rest audit
+; reporting StaticOverlap, REACH-1's layer 3 answering InsideStatic, and a hider who chose
+; that prop refused the Confirm with NobodyCouldReachThat, in a room that renders perfectly.
+; StockBakeTests.NoBulkInstanceStandsWhereACarryableFacingStands is the gate on it.
 ;
 ; THE HOLES ARE THE POINT. Every board keeps one to three empty slots, and every one of them is
 ; cleared from a FACE inward rather than out of the middle -- see StockGap's doc. A hole with
@@ -368,6 +418,14 @@ mesh = SubResource("BoxMesh_box")
 instance_count = {boxes}
 buffer = PackedFloat32Array({BufferOf(stock.Instances, StockMaterial.Box)})
 
+{ProduceMeshAndMaterial}
+
+[sub_resource type="MultiMesh" id="MultiMesh_produce"]
+transform_format = 1
+mesh = SubResource("SphereMesh_produce")
+instance_count = {produce}
+buffer = PackedFloat32Array({BufferOf(stock.Instances, StockMaterial.Produce)})
+
 {shapeBlocks}[node name="StockBulk" type="Node3D"]
 
 ; {cans} cans in ONE draw. No script, no _Ready, nothing built: the buffer above IS the shelf.
@@ -375,11 +433,20 @@ buffer = PackedFloat32Array({BufferOf(stock.Instances, StockMaterial.Box)})
 multimesh = SubResource("MultiMesh_cans")
 material_override = SubResource("Mat_can")
 
-; {boxes} cereal boxes in ONE draw -- the aisle facings' filler, the end-cap displays and the two
-; floor pallet stacks.
+; {boxes} cereal boxes in ONE draw -- two aisles of filler plus the two floor pallet stacks.
 [node name="BulkBoxes" type="MultiMeshInstance3D" parent="."]
 multimesh = SubResource("MultiMesh_boxes")
 material_override = SubResource("Mat_box")
+
+; {produce} oranges in ONE draw, on the two end-caps. Produce rather than the boxes the packet
+; asked for there, because SHELF-1 authored twelve CARRYABLE oranges onto those same shelves and
+; the filler behind a facing has to be the same product as the facing -- SFX-1 gave each material
+; its own voice, so a cardboard thud out of a shelf of oranges is a lie a player can hear. The
+; stacked box displays the packet wanted are the two floor pallets, which is what a stacked
+; display physically is; an end-cap is a shelf.
+[node name="BulkProduce" type="MultiMeshInstance3D" parent="."]
+multimesh = SubResource("MultiMesh_produce")
+material_override = SubResource("Mat_produce")
 
 ; Layer 1 (the default, left unwritten because Godot strips settings that match the default --
 ; .claude/rules/godot-scenes.md) is where this game puts static geometry AND released props, and

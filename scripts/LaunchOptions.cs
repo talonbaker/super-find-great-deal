@@ -524,6 +524,16 @@ public sealed class LaunchOptions
     /// 0/1; tests/Run-SupermarketWorldTest.ps1 gates on the LINE, not the exit code.</summary>
     public bool SupermarketSelfTest { get; private set; }
 
+    /// <summary>--stock-selftest (STOCK-1): the BAKED shop floor's compliance test. Reads the
+    /// bays out of the live tree, re-derives the whole bulk layout from ShelfStock's arithmetic,
+    /// and checks the loaded MultiMesh instance counts and collision-run count against it — then
+    /// poses a real near-miss prefab in EVERY authored hole and runs the shipped
+    /// PlacementIntegrity.Check on it. Offline, headless, no server and no bots: neither question
+    /// needs one, and every peer is a way for the run to fail for an unrelated reason. Prints one
+    /// machine-readable summary line and exits 0/1; tests/Run-StockTest.ps1 gates on the LINE, not
+    /// the exit code.</summary>
+    public bool StockSelfTest { get; private set; }
+
     /// <summary>--build-ui-theme: regenerates <c>resources/UITheme.tres</c> from the C# design
     /// tokens, for editor preview. Safe to run at any time — the exported file is build output
     /// of the same factory the game runs, so it cannot drift from what ships (which is exactly
@@ -1271,6 +1281,10 @@ public sealed class LaunchOptions
                     break;
                 case "--supermarket-selftest":
                     options.SupermarketSelfTest = true;
+                    break;
+                // --- STOCK-1 -------------------------------------------------------------
+                case "--stock-selftest":
+                    options.StockSelfTest = true;
                     break;
                 // --- REACH-1 -------------------------------------------------------------
                 case "--reach-selftest":

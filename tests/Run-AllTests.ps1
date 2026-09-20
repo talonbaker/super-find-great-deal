@@ -208,7 +208,16 @@ try {
         # nothing; what it asserts is that its FIRST painted board equals the host's. About a
         # minute and a half. Like the two suites above it takes part in the join-index spawn
         # dealing, which is the other reason it belongs at the end.
-        @{ Name = "Round: holding board (HOLD-1)"; Script = "Run-HoldingBoardTest.ps1" }
+        @{ Name = "Round: holding board (HOLD-1)"; Script = "Run-HoldingBoardTest.ps1" },
+
+        # --- STOCK-1 (2026-09-20): the baked shop floor, and the holes in it ---
+        # Last, on the standing rule. Phase 1 is offline and judges EVERY authored hole in
+        # the room against the shipped PlacementIntegrity.Check; phases 2 and 3 are a server
+        # and two bots on udp/7911 -- its own port, taken from the one ladder table in
+        # .claude/rules/test-suite.md and not computed from a snapshot of tests/ (INT-0's
+        # measured lesson). It takes part in the join-index spawn dealing, which is the other
+        # reason it belongs at the end. About a minute.
+        @{ Name = "Stock: shop floor (STOCK-1)"; Script = "Run-StockTest.ps1" }
 
         # WHAT WAS REMOVED HERE AT THE FORK (BASE-1, 2026-09-19), so a reader of an old handoff
         # can tell "deleted" from "lost": the bubble-test world, the shared bubble counter and the

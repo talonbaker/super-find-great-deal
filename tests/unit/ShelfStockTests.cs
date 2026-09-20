@@ -232,12 +232,14 @@ public class ShelfStockTests
     private static BayFill CanBay(string seed = "Aisle0_Bay0") =>
         ShelfStock.Fill(ShelfStock.ShelfUnit, StockMaterial.Can, seed);
 
+    /// <summary>Every bay as it actually ships -- through StockRoom.FillBay, with the authored
+    /// carryable facings carved out -- so these assertions are about the shelf that is baked
+    /// and not about a hypothetical empty one.</summary>
     private static IEnumerable<BayFill> EveryAuthoredBay()
     {
+        List<StockRoom.RoomFacing> facings = StockBake.ReadFacings(Root);
         foreach (RoomBay bay in StockBake.ReadBays(Root))
-            yield return ShelfStock.Fill(
-                bay.IsEndCap ? ShelfStock.EndCap : ShelfStock.ShelfUnit,
-                StockRoom.MaterialFor(bay), bay.Name);
+            yield return StockRoom.FillBay(bay, facings);
     }
 
     [Fact]
@@ -280,8 +282,7 @@ public class ShelfStockTests
     {
         foreach (BayFill fill in EveryAuthoredBay())
         {
-            BaySpec bay = fill.SlotsAcross == ShelfStock.SlotsAcross(ShelfStock.EndCap, fill.Material)
-                ? ShelfStock.EndCap : ShelfStock.ShelfUnit;
+            BaySpec bay = BayOf(fill);
             (int rows, _) = ShelfStock.DepthGridOf(fill.Material);
 
             // Rebuild the occupancy grid from the instances that were actually emitted.
@@ -362,8 +363,7 @@ public class ShelfStockTests
     {
         foreach (BayFill fill in EveryAuthoredBay())
         {
-            BaySpec bay = fill.SlotsAcross == ShelfStock.SlotsAcross(ShelfStock.EndCap, fill.Material)
-                ? ShelfStock.EndCap : ShelfStock.ShelfUnit;
+            BaySpec bay = BayOf(fill);
             foreach (StockGap gap in fill.Gaps)
             {
                 float gapMinX = gap.CentreX - gap.WidthM * 0.5f + 1e-4f;
@@ -405,8 +405,7 @@ public class ShelfStockTests
     {
         foreach (BayFill fill in EveryAuthoredBay())
         {
-            BaySpec bay = fill.SlotsAcross == ShelfStock.SlotsAcross(ShelfStock.EndCap, fill.Material)
-                ? ShelfStock.EndCap : ShelfStock.ShelfUnit;
+            BaySpec bay = BayOf(fill);
             ProductSize p = ShelfStock.SizeOf(fill.Material);
             float maxX = bay.InnerSpanM * 0.5f;
             var legalY = new HashSet<float>();
@@ -479,6 +478,12 @@ public class ShelfStockTests
     // ===========================================================================================
     // Helpers.
     // ===========================================================================================
+
+    /// <summary>Which frame a fill was built on. The two bay lengths give different slot
+    /// counts for every material, so this is decidable from the fill alone.</summary>
+    private static BaySpec BayOf(BayFill fill) =>
+        fill.SlotsAcross == ShelfStock.SlotsAcross(ShelfStock.EndCap, fill.Material)
+            ? ShelfStock.EndCap : ShelfStock.ShelfUnit;
 
     private static int NearestBoard(float y, StockMaterial m)
     {

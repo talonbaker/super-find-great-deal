@@ -55,12 +55,18 @@ public static class StockRoom
     /// it because a bay of cans with cardboard filler behind the facings would make that tell a
     /// lie the first time anything fell.
     ///
-    /// <para>End-caps carry BOXES: the packet asks for stacked box displays there, and a box's
-    /// flat 0.19 x 0.28 face is what reads as a display from the cross-aisle.</para></summary>
+    /// <para><b>End-caps carry PRODUCE, and that is a correction to the packet rather than a
+    /// preference.</b> The packet gives the end-caps "stacked box displays (pallet stacks)".
+    /// SHELF-1 already authored TWELVE CARRYABLE ORANGES onto them -- two per shelf, six per
+    /// end-cap, ids 1106..1117 -- and the facings are what the bulk fills in behind. Box filler
+    /// behind orange facings would be the one place in this room where the thing you pick up and
+    /// the thing behind it are different products, and SFX-1's per-material voice is what makes
+    /// that a lie a player can hear. The stacked box displays are the floor pallets below, which
+    /// is what a stacked display physically is; an end-cap is a shelf.</para></summary>
     public static StockMaterial MaterialFor(RoomBay bay)
     {
         if (bay.IsEndCap)
-            return StockMaterial.Box;
+            return StockMaterial.Produce;
         // "Aisle0_Bay3" -> 0
         int i = bay.Name.IndexOf("Aisle", StringComparison.Ordinal);
         if (i >= 0 && i + 5 < bay.Name.Length && char.IsDigit(bay.Name[i + 5]))
@@ -197,9 +203,55 @@ public static class StockRoom
     // Assembly.
     // ------------------------------------------------------------------------------------
 
+    /// <summary>One of SHELF-1's 120 authored carryable products, in ROOM space.</summary>
+    public readonly record struct RoomFacing(string Name, float X, float Y, float Z);
+
+    /// <summary>
+    /// Which bay a facing stands in, and where in that bay -- or null if it stands on the floor.
+    ///
+    /// <para>Twelve of the 120 are loose in the bins rather than on a shelf, so "not in any bay"
+    /// is an ordinary answer and not a failure. A facing is matched on all three axes: inside the
+    /// bay's footprint AND at one of that bay's board heights, because a bin standing in front of
+    /// an end-cap would otherwise capture the oranges inside it.</para>
+    /// </summary>
+    public static BayFacing? FacingInBay(RoomBay bay, BaySpec spec, StockMaterial material, RoomFacing f)
+    {
+        float yaw = bay.YawDeg * MathF.PI / 180f;
+        float cos = MathF.Cos(yaw), sin = MathF.Sin(yaw);
+        float dx = f.X - bay.X, dz = f.Z - bay.Z;
+        // The inverse of Assemble's rotation.
+        float lx = dx * cos - dz * sin;
+        float lz = dx * sin + dz * cos;
+
+        if (MathF.Abs(lx) > spec.LengthM * 0.5f || MathF.Abs(lz) > spec.DepthM * 0.5f)
+            return null;
+
+        float half = ShelfStock.SizeOf(material).HalfHeightM;
+        for (int b = 0; b < ShelfStock.BoardCentreY.Length; b++)
+            if (MathF.Abs(ShelfStock.BoardTopY(b) + half - f.Y) < 0.03f)
+                return new BayFacing(b, lx, lz);
+        return null;
+    }
+
+    /// <summary>One bay's fill, with the authored facings that stand in it carved out. The one
+    /// path -- the generator, the engine self-test and the xUnit assertions all come through
+    /// here, so none of them can be checking a different shelf from the one that ships.</summary>
+    public static BayFill FillBay(RoomBay bay, IReadOnlyList<RoomFacing>? facings)
+    {
+        StockMaterial material = MaterialFor(bay);
+        BaySpec spec = bay.IsEndCap ? ShelfStock.EndCap : ShelfStock.ShelfUnit;
+        var mine = new List<BayFacing>();
+        if (facings != null)
+            foreach (RoomFacing f in facings)
+                if (FacingInBay(bay, spec, material, f) is BayFacing inBay)
+                    mine.Add(inBay);
+        return ShelfStock.Fill(spec, material, bay.Name, mine);
+    }
+
     /// <summary>Fill every bay the room authors, then add the floor pallets. Bin mounds are NOT
     /// here: they live inside the bin prefab so they move with it.</summary>
-    public static RoomStock Assemble(IReadOnlyList<RoomBay> bays)
+    public static RoomStock Assemble(IReadOnlyList<RoomBay> bays,
+        IReadOnlyList<RoomFacing>? facings = null)
     {
         var instances = new List<RoomInstance>();
         var colliders = new List<RoomCollider>();
@@ -209,7 +261,8 @@ public static class StockRoom
         {
             StockMaterial material = MaterialFor(bay);
             BaySpec spec = bay.IsEndCap ? ShelfStock.EndCap : ShelfStock.ShelfUnit;
-            BayFill fill = ShelfStock.Fill(spec, material, bay.Name);
+
+            BayFill fill = FillBay(bay, facings);
 
             float yaw = bay.YawDeg * MathF.PI / 180f;
             float cos = MathF.Cos(yaw), sin = MathF.Sin(yaw);

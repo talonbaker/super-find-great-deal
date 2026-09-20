@@ -84,6 +84,11 @@ public readonly record struct BulkCollisionRun(
     float SizeY,
     float SizeZ);
 
+/// <summary>One authored CARRYABLE product standing in this bay, in the bay's own local space.
+/// Bulk is carved away from these: they are the front row a hand reaches, and a filler laid over
+/// one would leave a networked prop permanently inside static geometry.</summary>
+public readonly record struct BayFacing(int Board, float X, float Z);
+
 /// <summary>Everything one bay's fill produced.</summary>
 public sealed class BayFill
 {
@@ -180,7 +185,10 @@ public static class ShelfStock
     {
         StockMaterial.Can => 0.09f,
         StockMaterial.Box => 0.21f,
-        StockMaterial.Produce => 0.17f,
+        // 0.175 rather than 0.17, so the seven slots on a 1.28 m end-cap land ON SHELF-1's
+        // authored oranges (bay-local x = +/-0.35) instead of straddling them. A grid out of
+        // phase with the facings it fills around empties two cells per facing instead of one.
+        StockMaterial.Produce => 0.175f,
         _ => throw new ArgumentOutOfRangeException(nameof(m)),
     };
 
@@ -224,6 +232,24 @@ public static class ShelfStock
     /// not assumed, by <c>ShelfStockTests.EveryGapClearsTheWidestDealProp</c>.</summary>
     public static int GapSlotsOf(StockMaterial m) => m == StockMaterial.Can ? 3 : 2;
 
+    /// <summary>
+    /// How much room bulk leaves around an authored CARRYABLE facing, <b>on top of</b> the two
+    /// products' own half-widths — so a cell is emptied when its product would come within this
+    /// of touching the facing.
+    ///
+    /// <para>10 mm, and the size is argued rather than picked. The quantity that matters is
+    /// PENETRATION, which the rest audit judges at
+    /// <c>PlacementIntegrity.DefaultOverlapToleranceM</c> (0.02 m); any positive clearance is
+    /// already zero penetration, so this is margin against the two grids being slightly out of
+    /// phase, not against the audit. It cannot simply be made generous: the produce grid's pitch
+    /// is 0.175 m for a 0.16 m sphere, so a clearance of 0.02 would empty both NEIGHBOURS of every
+    /// facing as well and leave an end-cap barer than SHELF-1 left it — measured while writing
+    /// this, 2 of 14 cells surviving on a board. 10 mm empties the facing's own cell and stops
+    /// there, and the closest a bulk product then stands to a carryable one is 5 mm (a can, whose
+    /// 0.09 m pitch is the tightest).</para>
+    /// </summary>
+    public const float FacingClearanceM = 0.01f;
+
     /// <summary>Holes per board: one to three, which is what a real shelf looks like at the end
     /// of a trading day.</summary>
     public const int MinGapsPerBoard = 1;
@@ -259,7 +285,8 @@ public static class ShelfStock
     /// </summary>
     /// <param name="seed">The bay's node name (e.g. <c>Aisle0_Bay2</c>). Two bays with the same
     /// name get the same picture; that is why the caller passes the path and not an index.</param>
-    public static BayFill Fill(BaySpec bay, StockMaterial material, string seed)
+    public static BayFill Fill(BaySpec bay, StockMaterial material, string seed,
+        IReadOnlyList<BayFacing>? facings = null)
     {
         var rng = new StockRng(seed);
         int across = SlotsAcross(bay, material);
@@ -278,6 +305,37 @@ public static class ShelfStock
             filled[b] = new int[across];
             for (int s = 0; s < across; s++)
                 filled[b][s] = mask;
+
+            // THE FACINGS COME OUT OF THE GRID FIRST, and this is not an optimisation.
+            //
+            // SHELF-1's 120 products are CARRYABLE RigidBody3D standing on these same boards at
+            // these same heights, and they are the front row the packet keeps ("the existing
+            // Can/CerealBox/Produce networked prefabs on the front row of every board ... bulk
+            // BEHIND the facings"). Bulk collision laid over one of them would put a networked
+            // prop permanently inside static geometry: every rest audit would report
+            // StaticOverlap, REACH-1's layer 3 would answer InsideStatic, and a hider who chose
+            // one of those forty-eight cans would be refused the Confirm on it. A hundred and
+            // twenty of those is the whole room broken, quietly.
+            //
+            // So every cell whose product box, grown by the placement tolerance, would touch an
+            // authored facing is emptied of bulk. The collision runs are computed from what is
+            // left, so the facing ends up standing in its own hole in the filler -- which is what
+            // a front row IS -- and its own collider is what fills that volume.
+            if (facings != null)
+                foreach (BayFacing f in facings)
+                {
+                    if (f.Board != b)
+                        continue;
+                    for (int s = 0; s < across; s++)
+                    {
+                        if (MathF.Abs(SlotX(bay, material, s) - f.X)
+                            >= size.WidthM + FacingClearanceM)
+                            continue;
+                        for (int r = 0; r < rows; r++)
+                            if (MathF.Abs(RowZ(material, r) - f.Z) < size.DepthM + FacingClearanceM)
+                                filled[b][s] &= ~(1 << r);
+                    }
+                }
 
             // The rows this board actually has, ascending. A hole is cleared from one END of
             // this list inward, which is what makes it reach a face.
@@ -307,8 +365,16 @@ public static class ShelfStock
                             break;
                         }
                     }
+                    // A candidate whose slots are already empty is where a FACING stands, not a
+                    // hole: counting it would report a hole the level did not author and would
+                    // hand the placement check a pose with a carryable can already in it.
                     if (!clashes)
                     {
+                        bool anyStock = false;
+                        for (int s = candidate; s < candidate + gapSlots && !anyStock; s++)
+                            anyStock = filled[b][s] != 0;
+                        if (!anyStock)
+                            continue;
                         first = candidate;
                         break;
                     }

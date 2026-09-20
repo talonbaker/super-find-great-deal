@@ -39,7 +39,7 @@ public class StockBakeTests
     public void TheBakedSceneFilesAreExactlyWhatTheArithmeticProduces()
     {
         List<RoomBay> bays = StockBake.ReadBays(Root);
-        RoomStock stock = StockRoom.Assemble(bays);
+        RoomStock stock = StockRoom.Assemble(bays, StockBake.ReadFacings(Root));
 
         foreach ((string rel, string want) in new[]
                  {
@@ -124,17 +124,18 @@ public class StockBakeTests
     [Fact]
     public void TheInstanceCountIsInsideTheBandTheFrameTimeWasMeasuredAt()
     {
-        RoomStock stock = StockRoom.Assemble(StockBake.ReadBays(Root));
+        RoomStock stock = StockRoom.Assemble(StockBake.ReadBays(Root), StockBake.ReadFacings(Root));
         int total = stock.Instances.Count;
 
         Assert.InRange(total, 1500, 3200);
         Assert.InRange(stock.CountOf(StockMaterial.Can), 1000, 2000);
         Assert.InRange(stock.CountOf(StockMaterial.Box), 400, 1200);
+        Assert.InRange(stock.CountOf(StockMaterial.Produce), 20, 200);
 
-        // Two MultiMesh draws for the room plus one inside the bin prefab. Whatever else changes,
+        // Three MultiMesh draws for the room plus one inside the bin prefab. Whatever else changes,
         // the DRAW count must not start scaling with the bay count.
         string bulk = File.ReadAllText(Path.Combine(Root, StockBake.BulkScenePath));
-        Assert.Equal(2, Regex.Matches(bulk, @"type=""MultiMeshInstance3D""").Count);
+        Assert.Equal(3, Regex.Matches(bulk, @"type=""MultiMeshInstance3D""").Count);
     }
 
     /// <summary>
@@ -155,8 +156,10 @@ public class StockBakeTests
             StockMaterial want = aisle % 2 == 0 ? StockMaterial.Can : StockMaterial.Box;
             Assert.Equal(want, StockRoom.MaterialFor(b));
         }
+        // End-caps carry PRODUCE: SHELF-1 authored twelve carryable oranges onto them, and the
+        // bulk behind a facing must be the same product as the facing. See StockRoom.MaterialFor.
         foreach (RoomBay b in bays.Where(b => b.IsEndCap))
-            Assert.Equal(StockMaterial.Box, StockRoom.MaterialFor(b));
+            Assert.Equal(StockMaterial.Produce, StockRoom.MaterialFor(b));
 
         // The end-caps are instanced rotated 90 degrees about Y, so their 1.4 m length runs along
         // the room's z. If that stops being true the bulk inside them is rotated into the aisle.
@@ -219,6 +222,49 @@ public class StockBakeTests
                     + "room is part of somebody else's staging.");
             }
         }
+    }
+
+    /// <summary>
+    /// <b>No bulk instance stands where one of SHELF-1's 120 carryable products stands.</b>
+    ///
+    /// <para>This is the one that would have broken the room. The 120 authored products are
+    /// networked <c>RigidBody3D</c> on these same boards; static filler laid over one puts a
+    /// networked prop permanently inside static geometry, so every rest audit reports
+    /// <c>StaticOverlap</c>, REACH-1's layer 3 answers <c>InsideStatic</c>, and a hider who chose
+    /// any of those props is refused the Confirm with <c>NobodyCouldReachThat</c>. It would look
+    /// exactly like a room that renders perfectly.</para>
+    /// </summary>
+    [Fact]
+    public void NoBulkInstanceStandsWhereACarryableFacingStands()
+    {
+        List<StockRoom.RoomFacing> facings = StockBake.ReadFacings(Root);
+        Assert.Equal(120, facings.Count);
+
+        RoomStock stock = StockRoom.Assemble(StockBake.ReadBays(Root), facings);
+        float worst = float.MaxValue;
+        string where = "(none)";
+
+        foreach (StockRoom.RoomFacing f in facings)
+            foreach (RoomInstance i in stock.Instances)
+            {
+                // Only the facing's own shelf can touch it; 0.30 m is under the 0.55 m board pitch.
+                if (MathF.Abs(i.Y - f.Y) > 0.30f)
+                    continue;
+                ProductSize a = ShelfStock.SizeOf(i.Material);
+                float clear = MathF.Max(MathF.Abs(i.X - f.X) - a.WidthM,
+                                        MathF.Abs(i.Z - f.Z) - a.DepthM);
+                if (clear < worst)
+                {
+                    worst = clear;
+                    where = $"{f.Name} at ({f.X:0.00}, {f.Y:0.00}, {f.Z:0.00}) vs bulk "
+                            + $"{i.Material} at ({i.X:0.00}, {i.Y:0.00}, {i.Z:0.00})";
+                }
+            }
+
+        Assert.True(worst > 0f,
+            $"bulk overlaps an authored carryable by {-worst:0.000} m: {where}. That prop would "
+            + "be inside static geometry for the whole round, every rest audit would report "
+            + "StaticOverlap, and a hider who chose it would be refused the Confirm.");
     }
 
     /// <summary>
