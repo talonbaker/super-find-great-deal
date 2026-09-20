@@ -143,10 +143,15 @@ try {
 
     # The phase-2 seed comes from phase 1's own output. Prefer a CAN hole: cans are the tightest
     # of the three grids (0.09 m pitch), so it is the hole with the least room in it.
+    #
+    # THE KIND IS PASSED EXPLICITLY AND THAT IS NOT OPTIONAL. --seed-test-props defaults to a
+    # CRATE -- 0.44 m on every axis -- and no hole on any shelf in this room is a third of that.
+    # A run that forgot the kind would seed a crate half inside a bay, report StaticOverlap, and
+    # look exactly like the defect this suite exists to catch.
     foreach ($m in @("Can", "Box", "Produce")) {
         $hit = @($places | Where-Object { $_ -match "material=$m\b" }) | Select-Object -First 1
         if ($hit -and $hit -match 'at=([-\d.]+),([-\d.]+),([-\d.]+)') {
-            $script:PlacePose = "$($matches[1]),$($matches[2]),$($matches[3])"
+            $script:PlacePose = "$($matches[1]),$($matches[2]),$($matches[3]),$($m.ToLower())"
             $script:PlaceWhere = $hit
             break
         }
