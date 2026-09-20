@@ -1,4 +1,4 @@
-[gd_scene load_steps=25 format=3]
+[gd_scene load_steps=33 format=3]
 
 [ext_resource type="Script" path="res://scripts/game/world/BurstDoor.cs" id="1_burstdoor"]
 
@@ -40,6 +40,14 @@
 ; the main room sees nothing of it even for the frames between the teleport and the burst.
 
 [ext_resource type="PackedScene" path="res://scenes/game/world/supermarket/RoundClock.tscn" id="9_clock"]
+[ext_resource type="PackedScene" path="res://scenes/game/world/supermarket/SupplyCrate.tscn" id="10_crate"]
+[ext_resource type="PackedScene" path="res://scenes/game/world/supermarket/SortBin.tscn" id="11_bin"]
+[ext_resource type="Script" path="res://scripts/game/props/NetworkedProp.cs" id="12_netprop"]
+[ext_resource type="Script" path="res://scripts/game/round/SortItem.cs" id="13_sortitem"]
+[ext_resource type="Script" path="res://scripts/game/world/SortRoom.cs" id="14_sortroom"]
+[ext_resource type="PackedScene" path="res://scenes/game/props/SortCube.tscn" id="15_cube"]
+[ext_resource type="PackedScene" path="res://scenes/game/props/SortBall.tscn" id="16_ball"]
+[ext_resource type="PackedScene" path="res://scenes/game/props/SortCan.tscn" id="17_can"]
 
 [sub_resource type="StandardMaterial3D" id="Mat_floor"]
 resource_name = "task room floor (warm grey)"
@@ -345,3 +353,237 @@ shape = SubResource("BoxShape3D_bounds")
 
 [node name="RoundClock" parent="." instance=ExtResource("9_clock")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.35, -4.94)
+
+; TASK-1 (2026-09-19) -- THE SORTING JOB. Everything below is the hider job: a supply crate of
+; eighteen sortables, three bins along the +Z wall, and one poll node.
+;
+; THE RULE OF THE ROUND IS NOT AUTHORED HERE AND MUST NOT BE. SortRule.For(round) is odd -> sort
+; by COLOUR, even -> sort by SHAPE, derived on every peer from the round index the wire already
+; carries. Nothing in this file says which round is which, so the level cannot disagree with the
+; loop about what the bins are asking for.
+;
+; NEITHER OF A SORTABLE TWO FACTS IS AN [Export], AND BOTH LIVE IN NATIVE PROPERTIES.
+;   COLOUR is the suffix of the NetworkedProp node name -- Sort_000_Red. A node name survives
+;          instancing; an exported C# script property on a node inside an instanced sub-scene does
+;          NOT on this Godot/Mono build, and TaskRoom.tscn is instanced into Supermarket.tscn.
+;          That trap has now been paid for four times: PropManager.AuthoredKindOf (Crate.tscn
+;          kind/tint, 2026-07), Carryable.LoadLiftM, RoundClock.Room (CLOCK-1 3.1) and
+;          BurstDoor room-light lookup (CARRY-1 section 6).
+;   SHAPE  is the Body COLLIDER, through Carryable.ShapeFromCollider -- the same table that
+;          decides the prop wire kind and its SFX-1 material, so the sound and the sort can
+;          never disagree about what an object is. Cube -> cubic box -> Crate -> Wood;
+;          ball -> 0.08 m sphere -> Produce; can -> cylinder -> Can -> Tin. The three therefore
+;          also SOUND different, which is the packet own reason for choosing these shapes.
+;
+; THE NUMBERING IS THE ID ORDER. PropManager.AdoptAuthoredProps sorts by NODE PATH, and
+; "SearchRoom" sorts before "TaskRoom", so SearchRoom.tscn four crates keep ids 1000-1003 and
+; these eighteen are 1004-1021 in the order written below. Renaming or reordering one renumbers
+; the rest; tests/Run-SortTest.ps1 names ids, so it would notice.
+;
+; STRUCTURE, and it is not optional: a NetworkedProp (Node3D + script) whose child is literally
+; named "Body" and instances one of the three prefabs, plus a SortItem child. NetworkedProp._Ready
+; binds the Body rather than building one.
+;
+; THE CRATE IS NOT PRE-SORTED. The eighteen are interleaved on the 6 x 3 grid so no row and no
+; column is a group under either rule -- a crate that arrived already sorted by colour would hand
+; the player the answer to round 1 and make round 2 read as a trick.
+;
+; WHERE THINGS ARE. The crate is at (-2, 0, 1) and the bins are at x = 1.2 / 2.0 / 2.8, z = 4.6 --
+; about 5 m apart, so a trip is a real walk and being found mid-carry is the ordinary case rather
+; than bad luck. The bins are all inside DOOR-1 BurstRadiusM (3.0 m from the doorway at
+; (0, 1.1, 5.2)): measured from an object resting in one, 1.39 m / 2.12 m / 2.89 m. The crate is
+; about 7 m away and outside it on purpose -- the burst disturbs the WORK, not the supply.
+; The bins sit to the +X side of the doorway, clear of the leaf swing (which reaches x = -1.33).
+;
+; All twelve floats of every Transform3D below are basis ROWS (.claude/rules/godot-scenes.md);
+; every one is the identity basis plus a translation.
+
+[node name="SupplyCrate" parent="." instance=ExtResource("10_crate")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2, 0, 1)
+
+[node name="Sort_000_Red" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.55, 0.695, 0.68)
+script = ExtResource("12_netprop")
+
+[node name="Body" parent="Sort_000_Red" instance=ExtResource("15_cube")]
+
+[node name="SortItem" type="Node" parent="Sort_000_Red"]
+script = ExtResource("13_sortitem")
+
+[node name="Sort_001_Blue" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.33, 0.7, 0.68)
+script = ExtResource("12_netprop")
+
+[node name="Body" parent="Sort_001_Blue" instance=ExtResource("16_ball")]
+
+[node name="SortItem" type="Node" parent="Sort_001_Blue"]
+script = ExtResource("13_sortitem")
+
+[node name="Sort_002_Yellow" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.11, 0.69, 0.68)
+script = ExtResource("12_netprop")
+
+[node name="Body" parent="Sort_002_Yellow" instance=ExtResource("17_can")]
+
+[node name="SortItem" type="Node" parent="Sort_002_Yellow"]
+script = ExtResource("13_sortitem")
+
+[node name="Sort_003_Blue" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.89, 0.695, 0.68)
+script = ExtResource("12_netprop")
+
+[node name="Body" parent="Sort_003_Blue" instance=ExtResource("15_cube")]
+
+[node name="SortItem" type="Node" parent="Sort_003_Blue"]
+script = ExtResource("13_sortitem")
+
+[node name="Sort_004_Yellow" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.67, 0.7, 0.68)
+script = ExtResource("12_netprop")
+
+[node name="Body" parent="Sort_004_Yellow" instance=ExtResource("16_ball")]
+
+[node name="SortItem" type="Node" parent="Sort_004_Yellow"]
+script = ExtResource("13_sortitem")
+
+[node name="Sort_005_Red" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.45, 0.69, 0.68)
+script = ExtResource("12_netprop")
+
+[node name="Body" parent="Sort_005_Red" instance=ExtResource("17_can")]
+
+[node name="SortItem" type="Node" parent="Sort_005_Red"]
+script = ExtResource("13_sortitem")
+
+[node name="Sort_006_Yellow" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.55, 0.695, 1)
+script = ExtResource("12_netprop")
+
+[node name="Body" parent="Sort_006_Yellow" instance=ExtResource("15_cube")]
+
+[node name="SortItem" type="Node" parent="Sort_006_Yellow"]
+script = ExtResource("13_sortitem")
+
+[node name="Sort_007_Red" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.33, 0.7, 1)
+script = ExtResource("12_netprop")
+
+[node name="Body" parent="Sort_007_Red" instance=ExtResource("16_ball")]
+
+[node name="SortItem" type="Node" parent="Sort_007_Red"]
+script = ExtResource("13_sortitem")
+
+[node name="Sort_008_Blue" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.11, 0.69, 1)
+script = ExtResource("12_netprop")
+
+[node name="Body" parent="Sort_008_Blue" instance=ExtResource("17_can")]
+
+[node name="SortItem" type="Node" parent="Sort_008_Blue"]
+script = ExtResource("13_sortitem")
+
+[node name="Sort_009_Red" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.89, 0.695, 1)
+script = ExtResource("12_netprop")
+
+[node name="Body" parent="Sort_009_Red" instance=ExtResource("15_cube")]
+
+[node name="SortItem" type="Node" parent="Sort_009_Red"]
+script = ExtResource("13_sortitem")
+
+[node name="Sort_010_Blue" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.67, 0.7, 1)
+script = ExtResource("12_netprop")
+
+[node name="Body" parent="Sort_010_Blue" instance=ExtResource("16_ball")]
+
+[node name="SortItem" type="Node" parent="Sort_010_Blue"]
+script = ExtResource("13_sortitem")
+
+[node name="Sort_011_Yellow" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.45, 0.69, 1)
+script = ExtResource("12_netprop")
+
+[node name="Body" parent="Sort_011_Yellow" instance=ExtResource("17_can")]
+
+[node name="SortItem" type="Node" parent="Sort_011_Yellow"]
+script = ExtResource("13_sortitem")
+
+[node name="Sort_012_Blue" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.55, 0.695, 1.32)
+script = ExtResource("12_netprop")
+
+[node name="Body" parent="Sort_012_Blue" instance=ExtResource("15_cube")]
+
+[node name="SortItem" type="Node" parent="Sort_012_Blue"]
+script = ExtResource("13_sortitem")
+
+[node name="Sort_013_Yellow" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.33, 0.7, 1.32)
+script = ExtResource("12_netprop")
+
+[node name="Body" parent="Sort_013_Yellow" instance=ExtResource("16_ball")]
+
+[node name="SortItem" type="Node" parent="Sort_013_Yellow"]
+script = ExtResource("13_sortitem")
+
+[node name="Sort_014_Red" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.11, 0.69, 1.32)
+script = ExtResource("12_netprop")
+
+[node name="Body" parent="Sort_014_Red" instance=ExtResource("17_can")]
+
+[node name="SortItem" type="Node" parent="Sort_014_Red"]
+script = ExtResource("13_sortitem")
+
+[node name="Sort_015_Yellow" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.89, 0.695, 1.32)
+script = ExtResource("12_netprop")
+
+[node name="Body" parent="Sort_015_Yellow" instance=ExtResource("15_cube")]
+
+[node name="SortItem" type="Node" parent="Sort_015_Yellow"]
+script = ExtResource("13_sortitem")
+
+[node name="Sort_016_Red" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.67, 0.7, 1.32)
+script = ExtResource("12_netprop")
+
+[node name="Body" parent="Sort_016_Red" instance=ExtResource("16_ball")]
+
+[node name="SortItem" type="Node" parent="Sort_016_Red"]
+script = ExtResource("13_sortitem")
+
+[node name="Sort_017_Blue" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.45, 0.69, 1.32)
+script = ExtResource("12_netprop")
+
+[node name="Body" parent="Sort_017_Blue" instance=ExtResource("17_can")]
+
+[node name="SortItem" type="Node" parent="Sort_017_Blue"]
+script = ExtResource("13_sortitem")
+
+; THE THREE BINS. Identical instances of SortBin.tscn; the only thing that distinguishes them is
+; the NODE NAME, which is where the slot comes from (SortBin.SlotFromName). Slot 0 asks for RED on
+; an odd round and CUBE on an even one, and the boxes never move -- re-labelling rather than
+; re-arranging is what makes the second round of a match hard in the right way.
+;
+; Identity basis: the plate, the label and the icons already carry their own 180 degree yaw inside
+; SortBin.tscn so they read from -Z, which is the side of the wall the room is on.
+
+[node name="SortBin_0" parent="." instance=ExtResource("11_bin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.2, 0, 4.6)
+
+[node name="SortBin_1" parent="." instance=ExtResource("11_bin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2, 0, 4.6)
+
+[node name="SortBin_2" parent="." instance=ExtResource("11_bin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.8, 0, 4.6)
+
+; ONE POLL FOR THE WHOLE JOB. SortRoom walks this room for its bins and its SortItems, steps the
+; engine-free SortTally, and registers itself with HideSeekDriver as the IRoundFactSource that
+; answers SortsCompleted. It is a plain Node: it needs no transform, it builds nothing, and every
+; peer runs one (only the server answer is folded into the wire -- see SortRoom class doc).
+
+[node name="SortRoom" type="Node" parent="."]
+script = ExtResource("14_sortroom")

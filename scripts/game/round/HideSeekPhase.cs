@@ -39,7 +39,7 @@ public enum HideSeekPhase : byte
     Seeking = 2,
 
     /// <summary>The object is in the drop-off bin. The seeker has been put in the vestibule behind
-    /// the burst door (DOOR-1) and walks in; the hider's towers are already frozen. Ends on
+    /// the burst door (DOOR-1) and walks in; the hider's sorts are already frozen. Ends on
     /// anybody's End press — there is no timer here on purpose, because the beat after the startle
     /// belongs to the players, not to a clock.</summary>
     Together = 3,

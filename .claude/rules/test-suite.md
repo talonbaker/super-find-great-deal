@@ -906,7 +906,7 @@ stands, which is the list to read before picking the next one:
 wave-2 lanes were merged and their five separate part-tables could finally be resolved into one).
 Every number below is a REGISTERED suite's bind port on the merged tree, audited by grepping
 every `$Port` in `tests/` after the last merge: **all distinct.** Read this table before picking
-the next one, and take **7905**.
+the next one, and take **7908**.
 
 | Port | Suite | Lane |
 |---|---|---|
@@ -920,6 +920,8 @@ the next one, and take **7905**.
 | 7902 | `Run-MaterialSfxTest.ps1` | SFX-1 (SFX-2 merges at INT-1 on the same port) |
 | 7903 | `Run-ReachTest.ps1` | REACH-1 |
 | **7904** | **`Run-RoundClockTest.ps1`** (and `Capture-RoundClock.ps1`, unregistered) | **CLOCK-1** |
+| 7905 / 7906 | *reserved, no suite on this branch* | wave-3 lanes branched off INT-0B |
+| **7907** | **`Run-SortTest.ps1`** | **TASK-1** |
 
 Everything below 7893 is the pre-fork ladder and is unchanged: 7777, 7778, 7788, 7799, 7807,
 7809/7810, 7815, 7816, 7817, 7818, 7821, 7822, 7830, 7831, 7834.
@@ -1143,3 +1145,177 @@ wrapper**, and if you write a one-suite or subset wrapper, either invoke the sui
 (`&` in the same thread, as the marathon does) or do not take the lock in the wrapper at all.
 The two Godot lanes this machine runs make subset wrappers common enough that this will be hit
 again.
+
+## TASK-1: udp/7907, a PowerShell 5.1 trap, and a fixture that stalled on level geometry (2026-09-19)
+
+`tests/Run-SortTest.ps1` claims **udp/7907**, handed out by the orchestrator rather than computed
+from a snapshot of `tests/` -- INT-0's lesson applied rather than re-learned for a fourth time.
+7905 and 7906 are wave-3 reservations with no suite on this branch (BTN-1 holds 7906), so a grep
+here cannot see them and would happily have produced 7905. The one ladder table in the REACH-1
+section above has the row; **the next free number is 7908.**
+
+Baseline, machine busy throughout (BTN-1's suite held the machine-wide mutex for ~11 minutes
+immediately before the first run and its Godot processes were alive during all four):
+
+```
+        hider: roundSorts 2 at Together over 30 sample(s)
+        seeker: roundSorts 2 at Together over 29 sample(s)
+        server: 2 sort-good, 1 sort-bad
+        hider : 2 sort-good, 1 sort-bad
+        seeker: 2 sort-good, 1 sort-bad
+        hider held prop 1013 in 168 Seeking sample(s)
+  right sorts counted on the wire:      2
+  sort-good lines across 3 processes:   6
+  sort-bad lines across 3 processes:    3
+  duplicate counts for a re-placed obj: 0
+  burst force-dropped:                  1 prop(s)
+  hider's card at Tally:                2 sorted
+```
+
+**The quantity to compare is the per-PROCESS sort-good/sort-bad pair, not the wire count.**
+TASK-1 adds no wire field: the count rides `HideSeekWire`'s existing slot and every peer DERIVES
+its own verdicts from replicated props. So "2 / 1" appearing three times is the assertion, and a
+run where the server says 2/1 and the clients say 0/0 is the failure the suite exists for -- it
+is exactly what the planted "only the server derives" fault produced, with the wire count still
+reading a perfectly correct 2 on both peers.
+
+### `@($list)` on a `List[object]` throws in Windows PowerShell 5.1
+
+Measured, and it cost twenty minutes because the message points nowhere useful. A helper that
+built its rows in a `System.Collections.Generic.List[object]` and ended with `return @($out)`
+died with
+
+```
+Argument types do not match
++     return @($out)
+    + CategoryInfo : OperationStopped: (:) [], ArgumentException
+```
+
+The throw is at the wrapping `@(...)`, not at anything inside the loop, and the suite reported it
+from three statements later -- it read exactly like a type error in the assertion that followed.
+`$out.ToArray()` or a plain `$out = @()` with `+=` both avoid it; the counts these parsers handle
+are single digits, so the array is free. `[System.Collections.Generic.List[string]]` is fine
+(`Run-PlaceTest.ps1` has used one for months) -- it is the `[object]` instantiation that bites.
+
+### A scripted fixture can stall on the level and log absolutely nothing
+
+The first full run delivered two objects and then stood still for fifty seconds. **Nothing was
+logged, because a press that is never made is never refused** -- the server's `grab denied` line,
+which is the first thing anyone greps for, cannot fire for a request that was not sent.
+
+The cause was geometry: the sortables sit on a 1.4 m-wide crate, so a body walking at an object
+on the far column is stopped by the crate itself with the object still **1.40 m** away, outside
+the 1.2 m arrive radius copied from `ScriptedCarryIntentSource`. The discriminator was the bot's
+own JSONL: its position was byte-identical at t = 25, 31 and 38 s with an empty hand.
+
+Two reusable things:
+
+- **When a scripted bot goes quiet, read its POSITION series before reading any server log.** A
+  wedged bot and a bot whose requests are being refused produce completely different evidence,
+  and only one of them writes anything on the server.
+- **An arrive radius is a fact about the FURNITURE the target sits on, not about the target.**
+  Anything on a table, a shelf or a crate is unreachable by its own footprint plus the body's
+  radius, so the radius has to be derived from the server's reach (`SandboxAvatar.PickupRadius`
+  + `PropManager.GrabRangeTolerance` = 2.25 m in 3D) and not copied from a suite whose props sat
+  on the floor. SHELF-1's hundred shelved props will meet this immediately.
+
+### Proved able to fail, twice, in one run
+
+Two faults planted together: the once-only guard removed from `SortTally`, and `SortRoom` gated
+so that only the server derives verdicts. **9 failures, and they separate cleanly** --
+
+```
+- server logged 2 sort-good line(s) for prop 1004; it was delivered to bin 0 twice and must count ONCE
+- hider never logged sort-bad for prop 1007 in bin 2 -- the wrong bin was silent on this peer
+- seeker never logged sort-bad for prop 1007 in bin 2 -- the wrong bin was silent on this peer
+```
+
+The count on the wire, the card, the burst's forced drop and the census **all stayed green under
+both**, which is what shows the per-peer checks are independent rather than one check wearing
+nine hats. Worth recording that the first plant was WEAKER than intended and the suite said so
+honestly: `SortTally.Completed` is a HashSet count, so removing the guard duplicated the log line
+and the sound without changing the score -- the duplicate-count assertion is what caught it, and
+the `total > 2` assertion beside it correctly did not fire.
+
+### The level check's hole, closed for a second prefab
+
+CLOCK-1 measured that a LEVEL prefab is invisible to `SupermarketWorldSelfTest` until it is in
+`SectionScenes`. Re-proved here for `SortBin.tscn` with the same plant (`AddChild(new Node3D())`
+in `SortBin._Ready`):
+
+```
+[supermarket-selftest]   TaskRoom.tscn      packed=114 live=114     <- green, cannot see it
+[supermarket-selftest]   SortBin.tscn       packed=27  live=28      <- FAIL
+```
+
+**The room stayed green** because `CountNodes` stops at an instance boundary, which is the whole
+reason the list has to name every prefab. The three sortable prefabs (`SortCube`/`SortBall`/
+`SortCan`) are deliberately NOT in it: each is a `Carryable` and builds its own outline shell in
+`_Ready` exactly as `Crate.tscn` does, so listing one would assert a failure by construction.
+They are covered one level up instead -- each sortable's `SortItem` is authored directly in
+`TaskRoom.tscn` rather than inside a prefab, so the room's own count walks it to the leaf.
+
+### `dotnet test` after TASK-1: Failed: 0, Passed: 1619, Skipped: 0, Total: 1619
+
+INT-0B's baseline was 1550. `SortRuleTests.cs` adds 69 and one MATCH-1 assertion changed because
+its subject did (TASK-1 appends the hider's sort readout to the strip line that test was
+asserting; the seeker's half is added beside it, unchanged).
+
+## `Sandbox: mechanics` is load-flaky, and the discriminator is WHICH CHECK (TASK-1, measured 2026-09-19)
+
+**New to the load-flaky list**, measured rather than reasoned, and it does not look like the
+others: **120 of 121 checks passed and the one red was `phys_drop_no_holder_shove`** — an
+offline-sandbox physics assertion that the holder's own vertical velocity stays gravity-only for
+fifteen ticks after a drop (`SandboxSelfTest.cs`, `avatar.Velocity.Y <= 0.5f`).
+
+Measured on `feat/2026-09-19-task-1`, whose diff cannot reach it: the sandbox self-test runs an
+OFFLINE avatar (`NetRole.Offline`, `net.IsBot` false) in the sandbox scene, and TASK-1's only
+edits to shared files are one untaken branch in `SandboxAvatar`'s BOT brain selection
+(`SortScript.Count > 0`, and nothing in this suite passes `--sort-script`) and two appended
+members plus two new recipes in `SfxLab` (no existing recipe changed, no pool size changed,
+nothing here calls `Get` on either).
+
+| Run | Conditions | Result | The check |
+|---|---|---|---|
+| marathon, 6th of 40 suites in one PowerShell process | loaded — BTN-1's Godot processes alive on the machine throughout | **FAIL**, 120/121 | `phys_drop_no_holder_shove` |
+| tip, standalone `-SkipBuild` x3 | 4 other Godot processes alive (BTN-1's) for at least the first | **3/3 PASS**, 121/121 each | PASS each time |
+| **base** `9c16181`, detached worktree, standalone x3 | idle | **3/3 PASS**, 121/121 each | PASS each time |
+| the marathon's own three-suite TAIL (`Run-VoiceTest` -> `Run-HostingTest` -> `Run-SandboxTest`) in ONE PowerShell process | idle | **PASS**, 121/121 | PASS |
+
+**The last row is the one worth copying** and it is CELEBRATE-1's discriminator: a standalone
+re-run drops the PROCESS SHARING that the MOVE-1 env-var trap lives in, so re-running the tail in
+one process is what separates "the machine was loaded" from "the suite before it". Here it
+cleared both, which leaves load.
+
+**How to read a red here: COUNT THE CHECKS AND READ THE NAME.** A `120/121` with
+`phys_drop_no_holder_shove` as the only failure is this flake. A red on any of the other 120 — or
+more than one at once — is a different animal, and the carry/physics family's own rule applies
+first: read the failing check's name, then the log, before reaching for this list (CARRY-1's
+entry above is the case where a red written in this file's vocabulary was a real regression).
+
+**The A/B was inconclusive in the useful direction and that is worth saying** rather than
+claiming the base fails too: neither tree reproduced it standalone, so what is established is
+that the check passes 6/6 outside a marathon on both trees and failed once inside one. That is
+weaker than AVATAR-1's tidal-cycle measurement and it is what there is.
+
+## The task room has eighteen more rigid bodies, and `Run-ReachTest` counts them (TASK-1, 2026-09-19)
+
+`[reach-cost] props in world` moves from **154 to 172**: the 150 the suite seeds, CARRY-1's four
+in the search room, and TASK-1's eighteen sortables in the task room. The population check
+asserts AT LEAST the seeded count and is unaffected — REACH-1 already recorded why it is not an
+equality — but the numbers beside it moved and the next reader should not read that as a
+regression:
+
+| Quantity | REACH-1's baseline (154 props) | After TASK-1 (172 props) |
+|---|---|---|
+| rest audits in 20 s | 924 (46.2/s) | **1032 (51.6/s)** |
+| integrity queries | 924 | **1036** |
+| corrections | 0 | **1** |
+| server physics p50 / p95 / peak | 2.765 / 20.321 / 50.580 ms | **4.850 / 20.463 / 48.079 ms** |
+
+**Still one shape query per settle event**, which is the property that costing exercise exists to
+protect: 1036 queries against 1032 audits. The audit rate rises because there are more props to
+settle, not because each settle got dearer, and the p95 is within 1 % of REACH-1's while the peak
+is 5 % below it. The p50 roughly doubling is 18 more rigid bodies being simulated on a machine
+running another lane's suite. **SHELF-1's hundred will move all four again.**
+

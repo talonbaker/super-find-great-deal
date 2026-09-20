@@ -19,7 +19,7 @@ namespace SailNet.Tests;
 public class RoundFactSourceTests
 {
     /// <summary>A source that answers exactly what it was constructed with. Stands in for BTN-1's
-    /// buttons, CARRY-1's hands, REACH-1's audit and TASK-1's towers at once.</summary>
+    /// buttons, CARRY-1's hands, REACH-1's audit and TASK-1's sorts at once.</summary>
     private sealed class Fake : IRoundFactSource
     {
         public bool HostPressedStart { get; init; }
@@ -28,7 +28,7 @@ public class RoundFactSourceTests
         public bool HiderHoldsTarget { get; init; }
         public bool? TargetRetrievable { get; init; }
         public bool TargetInDropOff { get; init; }
-        public int TowersCompleted { get; init; }
+        public int SortsCompleted { get; init; }
         public bool AnyPressedEnd { get; init; }
 
         public int AfterStepCalls { get; private set; }
@@ -46,7 +46,7 @@ public class RoundFactSourceTests
         Assert.False(input.HostPressedStart);
         Assert.False(input.HiderHeldRackProp);
         Assert.False(input.TargetInDropOff);
-        Assert.Equal(0, input.TowersCompleted);
+        Assert.Equal(0, input.SortsCompleted);
         Assert.Null(input.TargetRetrievable);
         // And the unmeasured retrievability still reads as retrievable.
         Assert.True(input.TargetRetrievableOrDefault);
@@ -101,19 +101,19 @@ public class RoundFactSourceTests
         Assert.True(allowed.TargetRetrievableOrDefault);
     }
 
-    /// <summary><b>The tower count is the maximum</b>: absolute, so summing double-counts and
+    /// <summary><b>The sort count is the maximum</b>: absolute, so summing double-counts and
     /// last-wins lets a source that does not know zero a real count.</summary>
     [Fact]
-    public void Towers_TakeTheMaximum_NotTheSumAndNotTheLast()
+    public void SortCount_TakesTheMaximum_NotTheSumAndNotTheLast()
     {
         HideSeekInput input = RoundFacts.Combine(new IRoundFactSource[]
         {
-            new Fake { TowersCompleted = 3 },
-            new Fake { TowersCompleted = 0 },
-            new Fake { TowersCompleted = 2 },
+            new Fake { SortsCompleted = 3 },
+            new Fake { SortsCompleted = 0 },
+            new Fake { SortsCompleted = 2 },
         }, Roster);
 
-        Assert.Equal(3, input.TowersCompleted);
+        Assert.Equal(3, input.SortsCompleted);
     }
 
     [Fact]

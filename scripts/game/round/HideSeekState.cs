@@ -14,7 +14,7 @@ namespace MpFoundation.Game.Round;
 /// </summary>
 /// <param name="RoundIndex">The round this card is the result of.</param>
 /// <param name="HiderPeerId">Who hid. 0 when the round had no hider (a disconnect before roles).</param>
-/// <param name="HiderGained">Towers frozen at the find — the cost of being found late is the tower
+/// <param name="HiderGained">Sorts frozen at the find — the cost of being found late is the sort
 /// you did not finish. 0 on a hide that was never retrievable.</param>
 /// <param name="SeekerPeerId">Who sought.</param>
 /// <param name="SeekerGained">Whole seconds left on the seek clock at the find. 0 on a timeout.</param>
@@ -91,13 +91,13 @@ public readonly record struct HideSeekState
     /// carries what IS rather than what changed.</summary>
     public ImmutableDictionary<int, int> Scores { get; init; }
 
-    /// <summary>Towers the hider has completed so far THIS round — the live value, folded from
+    /// <summary>Sorts the hider has completed so far THIS round — the live value, folded from
     /// the facts every tick and reset at the start of each round.</summary>
-    public int TowersCompleted { get; init; }
+    public int SortsCompleted { get; init; }
 
-    /// <summary>Towers frozen at the Found tick (or at the Seeking buzzer). The hider's score for
+    /// <summary>Sorts frozen at the Found tick (or at the Seeking buzzer). The hider's score for
     /// the round: progress stops the instant the door bursts.</summary>
-    public int TowersAtFound { get; init; }
+    public int SortsAtFound { get; init; }
 
     /// <summary>Whole seconds left on the seek clock at the find; 0 on a timeout. The seeker's
     /// score for the round, frozen at the same instant for the same reason.</summary>

@@ -79,7 +79,7 @@ public readonly record struct StartleTuning
     /// <summary>Impulse at the doorway itself, newton-seconds, falling off LINEARLY to zero at
     /// <see cref="BurstRadiusM"/> (<see cref="StartleTimeline.ImpulseNsAt"/>). Newton-seconds
     /// rather than a velocity so a heavy prop is shoved less than a light one by construction —
-    /// 6 N·s on the 1 kg crate this game ships is 6 m/s, which is a tower going over.</summary>
+    /// 6 N·s on the 1 kg crate this game ships is 6 m/s, which is a stack of sorted objects going over.</summary>
     public float BurstImpulseNs { get; init; }
 
     /// <summary><b>The flinch.</b> On the burst tick the server releases the hider's held prop

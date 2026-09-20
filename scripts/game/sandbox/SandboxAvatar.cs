@@ -1255,7 +1255,12 @@ public partial class SandboxAvatar : CharacterBody3D, IServerConfirmedBody
         IIntentSource source;
         if (net.IsBot)
         {
-            IIntentSource baseSource = net.Options.CarryScript
+            IIntentSource baseSource = net.Options.SortScript.Count > 0
+                // TASK-1: the sorting job, a LOOP over a list of (prop, bin) steps. Checked
+                // before --carry-script because the two are alternative carry brains and a
+                // launch line that asked for both wants the one with the schedule in it.
+                ? BuildScriptedSort(net)
+                : net.Options.CarryScript
                 ? BuildScriptedCarry(net)
                 : net.Options.GotoScript
                     // --goto-script: walk to a point (sprinting if asked) and stand there.
@@ -1367,6 +1372,34 @@ public partial class SandboxAvatar : CharacterBody3D, IServerConfirmedBody
     /// (Run-CarryDriftTest.ps1) and the optional regrab phase wired to live replicated prop
     /// state (Run-RegrabTest.ps1's drift regression proof). The regrab lambdas read
     /// <see cref="Props"/> lazily — it is bound by SpawnPlayer before this avatar enters the tree.</summary>
+    /// <summary>
+    /// <b>The scripted sorting bot brain</b> (TASK-1, <c>tests/Run-SortTest.ps1</c>). Every
+    /// lambda reads LIVE replicated state through <see cref="Props"/>, which <c>SpawnPlayer</c>
+    /// binds before this avatar enters the tree — the same lazy wiring
+    /// <see cref="BuildScriptedCarry"/>'s regrab lambdas use, for the same reason.
+    ///
+    /// <para><c>canWork</c> is the round's own phase rather than a second. The hider is only in
+    /// the task room during <c>Seeking</c>, so a bot that started walking toward a crate in
+    /// another room would be walking at a wall — and a typed delay would be a guess about when
+    /// the round got there.</para>
+    /// </summary>
+    private ScriptedSortIntentSource BuildScriptedSort(NetworkManager net)
+    {
+        var steps = new System.Collections.Generic.List<ScriptedSortIntentSource.Step>();
+        foreach ((int propId, int binSlot) in net.Options.SortScript)
+            steps.Add(new ScriptedSortIntentSource.Step(propId, binSlot));
+        GD.Print($"[sort-bot] {DisplayName} script: {steps.Count} step(s) "
+                 + string.Join(" ", steps.ConvertAll(x => $"{x.PropId}->{x.BinSlot}")));
+        return new ScriptedSortIntentSource(this, steps,
+            propId => Props?.NodeFor(propId) is { } node ? node.WorldPosition : (Vector3?)null,
+            () => Props?.FindHeldBy(Multiplayer.GetUniqueId())?.PropId ?? 0,
+            propId => Props?.ClientRequestGrab(propId),
+            (propId, at) => Props?.ClientRequestPlace(propId, at),
+            () => Round.HideSeekDriver.Instance is { Synced: true } d
+                  && d.View.Phase == Round.HideSeekPhase.Seeking,
+            DisplayName);
+    }
+
     private ScriptedCarryIntentSource BuildScriptedCarry(NetworkManager net)
     {
         System.Func<Vector3?>? regrabTarget = null;

@@ -77,6 +77,18 @@ public sealed partial class SupermarketWorldSelfTest : Node3D
     /// geometry, and its script builds its own outline shell and blob shadow at runtime by
     /// design — that is the documented exception <see cref="CountNodes"/> exists for, and
     /// listing it would assert the opposite of what CARRY-1 decided.</para>
+    ///
+    /// <para><b>The same exclusion covers TASK-1's three sortable prefabs</b>
+    /// (<c>SortCube.tscn</c>, <c>SortBall.tscn</c>, <c>SortCan.tscn</c>), and it is worth saying
+    /// out loud because that packet asked for them. Each is a <c>Carryable</c> and therefore
+    /// builds its own outline shell in <c>_Ready</c> exactly as <c>Crate.tscn</c> does, so
+    /// listing one here would assert a failure by construction. <b>They are covered anyway, one
+    /// level up:</b> a sortable's <c>SortItem</c> component is authored directly in
+    /// <c>TaskRoom.tscn</c> rather than inside a prefab, so it is walked to the leaf by this
+    /// room's own count — a <c>SortItem</c> that grew a child in <c>_Ready</c> turns the
+    /// TaskRoom row red, which is the hole CLOCK-1 §3.2 opened this list to close.
+    /// <c>SortBin.tscn</c> and <c>SupplyCrate.tscn</c> ARE here: both are level furniture with no
+    /// <c>Carryable</c> anywhere in them.</para>
     /// </summary>
     private static readonly string[] SectionScenes =
     {
@@ -84,6 +96,8 @@ public sealed partial class SupermarketWorldSelfTest : Node3D
         "res://scenes/game/world/supermarket/SearchRoom.tscn",
         "res://scenes/game/world/supermarket/TaskRoom.tscn",
         "res://scenes/game/world/supermarket/RoundClock.tscn",
+        "res://scenes/game/world/supermarket/SortBin.tscn",
+        "res://scenes/game/world/supermarket/SupplyCrate.tscn",
     };
 
     private readonly List<string> _failures = new();

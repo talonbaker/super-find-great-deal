@@ -2,7 +2,7 @@ namespace MpFoundation.Game.Round;
 
 /// <summary>
 /// <b>How another lane tells the round what it is seeing.</b> BTN-1's three buttons, CARRY-1's
-/// hands, REACH-1's reachability audit, TASK-1's towers and the dev script all implement this and
+/// hands, REACH-1's reachability audit, TASK-1's sorts and the dev script all implement this and
 /// register with <c>HideSeekDriver</c>; the driver combines them into one
 /// <see cref="HideSeekInput"/> per sim tick.
 ///
@@ -20,7 +20,7 @@ namespace MpFoundation.Game.Round;
 /// order. It is nullable precisely so "nobody has measured this" is distinguishable from "no" —
 /// with everything null the driver passes null and the loop reads it as retrievable, which is the
 /// packet's "default true until REACH-1 supplies it".</item>
-/// <item><b><see cref="TowersCompleted"/> is the MAXIMUM.</b> It is an absolute count, not an
+/// <item><b><see cref="SortsCompleted"/> is the MAXIMUM.</b> It is an absolute count, not an
 /// increment, so summing two sources that both know would double it and taking the last would let
 /// a source that does not know zero it. The maximum is the only combination where a source that
 /// answers 0 costs nothing.</item>
@@ -52,8 +52,8 @@ public interface IRoundFactSource
     /// <summary>The target prop is in the drop-off bin.</summary>
     bool TargetInDropOff { get; }
 
-    /// <summary>Towers completed this round, absolute.</summary>
-    int TowersCompleted { get; }
+    /// <summary>Sorts completed this round, absolute.</summary>
+    int SortsCompleted { get; }
 
     /// <summary>Somebody pressed End since the last <see cref="AfterStep"/>.</summary>
     bool AnyPressedEnd { get; }
@@ -83,7 +83,7 @@ public sealed class NullRoundFactSource : IRoundFactSource
     public bool HiderHoldsTarget => false;
     public bool? TargetRetrievable => null;
     public bool TargetInDropOff => false;
-    public int TowersCompleted => 0;
+    public int SortsCompleted => 0;
     public bool AnyPressedEnd => false;
     public void AfterStep() { }
 }

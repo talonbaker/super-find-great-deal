@@ -1,0 +1,214 @@
+[gd_scene load_steps=18 format=3]
+
+; TASK-1 (2026-09-19) -- A SORTING BIN. Authored ONCE, here, and instanced three times by
+; TaskRoom.tscn, exactly the way RoundClock.tscn is instanced by the three rooms (read that file's
+; header first; it is the pattern this copies and the reasons transfer).
+;
+; WHAT A ROOM DOES WITH IT: instance this file, name the node SortBin_0 / SortBin_1 / SortBin_2,
+; and set a transform. That is the whole contract.
+;
+; THE SLOT IS IN THE NODE NAME AND THERE IS NO [Export] TO SET. Godot does not apply a nested
+; PackedScene instance's exported C# script properties on this project's Godot/Mono build, and
+; TaskRoom.tscn is itself instanced into Supermarket.tscn, so an authored export here would read
+; back as its C# default on all three bins -- three bins all claiming to be bin 0, in exactly the
+; right places, with no error anywhere. Measured four times now: PropManager.AuthoredKindOf
+; (2026-07), Carryable.LoadLiftM, RoundClock.Room (CLOCK-1 3.1), and BurstDoor's room-light
+; lookup (CARRY-1 section 6). SortBin.SlotFromName reads the digits off the name, which is native.
+;
+; WHAT THE SLOT MEANS CHANGES AND THE BIN DOES NOT. Bin 0 asks for RED on an odd round and for
+; CUBE on an even one (SortRule.For). The boxes never move: the player learns three positions once
+; and then has to re-learn what they mean, which is the concentration Talon asked for.
+;
+; THREE CHANNELS ON THE PLATE, and the redundancy is INTERACTION-BIBLE 8.2 rather than decoration.
+; The WORD (HideSeekText.BinPlateWord) is always there; the plate's own TINT carries the colour on
+; a colour round; a small unshaded ICON carries the shape on a shape round. All three icons are
+; authored below and SortBin shows the one matching its slot -- one prefab for three bins, and a
+; visibility choice rather than three files.
+;
+; NO COLOUR ON THE PLATE IN THIS FILE. The tint on a colour round is the RULE and comes from
+; SortPalette (the same value the objects are painted with, so they cannot disagree); the neutral
+; on a shape round is chrome and comes from UiTokens through UiThemeService. The material below
+; therefore ships WHITE: a plate that loses both renders white and screams. Same choice
+; RoundClock.tscn makes, and tests/unit/UiNoBespokeStylingTests scans every .tscn for the
+; opposite.
+;
+; THE HEIGHT IS A REACH DECISION. The tray's floor is 0.66 m up and the rim tops out at 0.96 m,
+; against a 1.04 m first-person eyeline: the player looks slightly DOWN into an open box at waist
+; height and can drop into it without crouching or aiming. A bin on the floor would put the whole
+; job at the bottom of the frame and the label out of sight behind its own rim.
+;
+; All twelve floats of every Transform3D below are basis ROWS (.claude/rules/godot-scenes.md).
+; Every one here is the identity basis plus a translation, EXCEPT the plate's label and icons,
+; which carry a 180 degree yaw: a Label3D with no rotation faces +Z, and this plate is read from
+; -Z by a player standing in the room.
+
+[ext_resource type="Script" path="res://scripts/game/world/SortBin.cs" id="1_sortbin"]
+
+[sub_resource type="StandardMaterial3D" id="Mat_shell"]
+resource_name = "sort bin shell (level dressing, a shade off the walls)"
+albedo_color = Color(0.42, 0.4, 0.38, 1)
+roughness = 0.9
+
+[sub_resource type="StandardMaterial3D" id="Mat_plate"]
+resource_name = "sort bin plate (colour comes from SortPalette/UiTokens at runtime)"
+resource_local_to_scene = true
+roughness = 0.7
+
+[sub_resource type="StandardMaterial3D" id="Mat_icon"]
+resource_name = "sort bin shape icon (unshaded; ink comes from UiTokens at runtime)"
+resource_local_to_scene = true
+shading_mode = 0
+
+[sub_resource type="BoxMesh" id="BoxMesh_plinth"]
+size = Vector3(0.7, 0.6, 0.7)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_plinth"]
+size = Vector3(0.7, 0.6, 0.7)
+
+[sub_resource type="BoxMesh" id="BoxMesh_tray"]
+size = Vector3(0.7, 0.06, 0.7)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_tray"]
+size = Vector3(0.7, 0.06, 0.7)
+
+[sub_resource type="BoxMesh" id="BoxMesh_wall_z"]
+size = Vector3(0.7, 0.3, 0.06)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_wall_z"]
+size = Vector3(0.7, 0.3, 0.06)
+
+[sub_resource type="BoxMesh" id="BoxMesh_wall_x"]
+size = Vector3(0.06, 0.3, 0.58)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_wall_x"]
+size = Vector3(0.06, 0.3, 0.58)
+
+; THE MOUTH. x and z are the interior between the rims exactly (0.58); y runs from the tray's top
+; face (0.66) to 0.10 m ABOVE the rim (1.06), so a second object resting on top of a first still
+; counts. Monitoring is OFF: SortBin reads this shape and transform directly, which is CARRY-1's
+; RoomBounds pattern and costs the broadphase nothing.
+[sub_resource type="BoxShape3D" id="BoxShape3D_volume"]
+size = Vector3(0.58, 0.4, 0.58)
+
+[sub_resource type="BoxMesh" id="BoxMesh_plate"]
+size = Vector3(0.66, 0.42, 0.03)
+
+[sub_resource type="BoxMesh" id="BoxMesh_icon_cube"]
+size = Vector3(0.08, 0.08, 0.08)
+
+[sub_resource type="SphereMesh" id="SphereMesh_icon_ball"]
+radius = 0.045
+height = 0.09
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_icon_can"]
+top_radius = 0.032
+bottom_radius = 0.032
+height = 0.09
+
+[node name="SortBin" type="Node3D"]
+script = ExtResource("1_sortbin")
+
+[node name="Plinth" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.3, 0)
+
+[node name="Collision" type="CollisionShape3D" parent="Plinth"]
+shape = SubResource("BoxShape3D_plinth")
+
+[node name="Mesh" type="MeshInstance3D" parent="Plinth"]
+mesh = SubResource("BoxMesh_plinth")
+surface_material_override/0 = SubResource("Mat_shell")
+
+[node name="Tray" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.63, 0)
+
+[node name="Collision" type="CollisionShape3D" parent="Tray"]
+shape = SubResource("BoxShape3D_tray")
+
+[node name="Mesh" type="MeshInstance3D" parent="Tray"]
+mesh = SubResource("BoxMesh_tray")
+surface_material_override/0 = SubResource("Mat_shell")
+
+[node name="RimZNeg" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.81, -0.32)
+
+[node name="Collision" type="CollisionShape3D" parent="RimZNeg"]
+shape = SubResource("BoxShape3D_wall_z")
+
+[node name="Mesh" type="MeshInstance3D" parent="RimZNeg"]
+mesh = SubResource("BoxMesh_wall_z")
+surface_material_override/0 = SubResource("Mat_shell")
+
+[node name="RimZPos" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.81, 0.32)
+
+[node name="Collision" type="CollisionShape3D" parent="RimZPos"]
+shape = SubResource("BoxShape3D_wall_z")
+
+[node name="Mesh" type="MeshInstance3D" parent="RimZPos"]
+mesh = SubResource("BoxMesh_wall_z")
+surface_material_override/0 = SubResource("Mat_shell")
+
+[node name="RimXNeg" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.32, 0.81, 0)
+
+[node name="Collision" type="CollisionShape3D" parent="RimXNeg"]
+shape = SubResource("BoxShape3D_wall_x")
+
+[node name="Mesh" type="MeshInstance3D" parent="RimXNeg"]
+mesh = SubResource("BoxMesh_wall_x")
+surface_material_override/0 = SubResource("Mat_shell")
+
+[node name="RimXPos" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.32, 0.81, 0)
+
+[node name="Collision" type="CollisionShape3D" parent="RimXPos"]
+shape = SubResource("BoxShape3D_wall_x")
+
+[node name="Mesh" type="MeshInstance3D" parent="RimXPos"]
+mesh = SubResource("BoxMesh_wall_x")
+surface_material_override/0 = SubResource("Mat_shell")
+
+[node name="Volume" type="Area3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.86, 0)
+monitoring = false
+monitorable = false
+collision_layer = 0
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape3D" parent="Volume"]
+shape = SubResource("BoxShape3D_volume")
+
+[node name="Plate" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.79, -0.37)
+mesh = SubResource("BoxMesh_plate")
+surface_material_override/0 = SubResource("Mat_plate")
+
+; font_size 24 at the default pixel_size 0.005 is 0.12 m of glyph height, so the widest word
+; either rule can produce -- YELLOW, six characters -- spans about 0.46 m across a 0.66 m plate at
+; this font's measured 0.64 advance ratio, leaving 0.10 m of margin each side.
+;
+; IT WAS 28 AND THE RENDER CORRECTED IT, which is CLOCK-1 3.3's lesson happening a second time:
+; the arithmetic said 0.54 m on a 0.66 m plate and passed, and the first capture
+; (tests/Capture-SortRoom.ps1 -Pass colour) showed YELLOW touching both edges of its plate with
+; no margin at all. A character count is an AVERAGE and is wrong in both directions. The bound in
+; SortRuleTests.EveryPlateWord_FitsThePlate keeps the COPY from growing; only a photograph can
+; tell you the size is right, so a change to this number or to the plate owes a new capture.
+[node name="PlateLabel" type="Label3D" parent="."]
+transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, 0, 0.7, -0.39)
+text = "-"
+font_size = 24
+
+[node name="PlateIcon" type="Node3D" parent="."]
+transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, 0, 0.92, -0.4)
+
+[node name="IconCube" type="MeshInstance3D" parent="PlateIcon"]
+mesh = SubResource("BoxMesh_icon_cube")
+material_override = SubResource("Mat_icon")
+
+[node name="IconBall" type="MeshInstance3D" parent="PlateIcon"]
+mesh = SubResource("SphereMesh_icon_ball")
+material_override = SubResource("Mat_icon")
+
+[node name="IconCan" type="MeshInstance3D" parent="PlateIcon"]
+mesh = SubResource("CylinderMesh_icon_can")
+material_override = SubResource("Mat_icon")

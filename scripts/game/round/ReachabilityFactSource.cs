@@ -107,7 +107,7 @@ public sealed class ReachabilityFactSource : IRoundFactSource, IConfirmTimeAudit
     public bool TargetInDropOff => false;
 
     /// <inheritdoc/>
-    public int TowersCompleted => 0;
+    public int SortsCompleted => 0;
 
     /// <inheritdoc/>
     public bool AnyPressedEnd => false;

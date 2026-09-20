@@ -320,6 +320,27 @@ public sealed class LaunchOptions
     /// (<c>Gameplay.SpawnPositionFor</c>), is the smaller of the two costs.</para></summary>
     public string SpawnRoom { get; private set; } = "";
 
+    // --- the sorting job (TASK-1, 2026-09-19) -----------------------------------------------
+
+    /// <summary>
+    /// <c>--sort-script "&lt;propId&gt;:&lt;binSlot&gt;[,...]"</c>: a bot that fetches each named
+    /// object out of the task room's supply crate and sets it down in the named bin, in order.
+    /// A NEGATIVE bin slot means "fetch it and keep holding it", which is how
+    /// <c>tests/Run-SortTest.ps1</c> stages an object in the hider's hands at the burst.
+    ///
+    /// <para><b>Self-paced, with no second in it.</b> Each step advances on an OBSERVED
+    /// hand-off, never on a wall clock, and the whole loop is gated on the round being in
+    /// <c>Seeking</c> — which is when the hider is in the task room at all.
+    /// <c>.claude/rules/test-suite.md</c>: derive a schedule from the thing it must outlive.
+    /// The bins' positions come out of the bot's own copy of the authored room
+    /// (<c>SortBin.Find</c>), so this flag names ids and slots and no coordinates.</para>
+    ///
+    /// <para>Empty on every real launch, like every other scripted-bot flag here, and it steers
+    /// a <c>--bot</c> client's brain only — there is nothing on a human's path to reach.</para>
+    /// </summary>
+    public IReadOnlyList<(int PropId, int BinSlot)> SortScript => _sortScript;
+    private readonly List<(int PropId, int BinSlot)> _sortScript = new();
+
     /// <summary>--carry-grab-retry &lt;sec&gt;: re-fire a scripted bot's FIRST grab on this cadence
     /// until it is actually holding something. Negative (the default) = the original one-shot
     /// press, so every existing carry suite's pacing is byte-for-byte unchanged.
@@ -650,7 +671,7 @@ public sealed class LaunchOptions
     /// <summary>
     /// <c>--round-script "start@2,confirm@8,found@20,end@25"</c>: <b>a DEV flag</b> (server only)
     /// that feeds the round's facts on a schedule, so the whole loop can be driven end to end
-    /// before BTN-1's buttons, CARRY-1's bin or TASK-1's towers exist. Each entry is
+    /// before BTN-1's buttons, CARRY-1's bin or TASK-1's sorting exists. Each entry is
     /// <c>&lt;verb&gt;[:&lt;value&gt;]@&lt;seconds&gt;</c>, seconds measured from the driver's own
     /// Setup, comma separated. Empty (every real launch) = nothing armed and no cost.
     ///
@@ -664,8 +685,8 @@ public sealed class LaunchOptions
     /// <para><b>Verbs.</b> <c>start</c>, <c>confirm</c>, <c>end</c> are one-tick presses;
     /// <c>found</c> is the LEVEL "the target is in the bin" and latches on (a bin does not pulse).
     /// <c>object</c>/<c>noobject</c> and <c>holdtarget</c>/<c>droptarget</c> set the two hands
-    /// facts; <c>reachable</c>/<c>unreachable</c> stand in for REACH-1; <c>towers:N</c> sets the
-    /// absolute tower count. The hands default to "holding a rack object, not holding the target,
+    /// facts; <c>reachable</c>/<c>unreachable</c> stand in for REACH-1; <c>sorts:N</c> sets the
+    /// absolute sort count. The hands default to "holding a rack object, not holding the target,
     /// reachable" so the packet's own four-verb example runs a whole round unaided; the others
     /// exist so a suite can provoke each named refusal and watch the HUD render it.</para>
     /// </summary>
@@ -1310,6 +1331,25 @@ public sealed class LaunchOptions
                             new Basis(Vector3.Up, Mathf.DegToRad((float)plyaw)),
                             new Vector3((float)plx, (float)ply, (float)plz));
                         options.CarryPlaceAfterSec = plafter;
+                    }
+                    break;
+                }
+                case "--sort-script":
+                {
+                    // "propId:binSlot[,propId:binSlot...]" -- see SortScript. A malformed entry
+                    // is SKIPPED rather than defaulted: a fixture that silently sorted prop 0
+                    // into bin 0 because a digit was fat-fingered would be a green suite about
+                    // nothing.
+                    foreach (string entry in Next(args, ref i).Split(',',
+                                 StringSplitOptions.RemoveEmptyEntries))
+                    {
+                        string[] bits = entry.Split(':');
+                        if (bits.Length == 2
+                            && int.TryParse(bits[0].Trim(), out int sortProp)
+                            && int.TryParse(bits[1].Trim(), out int sortBin))
+                        {
+                            options._sortScript.Add((sortProp, sortBin));
+                        }
                     }
                     break;
                 }

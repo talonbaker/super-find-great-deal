@@ -17,10 +17,10 @@ namespace MpFoundation.Game.Round;
 ///
 /// <list type="number">
 /// <item><b>Facts are folded before any transition is evaluated.</b> See
-/// <see cref="FoldFacts"/>: the roster, the roles, the tower count and the score rows all land in
+/// <see cref="FoldFacts"/>: the roster, the roles, the sort count and the score rows all land in
 /// the state at the TOP of <see cref="Step"/>, before any branch asks whether this is the tick the
-/// phase ends. A tower finished on the exact tick the seeker finds the object is therefore already
-/// counted when the towers are frozen — it falls out of the ordering rather than needing a special
+/// phase ends. A sort finished on the exact tick the seeker finds the object is therefore already
+/// counted when the sorts are frozen — it falls out of the ordering rather than needing a special
 /// case.</item>
 /// <item><b>The card is computed exactly once</b>, at the commit into
 /// <see cref="HideSeekPhase.Tally"/>, and stored on <see cref="HideSeekState.LastTally"/>. Every
@@ -51,8 +51,8 @@ public static class HideSeekLoop
             HiderPeerId = 0,
             SeekerPeerId = 0,
             Scores = ImmutableDictionary<int, int>.Empty,
-            TowersCompleted = 0,
-            TowersAtFound = 0,
+            SortsCompleted = 0,
+            SortsAtFound = 0,
             RemainingAtFoundSec = 0,
             FoundTick = null,
             HidingExtended = false,
@@ -169,11 +169,11 @@ public static class HideSeekLoop
                 if (left > 0f)
                     return s;
 
-                // Timeout. The hider keeps the towers they built (program §2's diagram: "timeout
-                // -> Tally (hiders keep towers)"); the seeker scores nothing.
+                // Timeout. The hider keeps the sorts they built (program §2's diagram: "timeout
+                // -> Tally (hiders keep sorts)"); the seeker scores nothing.
                 return CommitTally(
-                    s with { TowersAtFound = s.TowersCompleted, RemainingAtFoundSec = 0 },
-                    t, hiderGain: s.TowersCompleted, seekerGain: 0, byDisconnect: false,
+                    s with { SortsAtFound = s.SortsCompleted, RemainingAtFoundSec = 0 },
+                    t, hiderGain: s.SortsCompleted, seekerGain: 0, byDisconnect: false,
                     refusal: HideSeekRefusal.None);
             }
 
@@ -183,7 +183,7 @@ public static class HideSeekLoop
                 // belongs to the players.
                 if (!input.AnyPressedEnd)
                     return s;
-                return CommitTally(s, t, hiderGain: s.TowersAtFound,
+                return CommitTally(s, t, hiderGain: s.SortsAtFound,
                     seekerGain: s.RemainingAtFoundSec, byDisconnect: false,
                     refusal: HideSeekRefusal.None);
             }
@@ -251,15 +251,15 @@ public static class HideSeekLoop
         // Absolute, clamped at zero, never an increment. TASK-1 reports what the hider has
         // completed RIGHT NOW; the reset edge is what tells it to start counting again, so a
         // source that kept counting across a round boundary would show up here as a round that
-        // began with towers already built.
-        int towers = Math.Max(input.TowersCompleted, 0);
+        // began with sorts already built.
+        int sorts = Math.Max(input.SortsCompleted, 0);
 
         return s with
         {
             Scores = scores,
             HiderPeerId = hider,
             SeekerPeerId = seeker,
-            TowersCompleted = towers,
+            SortsCompleted = sorts,
         };
     }
 
@@ -308,8 +308,8 @@ public static class HideSeekLoop
             RemainingSec = Math.Max(t.HidingSec, HideSeekTuning.MinTimerSec),
             HidingExtended = false,
             Scores = scores,
-            TowersCompleted = 0,
-            TowersAtFound = 0,
+            SortsCompleted = 0,
+            SortsAtFound = 0,
             RemainingAtFoundSec = 0,
             FoundTick = null,
             Refusal = HideSeekRefusal.None,
@@ -325,7 +325,7 @@ public static class HideSeekLoop
         };
 
     /// <summary><b>The find.</b> Both scores freeze here, on one tick, on the server: the hider's
-    /// towers stop counting (the cost of being found late is the tower you did not finish) and the
+    /// sorts stop counting (the cost of being found late is the sort you did not finish) and the
     /// seeker's clock stops (the faster the find, the better the seek). Everything DOOR-1 and
     /// TASK-1 do at the startle keys off <see cref="HideSeekState.FoundTick"/>, so there is one
     /// instant, not one per subsystem.</summary>
@@ -335,7 +335,7 @@ public static class HideSeekLoop
             Phase = HideSeekPhase.Together,
             RemainingSec = 0f,
             FoundTick = s.Tick,
-            TowersAtFound = s.TowersCompleted,
+            SortsAtFound = s.SortsCompleted,
             RemainingAtFoundSec = (int)MathF.Floor(Math.Max(s.RemainingSec, 0f)),
             Refusal = HideSeekRefusal.None,
         };
@@ -395,7 +395,7 @@ public static class HideSeekLoop
             RemainingSec = Math.Max(matchOver ? t.MatchTallySec : t.TallySec,
                 HideSeekTuning.MinTimerSec),
             Scores = scores,
-            TowersAtFound = hiderGain,
+            SortsAtFound = hiderGain,
             RemainingAtFoundSec = seekerGain,
             LastTally = new HideSeekTally(s.RoundIndex, s.HiderPeerId, hiderGain,
                 s.SeekerPeerId, seekerGain, byDisconnect,
@@ -431,8 +431,8 @@ public static class HideSeekLoop
             RemainingSec = 0f,
             HiderPeerId = s.SeekerPeerId,
             SeekerPeerId = s.HiderPeerId,
-            TowersCompleted = 0,
-            TowersAtFound = 0,
+            SortsCompleted = 0,
+            SortsAtFound = 0,
             RemainingAtFoundSec = 0,
             FoundTick = null,
             HidingExtended = false,

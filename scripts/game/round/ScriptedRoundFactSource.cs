@@ -6,7 +6,7 @@ namespace MpFoundation.Game.Round;
 /// <summary>
 /// <b>The <c>--round-script</c> dev source.</b> Feeds the round's facts on a schedule so the whole
 /// loop — Start, Confirm, the find, End, the reset edge and every teleport between them — can be
-/// driven end to end on a server with no buttons, no bin and no towers in the world yet.
+/// driven end to end on a server with no buttons, no bin and no sorts in the world yet.
 ///
 /// <para><b>It can only ADD a fact.</b> <c>HideSeekDriver</c> ORs every source's bools, so a human
 /// pressing a real Start on the same server is never overridden and a real press is never
@@ -19,7 +19,7 @@ namespace MpFoundation.Game.Round;
 /// <para><b>Presses are one-tick; levels latch.</b> <c>start</c>, <c>confirm</c> and <c>end</c>
 /// are consumed by the very next <see cref="AfterStep"/>, exactly as a real button's latch is.
 /// <c>found</c> is a LEVEL — a bin holding the target keeps holding it — and so are the hands and
-/// the tower count. Getting that backwards is the classic round-loop bug, so the two kinds are
+/// the sort count. Getting that backwards is the classic round-loop bug, so the two kinds are
 /// separated here rather than at the call site.</para>
 ///
 /// <para><b>The defaults are what make the packet's own example work.</b>
@@ -39,7 +39,7 @@ public sealed class ScriptedRoundFactSource : IRoundFactSource
     private bool _holdsTarget;
     private bool? _retrievable;
     private bool _inDropOff;
-    private int _towers;
+    private int _sorts;
 
     // Edges, cleared by AfterStep.
     private bool _start;
@@ -90,8 +90,8 @@ public sealed class ScriptedRoundFactSource : IRoundFactSource
             case "droptarget": _holdsTarget = false; break;
             case "reachable": _retrievable = true; break;
             case "unreachable": _retrievable = false; break;
-            case "towers":
-                _towers = int.TryParse(value, out int n) ? System.Math.Max(n, 0) : _towers;
+            case "sorts":
+                _sorts = int.TryParse(value, out int n) ? System.Math.Max(n, 0) : _sorts;
                 break;
             default:
                 // Loud, not silent: a typo'd verb in a suite's launch line otherwise looks exactly
@@ -107,7 +107,7 @@ public sealed class ScriptedRoundFactSource : IRoundFactSource
     public bool HiderHoldsTarget => _holdsTarget;
     public bool? TargetRetrievable => _retrievable;
     public bool TargetInDropOff => _inDropOff;
-    public int TowersCompleted => _towers;
+    public int SortsCompleted => _sorts;
     public bool AnyPressedEnd => _end;
 
     /// <summary>The edges die here, exactly as a real button's latch does.</summary>

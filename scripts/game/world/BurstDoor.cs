@@ -182,7 +182,7 @@ public partial class BurstDoor : Node3D
     /// <para>The burst's two SERVER-side effects (the prop shove and the flinch) ride the same
     /// frame rather than waiting for the next physics tick. That costs nothing: an impulse
     /// written now is integrated by the next tick either way, and splitting the burst across two
-    /// clocks would mean the frame the blocker vanished on and the frame the tower went over on
+    /// clocks would mean the frame the blocker vanished on and the frame the sorted objects went over on
     /// were not the same frame.</para>
     /// </summary>
     public override void _Process(double delta)

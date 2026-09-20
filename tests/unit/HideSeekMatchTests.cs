@@ -59,10 +59,10 @@ public class HideSeekMatchTests
     /// side of it depending on accumulated float error. Half a second of margin makes every gain
     /// in this file exact.</para>
     /// </summary>
-    private static HideSeekState PlayRound(HideSeekState s, HideSeekTuning t, int towers,
+    private static HideSeekState PlayRound(HideSeekState s, HideSeekTuning t, int sorts,
         float seekSeconds)
     {
-        HideSeekInput carrying = Idle with { TowersCompleted = towers };
+        HideSeekInput carrying = Idle with { SortsCompleted = sorts };
 
         s = Tick(s, Idle, t);                               // the fold assigns/keeps the roles
         Assert.Equal(HideSeekPhase.Holding, s.Phase);
@@ -99,8 +99,8 @@ public class HideSeekMatchTests
     }
 
     /// <summary>A whole round plus its tally, landing back in the holding room.</summary>
-    private static HideSeekState PlayRoundAndReset(HideSeekState s, HideSeekTuning t, int towers,
-        float seekSeconds) => FinishTally(PlayRound(s, t, towers, seekSeconds), t);
+    private static HideSeekState PlayRoundAndReset(HideSeekState s, HideSeekTuning t, int sorts,
+        float seekSeconds) => FinishTally(PlayRound(s, t, sorts, seekSeconds), t);
 
     // ============================================================================================
     // Where a match ends
@@ -121,7 +121,7 @@ public class HideSeekMatchTests
         var matchIndex = new int[5];
         for (int round = 1; round <= 4; round++)
         {
-            s = PlayRound(s, t, towers: round, seekSeconds: 4.5f);
+            s = PlayRound(s, t, sorts: round, seekSeconds: 4.5f);
             HideSeekTally card = Card(s);
             Assert.Equal(round, card.RoundIndex);
             over[round] = card.MatchOver;
@@ -147,7 +147,7 @@ public class HideSeekMatchTests
 
         for (int round = 1; round <= 3; round++)
         {
-            s = PlayRound(s, t, towers: 1, seekSeconds: 4.5f);
+            s = PlayRound(s, t, sorts: 1, seekSeconds: 4.5f);
             Assert.True(Card(s).MatchOver, $"round {round} should be a whole match at MatchRounds=1");
             Assert.Equal(round, Card(s).MatchIndex);
             s = FinishTally(s, t);
@@ -166,7 +166,7 @@ public class HideSeekMatchTests
         var over = new bool[4];
         for (int round = 1; round <= 3; round++)
         {
-            s = PlayRound(s, t, towers: 1, seekSeconds: 4.5f);
+            s = PlayRound(s, t, sorts: 1, seekSeconds: 4.5f);
             over[round] = Card(s).MatchOver;
             s = FinishTally(s, t);
         }
@@ -189,7 +189,7 @@ public class HideSeekMatchTests
         HideSeekTuning t = Tune() with { MatchRounds = configured };
         Assert.Equal(1, t.MatchRoundsOrFloor);
 
-        HideSeekState s = PlayRound(HideSeekLoop.Restart(t), t, towers: 1, seekSeconds: 4.5f);
+        HideSeekState s = PlayRound(HideSeekLoop.Restart(t), t, sorts: 1, seekSeconds: 4.5f);
         Assert.True(Card(s).MatchOver, "at the floor of one round per match, round 1 ends a match");
     }
 
@@ -207,13 +207,13 @@ public class HideSeekMatchTests
         HideSeekState s = HideSeekLoop.Restart(t);
 
         // Round 1: Host hides and finishes 3; Joiner seeks and finds with 15 s left.
-        s = PlayRoundAndReset(s, t, towers: 3, seekSeconds: 4.5f);
+        s = PlayRoundAndReset(s, t, sorts: 3, seekSeconds: 4.5f);
         Assert.Equal(3, s.ScoreOf(Host));
         Assert.Equal(15, s.ScoreOf(Joiner));
 
         // Round 2: the roles have swapped. Joiner hides and finishes 1; Host seeks, slower, and
         // finds with 10 s left.
-        s = PlayRound(s, t, towers: 1, seekSeconds: 9.5f);
+        s = PlayRound(s, t, sorts: 1, seekSeconds: 9.5f);
         HideSeekTally card = Card(s);
 
         Assert.True(card.MatchOver);
@@ -236,8 +236,8 @@ public class HideSeekMatchTests
         HideSeekTuning t = Tune();
         HideSeekState s = HideSeekLoop.Restart(t);
 
-        s = PlayRoundAndReset(s, t, towers: 5, seekSeconds: 4.5f);   // Host 5, Joiner 15
-        s = PlayRound(s, t, towers: 0, seekSeconds: 9.5f);           // Joiner +0, Host +10
+        s = PlayRoundAndReset(s, t, sorts: 5, seekSeconds: 4.5f);   // Host 5, Joiner 15
+        s = PlayRound(s, t, sorts: 0, seekSeconds: 9.5f);           // Joiner +0, Host +10
 
         HideSeekTally card = Card(s);
         Assert.True(card.MatchOver);
@@ -253,7 +253,7 @@ public class HideSeekMatchTests
     public void AMidMatchCard_NamesNoWinner()
     {
         HideSeekTuning t = Tune();
-        HideSeekState s = PlayRound(HideSeekLoop.Restart(t), t, towers: 3, seekSeconds: 4.5f);
+        HideSeekState s = PlayRound(HideSeekLoop.Restart(t), t, sorts: 3, seekSeconds: 4.5f);
 
         HideSeekTally card = Card(s);
         Assert.False(card.MatchOver);
@@ -277,7 +277,7 @@ public class HideSeekMatchTests
         HideSeekTuning t = Tune();
         HideSeekState s = HideSeekLoop.Restart(t);
 
-        s = PlayRoundAndReset(s, t, towers: 3, seekSeconds: 4.5f);   // Host 3, Joiner 15
+        s = PlayRoundAndReset(s, t, sorts: 3, seekSeconds: 4.5f);   // Host 3, Joiner 15
         Assert.Equal(3, s.ScoreOf(Host));
         Assert.Equal(15, s.ScoreOf(Joiner));
 
@@ -320,8 +320,8 @@ public class HideSeekMatchTests
     {
         HideSeekTuning t = Tune();
         HideSeekState s = HideSeekLoop.Restart(t);
-        s = PlayRoundAndReset(s, t, towers: 3, seekSeconds: 4.5f);
-        s = PlayRoundAndReset(s, t, towers: 1, seekSeconds: 9.5f);   // the match ends here
+        s = PlayRoundAndReset(s, t, sorts: 3, seekSeconds: 4.5f);
+        s = PlayRoundAndReset(s, t, sorts: 1, seekSeconds: 9.5f);   // the match ends here
 
         s = Tick(s, Idle, t);
         s = Tick(s, Idle with { HostPressedStart = true, HiderHeldRackProp = true }, t);
@@ -341,9 +341,9 @@ public class HideSeekMatchTests
     {
         HideSeekTuning t = Tune();
         HideSeekState s = HideSeekLoop.Restart(t);
-        s = PlayRoundAndReset(s, t, towers: 3, seekSeconds: 4.5f);
-        s = PlayRoundAndReset(s, t, towers: 1, seekSeconds: 9.5f);
-        s = PlayRound(s, t, towers: 2, seekSeconds: 4.5f);
+        s = PlayRoundAndReset(s, t, sorts: 3, seekSeconds: 4.5f);
+        s = PlayRoundAndReset(s, t, sorts: 1, seekSeconds: 9.5f);
+        s = PlayRound(s, t, sorts: 2, seekSeconds: 4.5f);
 
         HideSeekTally card = Card(s);
         Assert.Equal(3, card.RoundIndex);
@@ -363,8 +363,8 @@ public class HideSeekMatchTests
         HideSeekTuning t = Tune();
         HideSeekState s = HideSeekLoop.Restart(t);
 
-        s = PlayRoundAndReset(s, t, towers: 3, seekSeconds: 4.5f);   // round 1: Host hid
-        s = PlayRoundAndReset(s, t, towers: 1, seekSeconds: 9.5f);   // round 2: Joiner hid; match over
+        s = PlayRoundAndReset(s, t, sorts: 3, seekSeconds: 4.5f);   // round 1: Host hid
+        s = PlayRoundAndReset(s, t, sorts: 1, seekSeconds: 9.5f);   // round 2: Joiner hid; match over
 
         Assert.Equal(Host, s.HiderPeerId);     // Host sought round 2, so Host hides round 3
         Assert.Equal(Joiner, s.SeekerPeerId);
@@ -383,12 +383,12 @@ public class HideSeekMatchTests
         HideSeekTuning t = Tune();
         HideSeekState s = HideSeekLoop.Restart(t);
 
-        s = PlayRound(s, t, towers: 3, seekSeconds: 4.5f);
+        s = PlayRound(s, t, sorts: 3, seekSeconds: 4.5f);
         Assert.False(Card(s).MatchOver);
         Assert.Equal(t.TallySec, s.RemainingSec, 0.001f);
 
         s = FinishTally(s, t);
-        s = PlayRound(s, t, towers: 1, seekSeconds: 9.5f);
+        s = PlayRound(s, t, sorts: 1, seekSeconds: 9.5f);
         Assert.True(Card(s).MatchOver);
         Assert.Equal(t.MatchTallySec, s.RemainingSec, 0.001f);
     }
@@ -400,8 +400,8 @@ public class HideSeekMatchTests
     {
         HideSeekTuning t = Tune() with { MatchTallySec = 0f };
         HideSeekState s = HideSeekLoop.Restart(t);
-        s = PlayRoundAndReset(s, t, towers: 1, seekSeconds: 4.5f);
-        s = PlayRound(s, t, towers: 1, seekSeconds: 4.5f);
+        s = PlayRoundAndReset(s, t, sorts: 1, seekSeconds: 4.5f);
+        s = PlayRound(s, t, sorts: 1, seekSeconds: 4.5f);
 
         Assert.True(Card(s).MatchOver);
         Assert.Equal(HideSeekTuning.MinTimerSec, s.RemainingSec, 0.001f);
@@ -420,7 +420,7 @@ public class HideSeekMatchTests
         HideSeekTuning t = Tune();
         HideSeekState s = HideSeekLoop.Restart(t);
 
-        s = PlayRoundAndReset(s, t, towers: 3, seekSeconds: 4.5f);   // Host 3, Joiner 15
+        s = PlayRoundAndReset(s, t, sorts: 3, seekSeconds: 4.5f);   // Host 3, Joiner 15
         int hostBefore = s.ScoreOf(Host);
         int joinerBefore = s.ScoreOf(Joiner);
 
@@ -451,8 +451,8 @@ public class HideSeekMatchTests
     {
         HideSeekTuning t = Tune();
         HideSeekState s = HideSeekLoop.Restart(t);
-        s = PlayRoundAndReset(s, t, towers: 3, seekSeconds: 4.5f);
-        s = PlayRound(s, t, towers: 1, seekSeconds: 9.5f);
+        s = PlayRoundAndReset(s, t, sorts: 3, seekSeconds: 4.5f);
+        s = PlayRound(s, t, sorts: 1, seekSeconds: 9.5f);
 
         HideSeekTally server = Card(s);
         var roster = new[] { Host, Joiner };
@@ -460,7 +460,7 @@ public class HideSeekMatchTests
         HideSeekWire wire = HideSeekWire.Encode(s, roster);
         var p = wire.Pack();
         HideSeekWire back = HideSeekWire.Unpack(p.Phase, p.Round, p.RemainingTenths, p.Hider,
-            p.Seeker, p.ScorePeers, p.ScoreValues, p.Refusal, p.Towers, p.FoundTick,
+            p.Seeker, p.ScorePeers, p.ScoreValues, p.Refusal, p.Sorts, p.FoundTick,
             p.TallyRound, p.TallyHider, p.TallyHiderGain, p.TallySeeker, p.TallySeekerGain,
             p.TallyByDisconnect, p.TallyMatchOver, p.TallyMatchIndex, p.TallyWinner,
             p.TallyHiderTotal, p.TallySeekerTotal);
@@ -487,8 +487,8 @@ public class HideSeekMatchTests
     {
         HideSeekTuning t = Tune();
         HideSeekState s = HideSeekLoop.Restart(t);
-        s = PlayRoundAndReset(s, t, towers: 3, seekSeconds: 4.5f);
-        s = PlayRound(s, t, towers: 1, seekSeconds: 9.5f);
+        s = PlayRoundAndReset(s, t, sorts: 3, seekSeconds: 4.5f);
+        s = PlayRound(s, t, sorts: 1, seekSeconds: 9.5f);
 
         HideSeekWire wire = HideSeekWire.Encode(s, new[] { Host, Joiner });
         HideSeekView cold = HideSeekWire.Fold(null, wire);
@@ -713,8 +713,14 @@ public class HideSeekMatchTests
         {
             RemainingSec = 161f,
         };
-        Assert.Equal("SEEKING · 2:41 · YOU HIDE · ROUND 2",
+        // TASK-1 (2026-09-19) appends the hider's sort readout to the phase line, so the HIDER's
+        // fall-through now carries it. The SEEKER's is untouched and is the one asserted against
+        // MATCH-1's original string -- what this test is about is that the match sentence does
+        // not fire here, and that is still exactly what both halves show.
+        Assert.Equal("SEEKING · 2:41 · YOU HIDE · ROUND 2 · SORTED 0 · BY SHAPE",
             HideSeekText.StripLine(seeking, Host, Name, t));
+        Assert.Equal("SEEKING · 2:41 · YOU SEEK · ROUND 2",
+            HideSeekText.StripLine(seeking, Joiner, Name, t));
 
         Assert.Equal("MATCH 1 · BEN WINS 16–13",
             HideSeekText.StripLine(ViewAt(HideSeekPhase.Tally, MatchWonCard(), Host, Joiner),

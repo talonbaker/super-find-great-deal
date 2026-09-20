@@ -552,7 +552,7 @@ public partial class BotHarness : Node
             lens,
             round?.Synced ?? false, (int)roundView.Phase, roundView.Round, roundView.RemainingSec,
             roundView.HiderPeerId, roundView.SeekerPeerId, (int)roundView.Refusal,
-            roundView.FoundTick, roundScores,
+            roundView.FoundTick, roundView.SortsCompleted, roundScores,
             roundTally is { } card
                 ? new RoundTallySample(card.RoundIndex, card.HiderPeerId, card.HiderGained,
                     card.SeekerPeerId, card.SeekerGained, card.EndedByDisconnect,
@@ -616,6 +616,14 @@ public partial class BotHarness : Node
         // paragraphs down and at the computation site.
         bool RoundSynced, int RoundPhase, int RoundIndex, float RoundRemaining,
         int RoundHider, int RoundSeeker, int RoundRefusal, int RoundFoundTick,
+        // TASK-1: the hider's LIVE sort count as THIS peer folded it off the wire. Sampled
+        // rather than derived, and sampled per peer, because that is the only thing the sort
+        // puts on any wire at all -- every other fact about the job (which object is which
+        // colour, which bin wants what, whether a settle has landed) is derived locally on each
+        // peer from the authored room, so "the count agrees everywhere" is the ONE assertion
+        // that can distinguish a working sort from three peers each quietly scoring their own.
+        // It rides HideSeekWire's existing slot: no new field, no bump.
+        int RoundSorts,
         Dictionary<string, int> RoundScores, RoundTallySample? RoundTally,
         // (The LoopUi / playthrough-flow / quota / bubble / honk columns were dropped with
         // their systems at the fork - BASE-1, 2026-09-19. What every one of them had in common is
