@@ -675,6 +675,9 @@ stands, which is the list to read before picking the next one:
 | 7901 | claimed in the same wave |
 | 7902 | SFX-1 |
 | **7903** | **`Run-ReachTest.ps1` (REACH-1)** |
+| 7904 | claimed in the same wave |
+| 7905 | SFX-2 |
+| **7906** | **`Run-ButtonsTest.ps1` (BTN-1)** |
 
 7903 was **given by the orchestrator, not computed from a snapshot of `tests/`** — which is
 INT-0's lesson above applied rather than re-learned. 7899-7902 do not appear in this branch's
@@ -729,3 +732,80 @@ extra crates were the level. SHELF-1's hundred will move the number again.
 legally; the audit's correction path does not fire under ordinary load, which is what it should
 look like. The correction branches are exercised by the planted room instead, where the fixtures
 are authored into the defects deliberately.
+
+## BTN-1: udp/7906, and two staging traps worth more than the suite (2026-09-19)
+
+### The ladder, extended
+
+`tests/Run-ButtonsTest.ps1` claims **udp/7906** for all three of its phases, **given by the
+orchestrator** rather than computed from a snapshot of `tests/` — INT-0's lesson applied rather
+than re-learned for the second time. 7904 and 7905 do not appear in this branch's `tests/` at all
+(their suites are on unmerged lane branches), so a grep here would happily have produced 7904.
+
+### An authored prop's id is a fact about the WHOLE world, and a suite that types one will break
+
+`PropManager.AdoptAuthoredProps` numbers authored props by sorting on NODE PATH across every room
+at once. BTN-1 put three objects on a rack in `HoldingRoom.tscn`; `HoldingRoom/...` sorts before
+`SearchRoom/...`, so those three took 1000..1002 and **the search room's four crates moved from
+1000..1003 to 1003..1006**. `tests/Run-PlaceTest.ps1` named all four by literal and had to be
+bumped by hand.
+
+**SHELF-1's hundred aisle props will do it again**, and any of them whose node name sorts before
+`Prop_0` will move that room's own four a second time. The server now prints one line per adopted
+prop at world build, so a suite can read the ids instead of typing them:
+
+```
+[props] authored prop 1002 <- /root/Gameplay/World/HoldingRoom/ObjectRack/Deal_2 (Crate)
+```
+
+Note the path: the seam scene is added to `Gameplay` under the node name **`World`**, not
+`Supermarket`, so a pattern anchored on the scene's own name matches nothing.
+
+### A scripted PLACE is measured from the HAND, and the walk stops 1.2 m short
+
+**Measured, on this suite's first run: both couriers were refused `TooFarToPlace` and nothing
+reached the bin, which reads exactly like a bin that does not work.** Two constants compose into a
+trap:
+
+- `PropManager.RequestPlace` measures `PlaceReachM + GrabRangeTolerance` = **1.65 m** from the
+  avatar's CARRY ANCHOR — about 0.9 m in front of the body, swinging with its heading — not from
+  the body. `Run-PlaceTest.ps1`'s header already says "the hand"; it is easy to read as the body.
+- `ScriptedCarryIntentSource.ArriveRadius` is **1.2 m**, so `--carry-walk-to` leaves the bot that
+  far short of the point it was given, in whatever direction it happened to approach from.
+
+So a walk-to placed a comfortable-looking 1.2 m from the target pose puts the hand 1.6-1.7 m away
+and the place is refused. **Aim `--carry-walk-to` AT the thing, not next to it** — a bot that is
+blocked by a solid object arrives by being blocked, which is both closer and far more repeatable
+than a free-space stopping point.
+
+Reusable discriminator: `[server] place denied peer=N reason=TooFarToPlace` in the server log
+separates this from every bin/pad/validator rule. The suite now echoes those lines
+unconditionally, for the CARRY-1 reason — read the server log before reaching for the flake list.
+
+### A wrapper that holds the suite mutex around a suite deadlocks against its own child
+
+Ten minutes were lost to `waiting for machine-wide full-suite lock ... held by: pid <my own
+wrapper>`. Most scripts in `tests/` take `Enter-SuiteMutex` themselves; a few (`Run-SupermarketWorldTest.ps1`)
+do not. A helper that wraps the mutex around one of the former can never proceed — the mutex is
+not reentrant across processes. **Wrap the BUILD and IMPORT in the mutex and release before
+invoking a suite that takes its own.**
+
+### The session scratchpad is shared between lanes on this machine
+
+A helper written to the scratchpad as `RunUnderMutex.ps1` was overwritten mid-session by another
+worktree's file of the same name, and the next invocation ran against that other worktree. Same
+class as the shared-stash hazard: **give scratch files a lane-specific subdirectory**, not just a
+lane-specific name.
+
+### `Carry: regrab-while-loose` — fourth confirmation, and the band has not moved
+
+The BTN-1 marathon (36 suites, 35 PASS / 1 FAIL) went red on this suite alone, printing the exact
+staging string this file already names: `bot A never completed held -> loose -> held-again for
+prop 2 (reached phase 2) - regrab staging broken`. Standalone with `-SkipBuild` immediately after,
+three times: **3/3 PASS, worst hold distance 1.05-1.09 m** (holder's own view 1.05/1.06/1.06 over
+96/96/100 samples; independent witness 1.08/1.09/1.07 over 95/95/99). That is inside the
+0.89-1.09 m band recorded here three times before it.
+
+**The machine was not idle for any of these** — another lane's `Run-AllTests.ps1` and its Godot
+processes were live throughout the marathon and through all three re-runs — which per SHADER-2's
+entry above makes a 3/3 clear a stronger flake verdict than an idle-machine pass.
