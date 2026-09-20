@@ -358,11 +358,13 @@ try {
         # nothing at all. Talon has not set a frame-time budget for this game, and inventing one
         # here would be a number nobody agreed to.
         if ($costSummary[-1] -match 'props=(\d+)') {
-            # AT LEAST the seeded population, not exactly it: the search room also has the four
-            # props CARRY-1 authored into it (1000..1003), so a correct run reports 154. Measured
-            # the hard way -- the first version of this check asserted equality, went red at
-            # "expected exactly 150", and the four extra crates were the level, not a bug in the
-            # seed. SHELF-1's hundred will land in the same room and move this number again.
+            # AT LEAST the seeded population, not exactly it: the world also has every AUTHORED
+            # prop in it. Measured the hard way -- the first version of this check asserted
+            # equality, went red at "expected exactly 150", and the four extra crates CARRY-1
+            # authored were the level, not a bug in the seed. It has moved twice since, exactly
+            # as predicted: 154 at REACH-1 (150 + CARRY-1's 4), and 283 at HOLD-1's BTN-1 merge
+            # (150 + the 133 the world now authors -- SHELF-1's 130 plus BTN-1's rack of 3).
+            # The check is written as a floor precisely so a growing level is not a red.
             $propCount = [int]$matches[1]
             if ($propCount -lt $CostPropTarget) {
                 Add-Failure "the cost run had $propCount prop(s) in the world, expected at least the $CostPropTarget seeded -- the measurement is of the wrong population"

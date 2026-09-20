@@ -70,8 +70,8 @@ $ErrorActionPreference = "Stop"
 # --- the world, in world space -----------------------------------------------------------------
 # HoldingRoom.tscn is instanced at the origin; SearchRoom.tscn at x = +40.
 $RackBoxPropId   = 1002        # ObjectRack/Deal_2 -- the cereal box, nearest the START button
-$SearchTargetId  = 1003        # SearchRoom/Prop_0, world (36, 0.22, 0)   -- phase 3's target
-$SearchDecoyId   = 1004        # SearchRoom/Prop_1, world (36, 0.22, 2)   -- phase 3's wrong prop
+$SearchTargetId  = 1004        # SearchRoom/Prop_1, world (36, 0.22, 2)   -- phase 3's target
+$SearchDecoyId   = 1006        # SearchRoom/Prop_3, world (38, 0.22, 0)   -- phase 3's wrong prop
 # The bin's interior, in world space: two crates side by side, both clear of its walls, and the
 # spot each courier walks to in order to be in reach of its own pose.
 #
@@ -83,10 +83,39 @@ $SearchDecoyId   = 1004        # SearchRoom/Prop_1, world (36, 0.22, 2)   -- pha
 # answered TooFarToPlace on both -- a staging failure that reads exactly like a bin that does not
 # work. The walk-to is now the BIN ITSELF: the courier presses up against its wall, arrives by
 # being blocked, and its hand ends up over the rim.
-$BinTargetPose   = "40.3,0.30,-4,0"
-$BinDecoyPose    = "39.7,0.30,-4,0"
-$BinTargetWalk   = "40.6,-4"
-$BinDecoyWalk    = "39.4,-4"
+#
+# RE-AIMED BY HOLD-1 (2026-09-19) WHEN BTN-1 AND SHELF-1 MET, and the reason is the level, not
+# this file. SHELF-1 dressed the search room with four bays and 1.6 m walkways and NO cross-aisle
+# except at each end, so a --carry-walk-to (which is ONE point and walks a straight line) can
+# only reach something in its own walkway or at the end of it. The bin moved to the -X
+# cross-aisle at local (-6.2, 0, 0) = world (33.8, 0, 0) -- see SearchRoom.tscn's header for the
+# whole argument, including the shelf it used to intersect.
+#
+# EACH COURIER NOW STAYS IN ITS OWN WALKWAY, and which prop each one carries is chosen by WHERE
+# THAT BOT SPAWNS rather than by taste. Gameplay.SpawnPositionFor deals SearchSpawn markers by
+# JOIN INDEX (index % 4), so in this phase A gets SearchSpawn_0 (35.5, 0), B gets _1 (44.5, 0)
+# and C -- the mid-round joiner -- gets _2 (38.5, 2.1), one walkway over from the other two.
+# A --carry-walk-to is ONE point walked in a STRAIGHT LINE, and the dressed room has no
+# cross-aisle except at each end (bays span world x in [35.4, 44.6]), so a courier that must
+# change walkway walks into a shelf. Measured: C, sent from (38.5, 2.1) to Prop_0 at (36, 0),
+# stopped dead at (36.01, 1.45) against Aisle2_Bay0 and the phase failed with "the target was
+# never delivered" -- which reads exactly like a bin that does not work.
+#
+#   B (spawn z = 0)   carries Prop_3 (38, 0.22, 0)  -- the DECOY, its own walkway throughout.
+#   C (spawn z = 2.1) carries Prop_1 (36, 0.22, 2)  -- the TARGET, its own walkway throughout.
+#
+# B is stopped by the bin's +X wall (outer face world x = 34.5) at about x = 34.86 with the
+# 0.36 m capsule, and its carry anchor then sits near x = 33.96, inside the 1.28 m clear
+# interior (world x in [33.16, 34.44]). C approaches down the z = 2.1 walkway and stops in the
+# CROSS-AISLE beside the bin rather than against it -- its walk-to is 1.3 m past the bin in x so
+# that ScriptedCarryIntentSource's 1.2 m arrive radius leaves it in free floor, and the line
+# from its grab to that point clears the corner of Aisle2_Bay0 at (35.4, 1.3) by about 0.43 m
+# against a 0.36 m capsule. The two poses are 0.64 m apart in z: two 0.44 m crates side by side
+# with 0.2 m to spare, the size the bin was built for.
+$BinTargetPose   = "33.8,0.30,0.32,0"
+$BinDecoyPose    = "33.8,0.30,-0.32,0"
+$BinTargetWalk   = "32.9,1.30"
+$BinDecoyWalk    = "33.8,-0.32"
 
 Write-Host "=== BTN-1: the three round buttons, the rack and the drop-off bin ===" -ForegroundColor White
 
@@ -373,7 +402,7 @@ try {
     # rule: under load a walk slips by seconds and a constant does not), and 16 s is comfortably
     # past the script's confirm@14 so the delivery lands while the round is Seeking.
     $binB = Start-ButtonsBot "buttons-p3-B" "BinSeeker" 80 @(
-        "--carry-script", "36,0.22,2,3,-1",
+        "--carry-script", "38,0.22,0,3,-1",
         "--carry-target-prop", $SearchDecoyId, "--carry-grab-retry", "0.8",
         "--carry-walk-to", $BinDecoyWalk,
         "--carry-place", "$BinDecoyPose,16")
@@ -383,7 +412,7 @@ try {
     # hider and seeker are still present.
     Start-Sleep -Seconds 22
     $binC = Start-ButtonsBot "buttons-p3-C" "BinCourier" 55 @(
-        "--carry-script", "36,0.22,0,3,-1",
+        "--carry-script", "36,0.22,2,3,-1",
         "--carry-target-prop", $SearchTargetId, "--carry-grab-retry", "0.8",
         "--carry-walk-to", $BinTargetWalk,
         "--carry-place", "$BinTargetPose,14")

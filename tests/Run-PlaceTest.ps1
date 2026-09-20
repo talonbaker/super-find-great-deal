@@ -71,8 +71,14 @@ $ErrorActionPreference = "Stop"
 # numbers authored props by sorting on NODE PATH across the whole world, so adding props to ANY
 # room renumbers every room after it alphabetically. BTN-1 put three objects on a rack in
 # HoldingRoom.tscn; "HoldingRoom/..." sorts before "SearchRoom/...", so those three took
-# 1000..1002 and this room's four moved up by three. SHELF-1's hundred aisle props will move them
-# again the same way.
+# 1000..1002 and this room's four moved up by three.
+#
+# HOLD-1 (2026-09-19) merged BTN-1 and SHELF-1 into one tree and RE-DERIVED these four off the
+# server's own adoption log rather than trusting either branch's copy. They did not move a second
+# time, and the reason is worth keeping: SHELF-1's hundred-and-twenty-six products live under a
+# container node named Stock/, and "S" sorts after "P", so they land ABOVE Prop_0..3 rather than
+# under them. 1003..1006 is the value on the merged tree, verified against
+# "[props] authored prop 1003 <- /root/Gameplay/World/SearchRoom/Prop_0 (Crate)".
 #
 # The durable fix is for a suite to DERIVE these from the server's own adoption log rather than
 # type them -- the server now prints one "[props] authored prop <id> <- <path>" line per prop at
