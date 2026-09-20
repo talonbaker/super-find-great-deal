@@ -1203,3 +1203,111 @@ three times: **3/3 PASS, worst hold distance 1.05-1.09 m** (holder's own view 1.
 **The machine was not idle for any of these** — another lane's `Run-AllTests.ps1` and its Godot
 processes were live throughout the marathon and through all three re-runs — which per SHADER-2's
 entry above makes a 3/3 clear a stronger flake verdict than an idle-machine pass.
+
+## HOLD-1 (2026-09-19): udp/7909, and four things measured merging two lanes into one room
+
+`tests/Run-HoldingBoardTest.ps1` claims **udp/7909** and is registered last in
+`tests/Run-AllTests.ps1`; `tests/Capture-HoldingBoard.ps1` is unregistered and manual on the same
+number. **The next free port is 7910.** The one ladder table is in the REACH-1 section above.
+
+### An `[Export]` is not a level-authoring surface in this project, in EITHER shape
+
+CLOCK-1's entry (and `godot-scenes.md`) records the trap as *"an `[Export]` on a nested
+PackedScene instance line is silently dropped"*. **It is broader than that.** HOLD-1 authored an
+`InteractionSlot` INLINE in `HoldingRoom.tscn` -- a plain node with `script = ExtResource(...)`
+on it, not an instance of anything -- and set four exported properties on it
+(`radius`, `rest_height`, `snap_rotation`, `show_marker`). All four read back as their C#
+defaults.
+
+**The failure was loud, and only because a list already existed.**
+`Run-SupermarketWorldTest` said:
+
+```
+FAIL res://scenes/game/world/supermarket/HoldingRoom.tscn: 87 node(s) packed but 88 live.
+```
+
+`show_marker = false` never arrived, so `InteractionSlot` built its own marker ring in `_Ready`
+and the room grew a node its `.tscn` does not declare. Without the packed-vs-live check this
+would have been a silently oversized room and three silently wrong physics constants.
+
+**The fix that works is a NODE NAME, because a node name is native.** `InteractionSlot._Ready`
+now adopts a child called `SlotMarker` when the level authored one and builds its own only when
+there is none, and the pad sets no properties at all. Same move `RoundClock.ResolveRoom` made for
+the same reason. This is the fourth payment in this repo: `PropManager.AuthoredKindOf` (2026-07),
+`Carryable.LoadLiftM`, `RoundClock.Room`, and now this.
+
+### A guard can be protected by the KEY TYPE, and a peer id is not a good enough counterexample
+
+`HoldingBoardModel.Rows` sorts the score map's keys so two peers paint the same row order.
+**Deleting `ids.Sort()` left every ordering assertion green** -- CELEBRATE-1's trap, arriving
+through a door nobody had used. `ImmutableDictionary<int,int>` enumerates in HASH order, `int`'s
+hash IS the value, and the trie's traversal of small positive ints comes out ASCENDING.
+
+The obvious "use realistic data instead of toy data" fix is **not enough**, and that is the part
+worth keeping. Measured with four real peer ids lifted out of `tests/logs/`:
+
+```
+1076010669, 652333145, 1788870000, 233849852
+  enumerate as -> 233849852, 652333145, 1076010669, 1788870000   (already sorted)
+```
+
+So a sort over `int` keys is unobservable through anything the shipped wire can produce. **To
+prove the guard, its call site had to be made to reach it**: the test builds the map with an
+`IEqualityComparer<int>` that hashes to the NEGATED key, which reverses the traversal, and
+carries a positive control asserting the map really does enumerate differently before asserting
+the rows come out ascending anyway. It goes red the moment the sort goes away.
+
+**And the test's own helper had to be fixed first.** `View(scores: hostile)` was calling
+`.ToImmutableDictionary()`, which silently rebuilt the map with the DEFAULT comparer -- so the
+hostile test passed against a deliberately unsorted implementation. A fixture that normalises its
+input can defeat the thing it was written to catch.
+
+### A render is the only witness some defects have, and that cuts both ways
+
+CELEBRATE-1's entry is about captures that are worthless (a flat grey frame passing as green).
+This is the converse. `HoldingBoard.SetLine` early-outs when the new text equals the last text,
+and the last text started as `""`. An empty row therefore **never got written**, so four labels
+sat on the wall showing the placeholder the `.tscn` authors so it is openable in the editor.
+
+Nothing in `tests/unit` could see it -- the model returns the right strings and the bug is in the
+pusher. **Nothing in the scene suite could either**, and that is the sharp half: the suite reads
+the board through `CurrentText`, which returns the same `_last*` fields the early-out compares,
+so both halves agreed with each other while disagreeing with the wall. The first capture showed
+it immediately. **When a readout's log line is built from the same cache as its own
+change-detection, the log cannot see a paint that never happened.**
+
+### Two suite-staging facts about the dressed search room and the two-player loop
+
+Both cost a run each and both generalise past this lane.
+
+- **`HideSeekLoop` needs EXACTLY two humans to Start**, not at least two. A capture script with
+  three windowed lenses produced `[round] refused: NeedTwoPlayers - TWO PLAYERS ARE NEEDED TO
+  START (phase=Holding humans=3)` and 72 seconds of frames that all read `HOLDING`. A third peer
+  is fine once the round is RUNNING -- `Run-ButtonsTest` phase 3 and this suite both rely on that
+  -- but it must arrive after the Start. The corollary bit too: a suite that gates its late
+  joiner on `Holding -> Hiding` while that joiner IS the second player is a deadlock, and it
+  fails with "the server never left Holding", which reads exactly like a broken round script.
+- **`--carry-walk-to` is ONE point walked in a STRAIGHT LINE, and the dressed search room has no
+  cross-aisle except at its ends** (bays span world x in [35.4, 44.6], walkways are 1.6 m).
+  `Gameplay.SpawnPositionFor` deals `SearchSpawn` markers by JOIN INDEX, so a suite's third bot
+  lands one walkway over from its first two. Measured: a courier sent from (38.5, 2.1) to a crate
+  at (36, 0) **stopped dead at (36.01, 1.45)** against `Aisle2_Bay0` and never grabbed anything;
+  the phase reported "the target was never delivered to the bin", which reads exactly like a bin
+  that does not work. **Walk a bot along its own walkway, never diagonally**, and choose which
+  prop it carries by where it spawns.
+
+### Derive an authored prop id, do not type it
+
+Three renumberings in two days (CARRY-1's four crates went 1000-1003 -> 1003-1006 -> 1014-1017)
+and `tests/_Common.ps1` now has `Get-AuthoredPropId -ServerLog <path> -PathSuffix
+"SearchRoom/Prop_0"`, reading `PropManager`'s own `[props] authored prop N <- <path>` line.
+Adoption is logged BEFORE `[server] listening`, so a suite that already waits for the listening
+line needs no second wait. `Run-PlaceTest` and `Run-ButtonsTest` use it; `Run-AuthoredPropTest`
+deliberately keeps its literals, because the block IS its subject and a version that derived them
+would pass whatever the world did.
+
+**A container name can only order things WITHIN one room.** SHELF-1's `Stock` works because it
+sorts after `Prop_` in the same room. Nothing in the holding room can sort after the search room,
+because the room name is a PREFIX of every path under it -- so a prop added to an
+alphabetically-earlier room renumbers every later room, always, and the only durable answer is
+for the suites to stop typing the number.
