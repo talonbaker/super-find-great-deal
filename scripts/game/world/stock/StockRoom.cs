@@ -95,13 +95,17 @@ public static class StockRoom
     /// twice in one session (an end-cap on bot D's diagonal, three material-SFX fixtures inside a
     /// bay). The cross-aisles are the one route between walkways, so a stack parked in the middle
     /// of one is a red in somebody else's suite waiting to happen. Against the wall at x = ±6.7
-    /// nothing has ever walked and nothing can: the bins are 2 m away in z, the drop-off bin
-    /// keeps its 1.6 m clear radius (nearest approach 2.36 m), and the pillar is 1 m clear.</para>
+    /// nothing has ever walked and nothing can: the bins are 2.01 m away, the drop-off bin keeps
+    /// its 1.6 m clear radius (nearest approach 2.33 m), and the pillar is 4.8 m clear.</para>
     /// </summary>
     public static readonly (string Name, float X, float Z)[] Pallets =
     {
-        ("PalletPos", 6.7f, -2.3f),
-        ("PalletNeg", -6.7f, -2.3f),
+        // x = +/-6.6, not 6.7: a 3-wide stack is 0.63 m across, so 6.7 put its outer face at
+        // 7.015 and the wall's inner face is at 7.0. Caught by
+        // StockBakeTests.TheFloorPalletsAreClearOfEveryFixtureTheRoomAlreadyHas on the first
+        // bake -- fifteen millimetres through a wall, which renders perfectly.
+        ("PalletPos", 6.6f, -2.3f),
+        ("PalletNeg", -6.6f, -2.3f),
     };
 
     /// <summary>One pallet stack's instances and its single collision box, in room space.</summary>

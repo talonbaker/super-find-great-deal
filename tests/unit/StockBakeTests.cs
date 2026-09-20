@@ -164,7 +164,7 @@ public class StockBakeTests
         // The end-caps are instanced rotated 90 degrees about Y, so their 1.4 m length runs along
         // the room's z. If that stops being true the bulk inside them is rotated into the aisle.
         foreach (RoomBay b in bays.Where(b => b.IsEndCap))
-            Assert.Equal(90f, MathF.Abs(b.YawDeg), 1);
+            Assert.Equal((double)(90f), (double)(MathF.Abs(b.YawDeg)), 1);
     }
 
     /// <summary>

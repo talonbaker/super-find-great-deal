@@ -56,15 +56,15 @@ public class ShelfStockTests
         Assert.Contains("0, 0, 1, 0, 0.95, 0", tscn);                 // Board1
         Assert.Contains("0, 0, 1, 0, 1.5, 0", tscn);                  // Board2
 
-        Assert.Equal(2.30f, ShelfStock.ShelfUnit.LengthM, 3);
-        Assert.Equal(1.12f, ShelfStock.ShelfUnit.UprightCentreX, 3);
-        Assert.Equal(0.06f, ShelfStock.ShelfUnit.UprightWidthM, 3);
-        Assert.Equal(0.50f, ShelfStock.ShelfUnit.DepthM, 3);
+        Assert.Equal((double)(2.30f), (double)(ShelfStock.ShelfUnit.LengthM), 3);
+        Assert.Equal((double)(1.12f), (double)(ShelfStock.ShelfUnit.UprightCentreX), 3);
+        Assert.Equal((double)(0.06f), (double)(ShelfStock.ShelfUnit.UprightWidthM), 3);
+        Assert.Equal((double)(0.50f), (double)(ShelfStock.ShelfUnit.DepthM), 3);
         Assert.Equal(new[] { 0.40f, 0.95f, 1.50f }, ShelfStock.BoardCentreY);
-        Assert.Equal(0.05f, ShelfStock.BoardThicknessM, 3);
+        Assert.Equal((double)(0.05f), (double)(ShelfStock.BoardThicknessM), 3);
 
         // The clear span between the uprights' INNER faces is what a product may occupy.
-        Assert.Equal(2.18f, ShelfStock.ShelfUnit.InnerSpanM, 3);
+        Assert.Equal((double)(2.18f), (double)(ShelfStock.ShelfUnit.InnerSpanM), 3);
     }
 
     [Fact]
@@ -73,7 +73,7 @@ public class ShelfStockTests
         string tscn = ReadScene("scenes/game/world/supermarket/EndCap.tscn");
         Assert.Contains("size = Vector3(1.4, 0.05, 0.5)", tscn);
         Assert.Contains("0, 0, 1, -0.67, 0.9, 0", tscn);
-        Assert.Equal(1.28f, ShelfStock.EndCap.InnerSpanM, 3);
+        Assert.Equal((double)(1.28f), (double)(ShelfStock.EndCap.InnerSpanM), 3);
     }
 
     /// <summary>Every product's box, against its own prefab. These three numbers decide where
@@ -90,9 +90,9 @@ public class ShelfStockTests
             : prefab.Contains("CerealBox") ? ShelfStock.Box
             : ShelfStock.Produce;
 
-        Assert.Equal(w, size.WidthM, 3);
-        Assert.Equal(h, size.HeightM, 3);
-        Assert.Equal(d, size.DepthM, 3);
+        Assert.Equal((double)(w), (double)(size.WidthM), 3);
+        Assert.Equal((double)(h), (double)(size.HeightM), 3);
+        Assert.Equal((double)(d), (double)(size.DepthM), 3);
 
         if (prefab.Contains("Can"))
         {
@@ -199,8 +199,8 @@ public class ShelfStockTests
 
         Assert.True(ShelfStock.BoardTopY(2) > 1.04f,
             "the top board is above the avatar's 1.040 m eye, which is why its middle rows are empty");
-        Assert.Equal(1.525f, ShelfStock.BoardTopY(2), 3);
-        Assert.Equal(0.425f, ShelfStock.BoardTopY(0), 3);
+        Assert.Equal((double)(1.525f), (double)(ShelfStock.BoardTopY(2)), 3);
+        Assert.Equal((double)(0.425f), (double)(ShelfStock.BoardTopY(0)), 3);
     }
 
     /// <summary>
@@ -212,7 +212,7 @@ public class ShelfStockTests
     [Fact]
     public void NoProductStacksTwoHighOnABoardBecauseTheClearanceIsFiveHundredMillimetres()
     {
-        Assert.Equal(0.50f, ShelfStock.BoardClearHeightM, 3);
+        Assert.Equal((double)(0.50f), (double)(ShelfStock.BoardClearHeightM), 3);
         foreach (StockMaterial m in new[] { StockMaterial.Can, StockMaterial.Box, StockMaterial.Produce })
             Assert.True(ShelfStock.SizeOf(m).HeightM <= ShelfStock.BoardClearHeightM,
                 $"{m} does not fit under a shelf at all");
@@ -340,7 +340,7 @@ public class ShelfStockTests
         // The three near-miss prefabs are their ordinary twins plus one band (SHELF-1 §10), so
         // the widest footprint in the game's hand is the cereal box's.
         float widest = ShelfStock.Box.PlanDiagonalM;
-        Assert.Equal(0.199f, widest, 3);
+        Assert.Equal((double)(0.199f), (double)(widest), 3);
 
         float needed = widest + 2f * PlacementIntegrity.DefaultOverlapToleranceM;
         foreach (BayFill fill in EveryAuthoredBay())
