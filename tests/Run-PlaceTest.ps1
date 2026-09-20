@@ -102,6 +102,18 @@ try {
 
     Write-Host "[2/3] launching four scripted place bots..." -ForegroundColor Cyan
 
+    # EACH BOT NAMES ITS PROP (--carry-target-prop), ADDED BY SHELF-1 AND NOT OPTIONAL ANY MORE.
+    # This suite used to say "walk to (36, 0.22, -2) and press E", and in a room containing four
+    # crates that was the same instruction as "pick up crate 1002". The search room now authors
+    # 130 props: on the first run against the dressed room, bot D pressed E at its 1.2 m arrive
+    # radius and came away holding 1013, a cereal box on the next shelf -- correctly, because a
+    # crate at y = 0.22 is 1.22 m from an avatar standing 1.2 m short and a box at y = 0.565 on
+    # the aisle 0.94 m away is 1.02 m. Nearest-carryable is the right rule for a player and it is
+    # the whole texture of a stocked aisle; it is simply no longer a way for a suite to name an
+    # object. The flag already existed for CARRY-1's version of this lesson ("walk to the ball",
+    # not "walk to (x, z)") and SHELF-1 extended it to the grab. See
+    # SandboxAvatar.ScriptedGrabPropId -- it narrows the choice, never widens the reach.
+
     # Bots connect in order, and the server hands out search-room markers 0..3 by join order, so
     # each of the four starts at its own marker. Two bots on one marker spawn inside each other,
     # which is why SearchRoom.tscn has four.
@@ -113,6 +125,7 @@ try {
     $botA = Start-Godot @("--bot", "--address", "127.0.0.1:$Port", "--name", "PlaceBotA",
         "--log", $aLog, "--duration", $DurationSec, "--world", "supermarket",
         "--carry-script", "36,0.22,0,1.0,-1", "--carry-grab-retry", "0.6",
+        "--carry-target-prop", $PropA,
         "--carry-walk-to", "40,0",
         "--carry-place", "$PlaceX,$PlaceY,$PlaceZ,$PlaceYawDeg,7") "placeA"
     $procs += $botA
@@ -125,6 +138,7 @@ try {
     $botB = Start-Godot @("--bot", "--address", "127.0.0.1:$Port", "--name", "PlaceBotB",
         "--log", $bLog, "--duration", $DurationSec, "--world", "supermarket",
         "--carry-script", "38,0.22,0,1.0,-1", "--carry-grab-retry", "0.6",
+        "--carry-target-prop", $PropB,
         "--carry-place", "45,1,0,0,7") "placeB"
     $procs += $botB
     Start-Sleep -Milliseconds 400
@@ -136,6 +150,7 @@ try {
     $botC = Start-Godot @("--bot", "--address", "127.0.0.1:$Port", "--name", "PlaceBotC",
         "--log", $cLog, "--duration", $DurationSec, "--world", "supermarket",
         "--carry-script", "36,0.22,2,1.0,-1", "--carry-grab-retry", "0.6",
+        "--carry-target-prop", $PropC,
         "--carry-walk-to", "46,2.5",
         "--carry-place", "46,1,2.5,0,7") "placeC"
     $procs += $botC
@@ -148,6 +163,7 @@ try {
     $botD = Start-Godot @("--bot", "--address", "127.0.0.1:$Port", "--name", "PlaceBotD",
         "--log", $dLog, "--duration", $DurationSec, "--world", "supermarket",
         "--carry-script", "36,0.22,-2,1.0,-1", "--carry-grab-retry", "0.6",
+        "--carry-target-prop", $PropD,
         "--carry-walk-to", "47,-3",
         "--carry-place", "47.35,1,-3,0,7") "placeD"
     $procs += $botD

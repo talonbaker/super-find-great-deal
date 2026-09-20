@@ -144,18 +144,29 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4.5, 1.1, 0)
 ; contract (0..n-1, enforced by SupermarketWorldSelfTest) is why they are _2 and _3 rather than
 ; any other pair of numbers.
 
-; SHELF-1 (2026-09-19) — _2 and _3 MOVED from z = 3 to z = 4.2, and nothing else about them
-; changed. z = 3 is now inside the fourth aisle's footprint (bays run z 2.9..3.4), and a bot
-; that starts its run standing inside a shelf is the flake CARRY-1's own note above was written
-; to prevent. 4.2 is the centre of the 1.6 m walkway between that aisle and the +Z wall, which
-; is the same kind of spot the other two markers have. The NAMES and the COUNT are untouched,
-; which is what SupermarketWorldSelfTest's contract actually binds — see its numbering check.
+; SHELF-1 (2026-09-19) — _2 AND _3 MOVED, and the second position is the one that was right.
+; z = 3 is now inside the fourth aisle's footprint (bays run z 2.9..3.4), and a bot that starts
+; its run standing inside a shelf is the flake CARRY-1's own note above was written to prevent.
+;
+; THE FIRST FIX WAS WRONG AND Run-PlaceTest FOUND IT. Moving them to z = 4.2 — the centre of the
+; walkway between the fourth aisle and the +Z wall — is a legal standing spot and turned that
+; suite red anyway: its bots C and D spawn on these two markers and walk STRAIGHT AT their
+; props, and an aisle now stood between the marker and the room. Both bots stopped dead against
+; a shelf at z ~= 3.5, never grabbed, and the suite reported "a REFUSED place must never cost
+; the player what they were carrying" about a placement that never happened.
+;
+; SO THE RULE FOR A SPAWN MARKER IN THIS ROOM IS NOT "somewhere legal to stand", IT IS
+; "the same walkway as the props a bot starting there is going to want". _2 sits in the z-band
+; [1.3, 2.9] with Prop_1; _3 sits in [-2.9, -1.3] with Prop_2. Both are mid-walkway, 0.8 m clear
+; of a shelf face on either side, and 2.1 m from _0 and _1 in the central walkway so no two bots
+; spawn inside each other. The NAMES and the COUNT are untouched, which is what
+; SupermarketWorldSelfTest's contract actually binds — see its numbering check.
 
 [node name="SearchSpawn_2" type="Marker3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4.5, 1.1, 4.2)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.5, 1.1, 2.1)
 
 [node name="SearchSpawn_3" type="Marker3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4.5, 1.1, 4.2)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.5, 1.1, -2.1)
 
 ; CARRY-1 (2026-09-19) — ROOM BOUNDS. The authored volume placement integrity layer 1 tests
 ; against (program doc §5b, a ruling from Talon): a prop may only be SET DOWN somewhere whose
@@ -348,8 +359,14 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3.45, 0, 3.15)
 ; it still got a headed look (docs/qa/2026-09-19-shelf-1/). They close the OUTER two aisles at
 ; OPPOSITE ends, so neither cross-aisle is blocked twice.
 
+; EndCap_0 closes the SECOND aisle rather than the first, and that is not a look: bot D of
+; Run-PlaceTest carries a crate from Prop_2 to the +X wall at z = -3 to stage the out-of-bounds
+; refusal, and an end-cap on aisle 1 sat exactly on that diagonal. Measured — the bot stopped
+; dead at world x = 44.45, 15 cm short of the end-cap's face, and the suite reported a refusal
+; that never happened. A walk brain that goes in a straight line makes every piece of furniture
+; in the room part of another lane's staging.
 [node name="EndCap_0" parent="." instance=ExtResource("11_endcap")]
-transform = Transform3D(0, 0, -1, 0, 1, 0, 1, 0, 0, 4.85, 0, -3.15)
+transform = Transform3D(0, 0, -1, 0, 1, 0, 1, 0, 0, 4.85, 0, -1.05)
 
 [node name="EndCap_1" parent="." instance=ExtResource("11_endcap")]
 transform = Transform3D(0, 0, -1, 0, 1, 0, 1, 0, 0, -4.85, 0, 3.15)
@@ -399,8 +416,11 @@ script = ExtResource("2_netprop")
 
 [node name="Body" parent="Stock/Bin_0" instance=ExtResource("12_bin")]
 
+; Bin_1 sits at +1.05 rather than the mirror of Bin_4: Run-PlaceTest's bot D walks from Prop_2
+; to the -X cross-aisle to try a placement outside the room, and a bin on that diagonal is a
+; 6 kg obstacle the walk brain cannot go round.
 [node name="Bin_1" type="Node3D" parent="Stock"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6.4, 0, -1.05)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6.4, 0, 1.05)
 script = ExtResource("2_netprop")
 
 [node name="Body" parent="Stock/Bin_1" instance=ExtResource("12_bin")]
@@ -1028,37 +1048,37 @@ script = ExtResource("2_netprop")
 ; a row.
 
 [node name="Produce_000" type="Node3D" parent="Stock"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4.85, 0.505, -3.5)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4.85, 0.505, -1.4)
 script = ExtResource("2_netprop")
 
 [node name="Body" parent="Stock/Produce_000" instance=ExtResource("15_produce")]
 
 [node name="Produce_001" type="Node3D" parent="Stock"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4.85, 0.505, -2.8)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4.85, 0.505, -0.7)
 script = ExtResource("2_netprop")
 
 [node name="Body" parent="Stock/Produce_001" instance=ExtResource("15_produce")]
 
 [node name="Produce_002" type="Node3D" parent="Stock"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4.85, 1.055, -3.5)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4.85, 1.055, -1.4)
 script = ExtResource("2_netprop")
 
 [node name="Body" parent="Stock/Produce_002" instance=ExtResource("15_produce")]
 
 [node name="Produce_003" type="Node3D" parent="Stock"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4.85, 1.055, -2.8)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4.85, 1.055, -0.7)
 script = ExtResource("2_netprop")
 
 [node name="Body" parent="Stock/Produce_003" instance=ExtResource("15_produce")]
 
 [node name="Produce_004" type="Node3D" parent="Stock"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4.85, 1.605, -3.5)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4.85, 1.605, -1.4)
 script = ExtResource("2_netprop")
 
 [node name="Body" parent="Stock/Produce_004" instance=ExtResource("15_produce")]
 
 [node name="Produce_005" type="Node3D" parent="Stock"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4.85, 1.605, -2.8)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4.85, 1.605, -0.7)
 script = ExtResource("2_netprop")
 
 [node name="Body" parent="Stock/Produce_005" instance=ExtResource("15_produce")]

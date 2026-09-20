@@ -53,6 +53,13 @@
          the 130 is compared between A's and B's final samples: same id, same place, or the two
          peers do not agree about what the number means.
 
+         BE HONEST ABOUT WHAT THE CROSS-PEER HALF PROVES HERE. Nothing moves in this run, and an
+         authored prop at rest is at its authored transform on every peer by construction, so a
+         green reads 0.0000 m and would read 0.0000 m even if the stream were dead. It is kept
+         because it is free and because it DOES catch a peer that built a different world -- but
+         the suite that proves a MOVING prop converges across peers is Run-PlaceTest (on these
+         same authored crates) and Run-CarryNetTest, not this one.
+
     PROVED ABLE TO FAIL. See docs/agents/handoffs/2026-09-19-SHELF-1.md for the planted rename
     (Stock/Can_000 -> Stock/Can_900) and exactly which lines went red.
 
@@ -107,7 +114,7 @@ $Landmarks = @(
     @{ Id = 1004; Name = "Stock/Bin_0";             At = @(33.60, 0.000, -4.30) }
     @{ Id = 1010; Name = "Stock/Box_000";           At = @(36.19, 0.565, -1.16) }
     @{ Id = 1058; Name = "Stock/Can_000";           At = @(36.31, 0.485, -3.26) }
-    @{ Id = 1106; Name = "Stock/Produce_000";       At = @(44.85, 0.505, -3.50) }
+    @{ Id = 1106; Name = "Stock/Produce_000";       At = @(44.85, 0.505, -1.40) }
 )
 
 # Cross-peer agreement. A client mirrors a Resting prop from the server's broadcast, so the two
@@ -328,11 +335,14 @@ if ($samplesA.Count -gt 0) {
 if ($samplesA.Count -gt 0 -and $samplesB.Count -gt 0) {
     $lastA = Get-AuthoredMap $samplesA[-1]
     $lastB = Get-AuthoredMap $samplesB[-1]
-    $worst = 0.0; $worstId = -1; $disagreements = 0; $holderMismatch = 0
+    $worst = -1.0; $worstId = -1; $disagreements = 0; $holderMismatch = 0
     for ($id = $AuthoredFirst; $id -le $AuthoredLast; $id++) {
         if (-not ($lastA.ContainsKey($id) -and $lastB.ContainsKey($id))) { continue }
         $pa = $lastA[$id]; $pb = $lastB[$id]
         $d = Dist3 @([double]$pa.x, [double]$pa.y, [double]$pa.z) @([double]$pb.x, [double]$pb.y, [double]$pb.z)
+        # -1 as the seed rather than 0, so an all-exact run still names an id: every authored
+        # prop is at its authored transform on BOTH peers while nothing has moved, and "worst
+        # 0.0000 m (id -1)" reads like the loop never ran.
         if ($d -gt $worst) { $worst = $d; $worstId = $id }
         if ($d -gt $PeerAgreementM) { $disagreements++ }
         if ([int]$pa.holder -ne [int]$pb.holder) { $holderMismatch++ }
@@ -360,10 +370,14 @@ if ($script:Failures.Count -gt 0) {
     exit 1
 }
 
-Write-Host ("PASS: {0} authored props adopted as ids {1}..{2} on the server, on a client that was " +
-    "there from the start and on one that joined {3} s late; the five id blocks carry the kinds the " +
-    "scene authors; the first id of every block is at its authored pose; and all {0} agree across peers." -f
-    $AuthoredCount, $AuthoredFirst, $AuthoredLast, $LateJoinDelaySec) -ForegroundColor Green
+# Built before it is printed: `-f` binds tighter than `+`, so a format string assembled with
+# `+` inside the same parentheses formats only its LAST fragment and prints the rest of the
+# placeholders literally. Measured on this suite's first green run.
+$passLine = "PASS: $AuthoredCount authored props adopted as ids $AuthoredFirst..$AuthoredLast on the " +
+    "server, on a client that was there from the start and on one that joined $LateJoinDelaySec s late; " +
+    "the five id blocks carry the kinds the scene authors; the first id of every block is at its " +
+    "authored pose; and all $AuthoredCount agree across peers."
+Write-Host $passLine -ForegroundColor Green
 Write-Host ""
 Write-Host "AUTHORED-PROP TEST OVERALL: PASS" -ForegroundColor Green
 exit 0
