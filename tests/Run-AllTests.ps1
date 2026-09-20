@@ -194,6 +194,14 @@ try {
         # here can report on, and it is why this one is worth its two minutes.
         @{ Name = "Round: buttons + drop-off bin (BTN-1)"; Script = "Run-ButtonsTest.ps1" }
 
+        # --- HOLD-1 (2026-09-19): the holding room's board, and a peer that saw none of it ---
+        # Last, on the standing rule. A server and THREE bots on udp/7909, the third launched on
+        # the server's own Holding -> Hiding line so it arrives mid-round having witnessed
+        # nothing; what it asserts is that its FIRST painted board equals the host's. About a
+        # minute and a half. Like the two suites above it takes part in the join-index spawn
+        # dealing, which is the other reason it belongs at the end.
+        @{ Name = "Round: holding board (HOLD-1)"; Script = "Run-HoldingBoardTest.ps1" }
+
         # WHAT WAS REMOVED HERE AT THE FORK (BASE-1, 2026-09-19), so a reader of an old handoff
         # can tell "deleted" from "lost": the bubble-test world, the shared bubble counter and the
         # last-bubble celebration, the TV portal, the Puffin Lab, the watcher's night gate, the

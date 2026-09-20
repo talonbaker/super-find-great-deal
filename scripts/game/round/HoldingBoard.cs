@@ -68,17 +68,26 @@ public partial class HoldingBoard : Node3D
     private float _rowBasePixelSize;
     private float _footerBasePixelSize;
 
+    /// <summary>
+    /// The value <see cref="_lastHeader"/> and friends hold before anything has been painted,
+    /// and it is NOT the empty string.
+    ///
+    /// <para><b>Measured, in the first capture of this board.</b> The scene authors a
+    /// placeholder in every label so the file is openable in the editor and shows its own
+    /// layout. <see cref="SetLine"/> early-outs when the new text equals the last text, and with
+    /// <c>""</c> as the initial value an empty row NEVER GOT WRITTEN -- so the two unused row
+    /// labels, the overflow line and the footer all sat there showing the authored em dash,
+    /// which reads as a readout that has something to say and cannot say it. A sentinel no real
+    /// line can equal makes the first paint unconditional.</para>
+    /// </summary>
+    private const string Unpainted = "\u0000";
+
     // What is currently painted, so a poll that changes nothing costs a handful of string
     // comparisons. The same early-out every HUD widget's Tick makes.
-    private string _lastHeader = "";
-    private string _lastFooter = "";
-    private string _lastOverflow = "";
+    private string _lastHeader = Unpainted;
+    private string _lastFooter = Unpainted;
+    private string _lastOverflow = Unpainted;
     private readonly string[] _lastRows = new string[HoldingBoardModel.MaxRows];
-
-    /// <summary>Whether <c>--log-clock</c> asked for a machine-readable line. Shares CLOCK-1's
-    /// flag rather than taking one of its own: the two readouts are painted by one poll from one
-    /// view, and a suite that wants to see what the walls say wants both.</summary>
-    private bool _log;
 
     public override void _Ready()
     {
@@ -89,7 +98,7 @@ public partial class HoldingBoard : Node3D
         for (int i = 0; i < _rows.Length; i++)
         {
             _rows[i] = GetNodeOrNull<Label3D>(RowNodeName(i));
-            _lastRows[i] = "";
+            _lastRows[i] = Unpainted;
         }
 
         if (_panel == null || _header == null || _overflow == null || _footer == null
@@ -118,8 +127,6 @@ public partial class HoldingBoard : Node3D
         }
 
         UiThemeService.Bind(this, ApplyTokens);
-
-        _log = NetworkManager.Instance?.Options?.LogClock == true;
 
         // A board that shows a plausible default is worse than a blank wall — RoundClock's class
         // doc has the argument. RoundAudio turns it on when the round is synced.
@@ -198,11 +205,11 @@ public partial class HoldingBoard : Node3D
     public void Blank()
     {
         Visible = false;
-        _lastHeader = "";
-        _lastFooter = "";
-        _lastOverflow = "";
+        _lastHeader = Unpainted;
+        _lastFooter = Unpainted;
+        _lastOverflow = Unpainted;
         for (int i = 0; i < _lastRows.Length; i++)
-            _lastRows[i] = "";
+            _lastRows[i] = Unpainted;
     }
 
     /// <summary>What this board currently reads, for <c>--log-clock</c> and for the smoke. Read
@@ -213,24 +220,26 @@ public partial class HoldingBoard : Node3D
     {
         var rows = new List<string>(_lastRows.Length);
         foreach (string r in _lastRows)
-            if (r.Length > 0)
+            if (r.Length > 0 && r != Unpainted)
                 rows.Add(r);
         return (_lastHeader, rows, _lastOverflow, _lastFooter);
     }
 
-    /// <summary>One machine-readable line per poll interval, emitted by
-    /// <see cref="RoundAudio"/> when <c>--log-clock</c> is on. Rows are separated by <c>" | "</c>
+    /// <summary>One machine-readable line per log interval, emitted by
+    /// <see cref="RoundAudio"/> when <c>--log-clock</c> is on. It shares CLOCK-1's flag rather
+    /// than taking one of its own: the two readouts are painted by one poll from one view, and
+    /// a suite that wants to see what the walls say wants both. Rows are separated by <c>" | "</c>
     /// because the rows themselves already contain the project's <c>" · "</c>.</summary>
     public string LogLine(long wallMs)
     {
         (string header, IReadOnlyList<string> rows, string overflow, string footer) = CurrentText();
+        if (header == Unpainted) header = "";
+        if (overflow == Unpainted) overflow = "";
+        if (footer == Unpainted) footer = "";
         string joined = rows.Count == 0 ? "(none)" : string.Join(" | ", rows);
         return $"{LogPrefix} wall={wallMs} header=\"{header}\" rows={rows.Count} "
                + $"[{joined}] overflow=\"{overflow}\" footer=\"{footer}\"";
     }
-
-    /// <inheritdoc cref="LogLine"/>
-    internal bool WantsLog => _log;
 
     private static void SetLine(Label3D label, ref string last, string text,
         float basePixelSize, int referenceChars)

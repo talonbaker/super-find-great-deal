@@ -920,6 +920,7 @@ the next one, and take **7905**.
 | **7906** | **`Run-ButtonsTest.ps1`** | **BTN-1** |
 | 7907 | *reserved* | TASK-1 |
 | **7908** | **`Run-AuthoredPropTest.ps1`** | **SHELF-1** |
+| **7909** | **`Run-HoldingBoardTest.ps1`** | **HOLD-1** |
 
 Everything below 7893 is the pre-fork ladder and is unchanged: 7777, 7778, 7788, 7799, 7807,
 7809/7810, 7815, 7816, 7817, 7818, 7821, 7822, 7830, 7831, 7834.
