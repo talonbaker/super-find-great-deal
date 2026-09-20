@@ -917,12 +917,22 @@ the next one, and take **7905**.
 | 7903 | `Run-ReachTest.ps1` | REACH-1 |
 | **7904** | **`Run-RoundClockTest.ps1`** (and `Capture-RoundClock.ps1`, unregistered) | **CLOCK-1** |
 | 7905 | *the match-end clock probe, unregistered and manual* | INT-0B (§8.5) |
-| 7906 | *reserved* | BTN-1 |
+| **7906** | **`Run-ButtonsTest.ps1`** | **BTN-1** |
 | 7907 | *reserved* | TASK-1 |
 | **7908** | **`Run-AuthoredPropTest.ps1`** | **SHELF-1** |
 
 Everything below 7893 is the pre-fork ladder and is unchanged: 7777, 7778, 7788, 7799, 7807,
 7809/7810, 7815, 7816, 7817, 7818, 7821, 7822, 7830, 7831, 7834.
+
+> **Updated by HOLD-1's BTN-1 merge, 2026-09-19.** BTN-1 carried a fifth partial copy of this
+> ladder on its own branch (its `tests/` could not see 7904/7905/7907/7908) and it is DROPPED
+> here rather than kept beside this one — five lanes each writing down the part of the ladder
+> they could see is exactly how 7899 was claimed twice. Its two real claims are folded into the
+> table above: **7906 is `Run-ButtonsTest.ps1`, registered**, and 7901 stays reserved and unused.
+> BTN-1's branch listed 7905 as SFX-2's; INT-0B's row (the unregistered match-end clock probe)
+> is the one on the merged tree and is what the table says. **HOLD-1 claims 7909** for
+> `Run-HoldingBoardTest.ps1`; the next free number is **7910**.
+
 
 7903 was **given by the orchestrator, not computed from a snapshot of `tests/`** — which is
 INT-0's lesson above applied rather than re-learned. 7899-7902 do not appear in this branch's
@@ -1111,3 +1121,84 @@ own container and choose the container's name against the sort, not against tast
 (`Can_000`), so the id order and the reading order are the same thing. An unpadded set would have
 been deterministic and identical on every peer — and wrong about which object a level author was
 looking at.
+
+## BTN-1: udp/7906, and two staging traps worth more than the suite (2026-09-19)
+
+### The ladder, extended
+
+`tests/Run-ButtonsTest.ps1` claims **udp/7906** for all three of its phases, **given by the
+orchestrator** rather than computed from a snapshot of `tests/` — INT-0's lesson applied rather
+than re-learned for the second time. 7904 and 7905 do not appear in this branch's `tests/` at all
+(their suites are on unmerged lane branches), so a grep here would happily have produced 7904.
+
+> BTN-1's own copy of the ladder table was DROPPED by HOLD-1's merge (2026-09-19) — the one
+> table lives in the REACH-1 section above and now carries 7906 as this suite's. See the note
+> under it.
+
+### An authored prop's id is a fact about the WHOLE world, and a suite that types one will break
+
+`PropManager.AdoptAuthoredProps` numbers authored props by sorting on NODE PATH across every room
+at once. BTN-1 put three objects on a rack in `HoldingRoom.tscn`; `HoldingRoom/...` sorts before
+`SearchRoom/...`, so those three took 1000..1002 and **the search room's four crates moved from
+1000..1003 to 1003..1006**. `tests/Run-PlaceTest.ps1` named all four by literal and had to be
+bumped by hand.
+
+**SHELF-1's hundred aisle props will do it again**, and any of them whose node name sorts before
+`Prop_0` will move that room's own four a second time. The server now prints one line per adopted
+prop at world build, so a suite can read the ids instead of typing them:
+
+```
+[props] authored prop 1002 <- /root/Gameplay/World/HoldingRoom/ObjectRack/Deal_2 (Crate)
+```
+
+Note the path: the seam scene is added to `Gameplay` under the node name **`World`**, not
+`Supermarket`, so a pattern anchored on the scene's own name matches nothing.
+
+### A scripted PLACE is measured from the HAND, and the walk stops 1.2 m short
+
+**Measured, on this suite's first run: both couriers were refused `TooFarToPlace` and nothing
+reached the bin, which reads exactly like a bin that does not work.** Two constants compose into a
+trap:
+
+- `PropManager.RequestPlace` measures `PlaceReachM + GrabRangeTolerance` = **1.65 m** from the
+  avatar's CARRY ANCHOR — about 0.9 m in front of the body, swinging with its heading — not from
+  the body. `Run-PlaceTest.ps1`'s header already says "the hand"; it is easy to read as the body.
+- `ScriptedCarryIntentSource.ArriveRadius` is **1.2 m**, so `--carry-walk-to` leaves the bot that
+  far short of the point it was given, in whatever direction it happened to approach from.
+
+So a walk-to placed a comfortable-looking 1.2 m from the target pose puts the hand 1.6-1.7 m away
+and the place is refused. **Aim `--carry-walk-to` AT the thing, not next to it** — a bot that is
+blocked by a solid object arrives by being blocked, which is both closer and far more repeatable
+than a free-space stopping point.
+
+Reusable discriminator: `[server] place denied peer=N reason=TooFarToPlace` in the server log
+separates this from every bin/pad/validator rule. The suite now echoes those lines
+unconditionally, for the CARRY-1 reason — read the server log before reaching for the flake list.
+
+### A wrapper that holds the suite mutex around a suite deadlocks against its own child
+
+Ten minutes were lost to `waiting for machine-wide full-suite lock ... held by: pid <my own
+wrapper>`. Most scripts in `tests/` take `Enter-SuiteMutex` themselves; a few (`Run-SupermarketWorldTest.ps1`)
+do not. A helper that wraps the mutex around one of the former can never proceed — the mutex is
+not reentrant across processes. **Wrap the BUILD and IMPORT in the mutex and release before
+invoking a suite that takes its own.**
+
+### The session scratchpad is shared between lanes on this machine
+
+A helper written to the scratchpad as `RunUnderMutex.ps1` was overwritten mid-session by another
+worktree's file of the same name, and the next invocation ran against that other worktree. Same
+class as the shared-stash hazard: **give scratch files a lane-specific subdirectory**, not just a
+lane-specific name.
+
+### `Carry: regrab-while-loose` — fourth confirmation, and the band has not moved
+
+The BTN-1 marathon (36 suites, 35 PASS / 1 FAIL) went red on this suite alone, printing the exact
+staging string this file already names: `bot A never completed held -> loose -> held-again for
+prop 2 (reached phase 2) - regrab staging broken`. Standalone with `-SkipBuild` immediately after,
+three times: **3/3 PASS, worst hold distance 1.05-1.09 m** (holder's own view 1.05/1.06/1.06 over
+96/96/100 samples; independent witness 1.08/1.09/1.07 over 95/95/99). That is inside the
+0.89-1.09 m band recorded here three times before it.
+
+**The machine was not idle for any of these** — another lane's `Run-AllTests.ps1` and its Godot
+processes were live throughout the marathon and through all three re-runs — which per SHADER-2's
+entry above makes a 3/3 clear a stronger flake verdict than an idle-machine pass.

@@ -1,4 +1,4 @@
-[gd_scene load_steps=21 format=3]
+[gd_scene load_steps=40 format=3]
 
 ; BASE-1 (2026-09-19) — THE SEARCH ROOM. 14 x 10 x 3.5 m interior box, same construction as
 ; HoldingRoom.tscn (read that file's header for the convention and for why nothing here may be
@@ -25,6 +25,11 @@
 [ext_resource type="PackedScene" path="res://scenes/game/props/Can.tscn" id="13_can"]
 [ext_resource type="PackedScene" path="res://scenes/game/props/CerealBox.tscn" id="14_box"]
 [ext_resource type="PackedScene" path="res://scenes/game/props/Produce.tscn" id="15_produce"]
+
+; BTN-1 (2026-09-19) — the drop-off bin and the CONFIRM button, both authored at the bottom of
+; this file so this room's packed-vs-live node count covers them.
+[ext_resource type="Script" path="res://scripts/game/round/DropOffBin.cs" id="3_bin"]
+[ext_resource type="Script" path="res://scripts/game/round/RoundButton.cs" id="4_button"]
 
 [sub_resource type="StandardMaterial3D" id="Mat_floor"]
 resource_name = "search room floor (cool green-grey)"
@@ -62,6 +67,90 @@ size = Vector3(1, 2, 1)
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_pillar"]
 size = Vector3(1, 2, 1)
+
+; --- BTN-1: the bin's carpentry and the button's parts ----------------------------------------
+; Same convention as everywhere in this level: each mesh and its collider are one size.
+
+[sub_resource type="StandardMaterial3D" id="Mat_bin"]
+resource_name = "drop-off bin (dark crate)"
+albedo_color = Color(0.24, 0.26, 0.27, 1)
+roughness = 0.75
+metallic = 0.15
+
+[sub_resource type="BoxMesh" id="BoxMesh_bin_floor"]
+size = Vector3(1.4, 0.06, 1.4)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_bin_floor"]
+size = Vector3(1.4, 0.06, 1.4)
+
+[sub_resource type="BoxMesh" id="BoxMesh_bin_wall_x"]
+size = Vector3(0.06, 0.35, 1.4)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_bin_wall_x"]
+size = Vector3(0.06, 0.35, 1.4)
+
+[sub_resource type="BoxMesh" id="BoxMesh_bin_wall_z"]
+size = Vector3(1.4, 0.35, 0.06)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_bin_wall_z"]
+size = Vector3(1.4, 0.35, 0.06)
+
+; The sensor volume: the bin's INTERIOR, floor-top to rim. Deliberately a hair inside the walls
+; (1.26 against a 1.28 clear interior) so a prop resting against a wall is unambiguously inside
+; and a prop balanced ON the rim is not.
+[sub_resource type="BoxShape3D" id="BoxShape3D_bin_sensor"]
+size = Vector3(1.26, 0.28, 1.26)
+
+[sub_resource type="BoxMesh" id="BoxMesh_bin_lamp"]
+size = Vector3(0.34, 0.07, 0.03)
+
+[sub_resource type="StandardMaterial3D" id="Mat_bin_lamp"]
+resource_local_to_scene = true
+resource_name = "drop-off bin lamp"
+albedo_color = Color(0.16, 0.17, 0.18, 1)
+roughness = 0.35
+emission_enabled = true
+emission = Color(0.16, 0.17, 0.18, 1)
+emission_energy_multiplier = 0.08
+
+[sub_resource type="BoxMesh" id="BoxMesh_btn"]
+size = Vector3(0.34, 0.34, 0.12)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_btn"]
+size = Vector3(0.34, 0.34, 0.12)
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_cap"]
+top_radius = 0.1
+bottom_radius = 0.1
+height = 0.06
+radial_segments = 24
+
+[sub_resource type="BoxMesh" id="BoxMesh_lamp"]
+size = Vector3(0.26, 0.05, 0.02)
+
+[sub_resource type="StandardMaterial3D" id="Mat_btn_base"]
+resource_name = "round button plate"
+albedo_color = Color(0.21, 0.22, 0.24, 1)
+roughness = 0.7
+metallic = 0.3
+
+[sub_resource type="StandardMaterial3D" id="Mat_btn_cap"]
+resource_local_to_scene = true
+resource_name = "round button cap"
+albedo_color = Color(0.85, 0.85, 0.83, 1)
+roughness = 0.45
+emission_enabled = true
+emission = Color(0.85, 0.85, 0.83, 1)
+emission_energy_multiplier = 0.2
+
+[sub_resource type="StandardMaterial3D" id="Mat_btn_lamp"]
+resource_local_to_scene = true
+resource_name = "round button lamp"
+albedo_color = Color(0.13, 0.14, 0.13, 1)
+roughness = 0.35
+emission_enabled = true
+emission = Color(0.13, 0.14, 0.13, 1)
+emission_energy_multiplier = 0.05
 
 [node name="SearchRoom" type="Node3D"]
 
@@ -1192,3 +1281,151 @@ script = ExtResource("2_netprop")
 
 [node name="Body" parent="Stock/Produce_023" instance=ExtResource("15_produce")]
 
+; BTN-1 (2026-09-19) — THE DROP-OFF BIN. Where the seeker puts the object, and therefore where
+; the round ends: the instant the target lands in here the door to the task room bursts open.
+;
+; AN OPEN-TOP BOX WITH A SENSOR IN IT, and both halves matter. The walls are real static bodies,
+; so a prop tossed at it can MISS and roll away, and the seeker can see at a glance whether the
+; thing went in — a trigger volume with no box would be an invisible rule. The sensor is an
+; Area3D the SERVER reads; clients never decide what is in the bin.
+;
+; NOTHING IS EVER EJECTED (the packet is explicit). A wrong prop buzzes at the seeker, flashes
+; the lamp red for half a second, and stays exactly where it fell. That is the honest version:
+; the bin is a place, not a machine with opinions.
+;
+; WHERE IT IS, AND WHY THERE. Local (0, 0, −4) — world (40, 0, −4), because Supermarket.tscn
+; instances this room at x = +40. On the −Z midline, and that spot was CHOSEN by walking every
+; existing suite's lanes through this room rather than by eye: Run-PlaceTest.ps1's fourth bot
+; takes the diagonal from (−4, −2) to (+7, −3) and clears the bin's +Z face by about a metre;
+; its first bot places a crate at (0.2, ·, 0), four metres away; its third walks to the pillar at
+; (6, ·, 2.5); and all four SearchSpawn markers are at |z| ≤ 3. A later lane that moves this bin
+; owes those four checks again — a bin that deflects a bot changes which refusal that suite gets,
+; which reads as a placement bug in a lane that never touched placement.
+;
+; 1.4 m SQUARE OUTSIDE, 1.28 m CLEAR INSIDE, and that number has a reason: two 0.44 m crates have
+; to be able to sit in it side by side and BOTH pass placement integrity, because the delivery
+; smoke puts a wrong prop in first and the real one in after it. At 1.1 m outside they did not
+; fit and the second placement was refused DoesNotFitThere — a suite failing on the bin's size
+; rather than on the bin's rule.
+;
+; LOW WALLS (0.35 m) ON PURPOSE. The seeker has to be able to drop a 0.2 m object in from a
+; standing position without a throwing minigame; a deep bin would turn the payoff moment into an
+; aiming test. The rim is also what keeps a prop that went in from rolling back out.
+
+[node name="DropOffBin" type="Node3D" parent="." groups=["dropoff_bin"]]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -4)
+script = ExtResource("3_bin")
+
+[node name="Floor" type="StaticBody3D" parent="DropOffBin"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.03, 0)
+
+[node name="Collision" type="CollisionShape3D" parent="DropOffBin/Floor"]
+shape = SubResource("BoxShape3D_bin_floor")
+
+[node name="Mesh" type="MeshInstance3D" parent="DropOffBin/Floor"]
+mesh = SubResource("BoxMesh_bin_floor")
+surface_material_override/0 = SubResource("Mat_bin")
+
+[node name="WallXPos" type="StaticBody3D" parent="DropOffBin"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.67, 0.235, 0)
+
+[node name="Collision" type="CollisionShape3D" parent="DropOffBin/WallXPos"]
+shape = SubResource("BoxShape3D_bin_wall_x")
+
+[node name="Mesh" type="MeshInstance3D" parent="DropOffBin/WallXPos"]
+mesh = SubResource("BoxMesh_bin_wall_x")
+surface_material_override/0 = SubResource("Mat_bin")
+
+[node name="WallXNeg" type="StaticBody3D" parent="DropOffBin"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.67, 0.235, 0)
+
+[node name="Collision" type="CollisionShape3D" parent="DropOffBin/WallXNeg"]
+shape = SubResource("BoxShape3D_bin_wall_x")
+
+[node name="Mesh" type="MeshInstance3D" parent="DropOffBin/WallXNeg"]
+mesh = SubResource("BoxMesh_bin_wall_x")
+surface_material_override/0 = SubResource("Mat_bin")
+
+[node name="WallZPos" type="StaticBody3D" parent="DropOffBin"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.235, 0.67)
+
+[node name="Collision" type="CollisionShape3D" parent="DropOffBin/WallZPos"]
+shape = SubResource("BoxShape3D_bin_wall_z")
+
+[node name="Mesh" type="MeshInstance3D" parent="DropOffBin/WallZPos"]
+mesh = SubResource("BoxMesh_bin_wall_z")
+surface_material_override/0 = SubResource("Mat_bin")
+
+[node name="WallZNeg" type="StaticBody3D" parent="DropOffBin"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.235, -0.67)
+
+[node name="Collision" type="CollisionShape3D" parent="DropOffBin/WallZNeg"]
+shape = SubResource("BoxShape3D_bin_wall_z")
+
+[node name="Mesh" type="MeshInstance3D" parent="DropOffBin/WallZNeg"]
+mesh = SubResource("BoxMesh_bin_wall_z")
+surface_material_override/0 = SubResource("Mat_bin")
+
+; The sensor. monitoring = true and monitorable = false: it watches bodies, nothing watches it.
+; Mask 1 is the layer every prop body is on; DropOffBin still filters to Carryable-with-a-
+; NetworkedProp-parent in code, because a player standing in the bin is not a delivery.
+
+[node name="Sensor" type="Area3D" parent="DropOffBin"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.2, 0)
+monitoring = true
+monitorable = false
+collision_layer = 0
+collision_mask = 1
+
+[node name="Collision" type="CollisionShape3D" parent="DropOffBin/Sensor"]
+shape = SubResource("BoxShape3D_bin_sensor")
+
+[node name="Lamp" type="MeshInstance3D" parent="DropOffBin"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.45, 0.67)
+mesh = SubResource("BoxMesh_bin_lamp")
+material_override = SubResource("Mat_bin_lamp")
+
+; BTN-1 (2026-09-19) — THE CONFIRM BUTTON ("I'M DONE HIDING"), on the −X wall.
+;
+; MOUNTING: local +Z out of the wall, into the room — see HoldingRoom.tscn's StartButton header
+; for why every button in this level is authored that way. This wall faces +X, so the basis is a
+; quarter turn about Y and its twelve floats are (0,0,1, 0,1,0, −1,0,0). Those are basis ROWS
+; (.claude/rules/godot-scenes.md): the same rotation written column-wise is its inverse and would
+; point the button, its label and its cap travel INTO the wall. The server prints the measured
+; facing at world build ("[buttons] found Confirm button at … facing …") so this is checkable
+; from a log rather than only from a render.
+;
+; x = −6.94 is the wall's inner face (−7.0) plus the plate's own half-depth. z = −3 puts it well
+; clear of the four SearchSpawn markers and of every coordinate Run-PlaceTest.ps1 drives a bot to.
+;
+; ONLY THE HIDER CAN PRESS IT, and in a real session only the hider is ever in this room while it
+; is live — the gate is still enforced (RoundButtonRules.Gate), because "unreachable in practice"
+; and "refused" are different guarantees and only the second survives a level edit.
+
+[node name="ConfirmButton" type="StaticBody3D" parent="." groups=["pressable", "round_button", "round_button_confirm"]]
+transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, -6.94, 1.15, -3)
+script = ExtResource("4_button")
+
+[node name="Collision" type="CollisionShape3D" parent="ConfirmButton"]
+shape = SubResource("BoxShape3D_btn")
+
+[node name="Base" type="MeshInstance3D" parent="ConfirmButton"]
+mesh = SubResource("BoxMesh_btn")
+surface_material_override/0 = SubResource("Mat_btn_base")
+
+[node name="Cap" type="MeshInstance3D" parent="ConfirmButton"]
+transform = Transform3D(1, 0, 0, 0, 0, -1, 0, 1, 0, 0, 0.03, 0.07)
+mesh = SubResource("CylinderMesh_cap")
+material_override = SubResource("Mat_btn_cap")
+
+[node name="Lamp" type="MeshInstance3D" parent="ConfirmButton"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.125, 0.07)
+mesh = SubResource("BoxMesh_lamp")
+material_override = SubResource("Mat_btn_lamp")
+
+[node name="Label" type="Label3D" parent="ConfirmButton"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.26, 0.07)
+pixel_size = 0.0018
+text = "I'M DONE HIDING"
+font_size = 96
+outline_size = 18

@@ -180,6 +180,20 @@ try {
         # already run everything that was green before it.
         @{ Name = "Props: authored adoption (SHELF-1)"; Script = "Run-AuthoredPropTest.ps1" }
 
+        # --- BTN-1 (2026-09-19): the round buttons and the drop-off bin ---
+        # Registered after SHELF-1's by HOLD-1's merge, on the same standing rule: a new suite
+        # joins at the end.
+        #
+        # THREE server launches on its own port (7906), one of them with three bots, so like the
+        # suite above it takes part in the join-index spawn dealing and belongs after everything
+        # that does not. About two minutes.
+        #
+        # Its first phase is the only suite in this registry that drives the round WITHOUT
+        # --round-script: a bot walks to the rack, picks an object up and presses a real button,
+        # and the round starts because the button said so. That is the one thing no other suite
+        # here can report on, and it is why this one is worth its two minutes.
+        @{ Name = "Round: buttons + drop-off bin (BTN-1)"; Script = "Run-ButtonsTest.ps1" }
+
         # WHAT WAS REMOVED HERE AT THE FORK (BASE-1, 2026-09-19), so a reader of an old handoff
         # can tell "deleted" from "lost": the bubble-test world, the shared bubble counter and the
         # last-bubble celebration, the TV portal, the Puffin Lab, the watcher's night gate, the

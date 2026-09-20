@@ -47,6 +47,13 @@ public partial class Gameplay : Node3D
     private CycleDriver _cycleDriver = null!;
     private RunDriver _runDriver = null!;
     private Round.HideSeekDriver _hideSeekDriver = null!;
+    private Round.RoundControls _roundControls = null!;
+
+    /// <summary>REACH-1's fact source on the server, or null off-server — handed to
+    /// <see cref="_roundControls"/> so BTN-1's rack can aim the reachability audit at whatever
+    /// the hider actually took off the shelf. Held as a field only to keep the two registrations
+    /// in their required order (see where it is assigned).</summary>
+    private Round.ReachabilityFactSource? _reachFacts;
 
     private Label _connectingLabel = null!;
     private Label _roomCodeLabel = null!;
@@ -339,6 +346,7 @@ public partial class Gameplay : Node3D
             if (net.Options.ReachTargetPropId >= 0)
                 reach.TargetPropId = net.Options.ReachTargetPropId;
             _hideSeekDriver.Register(reach);
+            _reachFacts = reach;
 
             if (net.Options.ReachSelfTest)
             {
@@ -373,6 +381,28 @@ public partial class Gameplay : Node3D
         //
         // After the driver, because its very first poll reads HideSeekDriver.Instance.
         Round.RoundAudio.Attach(this);
+        // BTN-1 (2026-09-19): the three round buttons, the object rack and the drop-off bin.
+        //
+        // AFTER the round driver, because it registers a fact source with it. AFTER REACH-1's
+        // source, because that one must be FIRST among the real sources (the first-non-null
+        // TargetRetrievable rule above) — this lane answers null to that fact precisely so it
+        // could never win the race, and registering behind it as well makes the ordering a fact
+        // rather than a property of one method. AFTER AdoptAuthoredProps, because the rack's
+        // three objects must already carry their prop ids.
+        //
+        // Present on EVERY peer, like every node in this block: the lamp on each button is
+        // DERIVED on each client from the round wire and the replicated holder view rather than
+        // pushed, so nothing new rides the wire for the affordance (RoundControls.LampFactsFor).
+        _roundControls = new Round.RoundControls { Name = Round.RoundControls.NodeName };
+        AddChild(_roundControls);
+        _roundControls.Setup(net.Role == NetworkManager.SessionRole.Server,
+            _propManager, _players, _hideSeekDriver, worldNode,
+            net.Options.ReachTargetPropId);
+        // The RACK is the production path for the target's identity; --reach-target stays as the
+        // dev-script stopgap REACH-1 shipped it as, and loses to the rack the moment a hider
+        // picks something up, because the rack's answer is measured rather than typed.
+        _roundControls.Reach = _reachFacts;
+
         // WHAT USED TO BE HERE, in one line each, because every one of these blocks carried a
         // "THIS IS THE ONLY CONSTRUCTION SITE" warning and deleting them is exactly the move those
         // warnings were written against: the lake (WaterService plus the chill overlays and the

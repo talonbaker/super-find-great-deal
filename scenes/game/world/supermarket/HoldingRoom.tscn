@@ -1,4 +1,4 @@
-[gd_scene load_steps=11 format=3]
+[gd_scene load_steps=29 format=3]
 
 ; BASE-1 (2026-09-19) — THE HOLDING ROOM. 10 x 10 x 3.5 m interior box: floor, four walls,
 ; ceiling, one light, four spawn markers. Every session starts here and every late joiner lands
@@ -19,6 +19,16 @@
 ; THE TINT IS FUNCTIONAL. Each room is a different flat grey so a capture, a bug report or a
 ; playtest video says which room it was taken in without a caption. Do not unify them.
 
+; BTN-1 (2026-09-19) — the rack, its three objects and the START button. Scripts and prop scenes
+; are referenced here; every node they drive is authored at the bottom of this file, so the
+; packed-vs-live node count SupermarketWorldSelfTest takes of this room covers all of it.
+
+[ext_resource type="Script" path="res://scripts/game/round/ObjectRack.cs" id="3_rack"]
+[ext_resource type="Script" path="res://scripts/game/props/NetworkedProp.cs" id="4_netprop"]
+[ext_resource type="PackedScene" path="res://scenes/game/props/DealCan.tscn" id="5_dealcan"]
+[ext_resource type="PackedScene" path="res://scenes/game/props/DealBox.tscn" id="6_dealbox"]
+[ext_resource type="PackedScene" path="res://scenes/game/props/DealProduce.tscn" id="7_dealproduce"]
+[ext_resource type="Script" path="res://scripts/game/round/RoundButton.cs" id="8_button"]
 [ext_resource type="PackedScene" path="res://scenes/game/world/supermarket/RoundClock.tscn" id="9_clock"]
 
 [sub_resource type="StandardMaterial3D" id="Mat_floor"]
@@ -51,6 +61,76 @@ size = Vector3(10.8, 3.5, 0.4)
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_bounds"]
 size = Vector3(10.0, 3.5, 10.0)
+
+; --- BTN-1: the rack's carpentry and the button's parts ---------------------------------------
+; Every mesh and its collider are the SAME size, the convention this level's header states: one
+; number for what you can see and what you can walk into.
+
+[sub_resource type="StandardMaterial3D" id="Mat_rack"]
+resource_name = "object rack (pale shelf)"
+albedo_color = Color(0.62, 0.6, 0.55, 1)
+roughness = 0.8
+
+[sub_resource type="BoxMesh" id="BoxMesh_shelf"]
+size = Vector3(2, 0.08, 0.4)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_shelf"]
+size = Vector3(2, 0.08, 0.4)
+
+[sub_resource type="BoxMesh" id="BoxMesh_riser"]
+size = Vector3(2, 0.95, 0.12)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_riser"]
+size = Vector3(2, 0.95, 0.12)
+
+; The button plate. 0.34 m square and 0.12 m deep: big enough to be unmistakably a control at
+; first-person distance, shallow enough that it reads as mounted ON the wall rather than as a
+; pillar stuck to it.
+[sub_resource type="BoxMesh" id="BoxMesh_btn"]
+size = Vector3(0.34, 0.34, 0.12)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_btn"]
+size = Vector3(0.34, 0.34, 0.12)
+
+; The cap. A CylinderMesh's axis is its own +Y, so every Cap node is rotated a quarter turn about
+; X to lie along the button's +Z — the twelve floats (1,0,0, 0,0,-1, 0,1,0) are that rotation
+; written as basis ROWS, which is what a .tscn stores (.claude/rules/godot-scenes.md). At rest it
+; stands 4 cm proud of the plate; RoundButton.CapTravelM is 4 cm, so a press takes it flush and
+; the travel is legible without measuring.
+[sub_resource type="CylinderMesh" id="CylinderMesh_cap"]
+top_radius = 0.1
+bottom_radius = 0.1
+height = 0.06
+radial_segments = 24
+
+; The lamp. A slot rather than a dot: a thin bright bar reads as on/off at a glance and in
+; greyscale, and RoundButton drives its VALUE as well as its hue (never colour alone).
+[sub_resource type="BoxMesh" id="BoxMesh_lamp"]
+size = Vector3(0.26, 0.05, 0.02)
+
+[sub_resource type="StandardMaterial3D" id="Mat_btn_base"]
+resource_name = "round button plate"
+albedo_color = Color(0.21, 0.22, 0.24, 1)
+roughness = 0.7
+metallic = 0.3
+
+[sub_resource type="StandardMaterial3D" id="Mat_btn_cap"]
+resource_local_to_scene = true
+resource_name = "round button cap"
+albedo_color = Color(0.85, 0.85, 0.83, 1)
+roughness = 0.45
+emission_enabled = true
+emission = Color(0.85, 0.85, 0.83, 1)
+emission_energy_multiplier = 0.2
+
+[sub_resource type="StandardMaterial3D" id="Mat_btn_lamp"]
+resource_local_to_scene = true
+resource_name = "round button lamp"
+albedo_color = Color(0.13, 0.14, 0.13, 1)
+roughness = 0.35
+emission_enabled = true
+emission = Color(0.13, 0.14, 0.13, 1)
+emission_energy_multiplier = 0.05
 
 [node name="HoldingRoom" type="Node3D"]
 
@@ -176,3 +256,132 @@ shape = SubResource("BoxShape3D_bounds")
 
 [node name="RoundClock" parent="." instance=ExtResource("9_clock")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.35, -4.94)
+
+; BTN-1 (2026-09-19) — THE OBJECT RACK. The shelf of three near-misses the hider chooses from,
+; and the reason the holding room exists as a room rather than as a lobby.
+;
+; SAME COLOUR, SAME SIZE CLASS, A SHAPE APART (program §0). The three objects are the ONLY thing
+; either player learns about the target before the seek: the hider takes one, the other two stay
+; here, and the seeker walks up and looks at what is left. That is why they are authored side by
+; side at eye-line rather than in a bin — the shelf is a readout.
+;
+; THE IDS ARE THE NODE ORDER, AND THAT IS LOAD-BEARING TWICE. PropManager.AdoptAuthoredProps
+; assigns authored ids by sorting on NODE PATH, identically on every peer, so Deal_0/1/2 here
+; adopt as 1000/1001/1002 and the search room's four crates follow at 1003..1006. Two consequences
+; a later lane must know:
+;   - RENAMING one of these, or adding a fourth, RENUMBERS the search room's props. It already
+;     did once: this rack is why tests/Run-PlaceTest.ps1's four prop ids moved from 1000..1003 to
+;     1003..1006 (see that file's header and the BTN-1 handoff). SHELF-1's hundred will move them
+;     again. A suite that hardcodes an authored prop id is a suite that breaks when a level grows.
+;   - ObjectRack answers "is this one of mine" from its own CHILDREN, never from a literal, so
+;     nothing in code has to be updated when they move.
+;
+; SHELF-1 REPLACES THE THREE scenes/game/props/Deal*.tscn FILES IN PLACE. Nothing in this scene
+; changes when it does: the instance paths and the node names are the contract.
+;
+; y = 0.99 is the shelf's top surface (0.95 centre + 0.04 half-thickness). Each object's own
+; half-height is added to that so it RESTS on the shelf rather than floating or intersecting —
+; the can and the produce are 0.2 m tall (half 0.10) and the box is 0.26 m tall (half 0.13).
+
+[node name="ObjectRack" type="Node3D" parent="." groups=["object_rack"]]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -4.6)
+script = ExtResource("3_rack")
+
+[node name="Shelf" type="StaticBody3D" parent="ObjectRack"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.95, 0)
+
+[node name="Collision" type="CollisionShape3D" parent="ObjectRack/Shelf"]
+shape = SubResource("BoxShape3D_shelf")
+
+[node name="Mesh" type="MeshInstance3D" parent="ObjectRack/Shelf"]
+mesh = SubResource("BoxMesh_shelf")
+surface_material_override/0 = SubResource("Mat_rack")
+
+[node name="Riser" type="StaticBody3D" parent="ObjectRack"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.475, -0.14)
+
+[node name="Collision" type="CollisionShape3D" parent="ObjectRack/Riser"]
+shape = SubResource("BoxShape3D_riser")
+
+[node name="Mesh" type="MeshInstance3D" parent="ObjectRack/Riser"]
+mesh = SubResource("BoxMesh_riser")
+surface_material_override/0 = SubResource("Mat_rack")
+
+[node name="Deal_0" type="Node3D" parent="ObjectRack"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.6, 1.09, 0)
+script = ExtResource("4_netprop")
+
+[node name="Body" parent="ObjectRack/Deal_0" instance=ExtResource("5_dealcan")]
+
+[node name="Deal_1" type="Node3D" parent="ObjectRack"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.09, 0)
+script = ExtResource("4_netprop")
+
+[node name="Body" parent="ObjectRack/Deal_1" instance=ExtResource("7_dealproduce")]
+
+; Deal_2 is the BOX and it is the one nearest the button, deliberately: it is the object
+; tests/Run-ButtonsTest.ps1 has its hider take, because a box settles where it is put and a
+; sphere rolls, and because the shortest walk from the rack to START is the most reliable
+; staging. Nothing in the GAME depends on which of the three is where — SHELF-1 may reorder
+; them — but that suite names prop 1002, so a reorder is a suite edit.
+
+[node name="Deal_2" type="Node3D" parent="ObjectRack"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.6, 1.12, 0)
+script = ExtResource("4_netprop")
+
+[node name="Body" parent="ObjectRack/Deal_2" instance=ExtResource("6_dealbox")]
+
+; BTN-1 (2026-09-19) — THE START BUTTON, beside the rack on the same wall.
+;
+; MOUNTING CONVENTION, the same for all three round buttons in this level: the node's local +Z
+; points OUT of the surface it is mounted on, into the room. RoundButton presses its cap along
+; local −Z, so that one rule makes the cap go INTO the wall on every wall without a per-instance
+; special case. This one sits on WallZNeg, whose inner face is z = −5.0, and faces +Z — which is
+; the identity basis, so its twelve Transform3D floats are the identity and there is nothing to
+; get wrong. (The other two are rotated; see their own headers, and remember that those twelve
+; floats are basis ROWS — .claude/rules/godot-scenes.md.)
+;
+; x = 1.2 puts the plate (0.34 wide, so x ∈ [1.03, 1.37]) just clear of the shelf's end at x = 1
+; and — this is the part that was MEASURED rather than eyeballed — inside the 1.6 m press radius
+; of somebody standing at the rack. A player who has just taken an object off the shelf stands
+; about 1.9 m from here, which is inside the radius plus the server's latency tolerance and is
+; why they do not have to walk anywhere to start the round. Moving this button away from the
+; rack costs that, and the symptom is a Start that answers STEP CLOSER TO THE BUTTON.
+; y = 1.15 is a hair above the 1.1 m spawn height, i.e. chest height in first person.
+;
+; THE GROUPS ARE THE WIRING. "pressable" is what InteractHighlighter polls, so without it the
+; button has no shimmer, no key chip and no press at all; "round_button_start" is what the script
+; reads its KIND from, because a nested instance's exported fields read back as C# defaults on
+; this Godot/Mono build. Groups go in the [node] header or they fail silently.
+;
+; THE LABEL SAYS NO KEY. "START", and nothing else — the live glyph is InteractPrompt's, resolved
+; from the InputMap. A mesh that said "PRESS E" is the third of the three playtest failures this
+; packet exists to remove, in a build where E is rebindable.
+
+[node name="StartButton" type="StaticBody3D" parent="." groups=["pressable", "round_button", "round_button_start"]]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.2, 1.15, -4.94)
+script = ExtResource("8_button")
+
+[node name="Collision" type="CollisionShape3D" parent="StartButton"]
+shape = SubResource("BoxShape3D_btn")
+
+[node name="Base" type="MeshInstance3D" parent="StartButton"]
+mesh = SubResource("BoxMesh_btn")
+surface_material_override/0 = SubResource("Mat_btn_base")
+
+[node name="Cap" type="MeshInstance3D" parent="StartButton"]
+transform = Transform3D(1, 0, 0, 0, 0, -1, 0, 1, 0, 0, 0.03, 0.07)
+mesh = SubResource("CylinderMesh_cap")
+material_override = SubResource("Mat_btn_cap")
+
+[node name="Lamp" type="MeshInstance3D" parent="StartButton"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.125, 0.07)
+mesh = SubResource("BoxMesh_lamp")
+material_override = SubResource("Mat_btn_lamp")
+
+[node name="Label" type="Label3D" parent="StartButton"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.26, 0.07)
+pixel_size = 0.0018
+text = "START"
+font_size = 96
+outline_size = 18

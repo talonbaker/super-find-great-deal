@@ -882,6 +882,15 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
                 System.Diagnostics.Debug.Assert(registered,
                     $"authored prop id {id} already occupied — id-space collision (see RISK-AUDIT-2026-07-12.md 5.1d)");
             }
+            // ONE LINE PER ADOPTED PROP, saying which id landed on which node (BTN-1,
+            // 2026-09-19). These ids are a function of EVERY authored prop in the whole world:
+            // the sort above is over node paths, so adding props to one room renumbers every
+            // room whose path sorts after it. That has already bitten once — BTN-1's three rack
+            // objects in HoldingRoom.tscn moved SearchRoom's four crates from 1000..1003 to
+            // 1003..1006 and tests/Run-PlaceTest.ps1 named them by literal — and SHELF-1's
+            // hundred aisle props will do it again. A suite that reads these lines cannot be
+            // broken by a level growing; one that types the numbers can.
+            GD.Print($"[props] authored prop {id} <- {prop.GetPath()} ({kind})");
         }
 
         double ms = (System.Diagnostics.Stopwatch.GetTimestamp() - startedTicks)

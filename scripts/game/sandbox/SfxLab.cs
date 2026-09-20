@@ -197,6 +197,27 @@ public enum Sfx
     /// orchestrator may collapse this onto SFX-1's <c>Whoosh</c> at merge; until then this is the
     /// reset's own cue and nothing else reads it.</para></summary>
     ResetWhoosh = 42,
+
+    /// <summary><b>The rejection buzzer</b> (BTN-1, 2026-09-19): the drop-off bin telling the
+    /// seeker that the thing they just put in it is not the thing. A short, harsh, falling
+    /// two-tone rasp — a game-show "no", not a sound anything in the world could make.
+    ///
+    /// <para><b>Why not <see cref="Buzz"/>, whose name is right.</b> That member is an INSECT
+    /// fly-past, and its own implementation comment says so in as many words ("a steady tone
+    /// reads as a machine, not an insect") — it wavers its pitch and swells in and out over
+    /// 0.45 s specifically so it does NOT read as a buzzer. Using it here would be a bee where
+    /// an answer belongs. <see cref="Thunk"/> is already spoken for: it is the dull thud a
+    /// REFUSED BUTTON PRESS makes, and one sound for two different refusals is how a player
+    /// learns that the game makes a noise rather than what the noise means.</para>
+    ///
+    /// <para>Appended at <b>43</b>, and BTN-1 left 24-42 unused on its own branch because three
+    /// other lanes of this program were appending to this enum in parallel off the same base and
+    /// could not see each other — the ordinals above are pinned (see the note at the top of this
+    /// enum) and a textual merge that renumbered one would silently re-point every presentation
+    /// <c>.tres</c> that names it. <b>HOLD-1's merge (2026-09-19) filled exactly that gap</b>:
+    /// DOOR-1 took 24, SFX-1 25-35 and CLOCK-1 36-42, so every ordinal 0-43 is now spoken for and
+    /// 44 is the next free one. The reservation worked as designed — nothing moved.</para></summary>
+    Buzzer = 43,
 }
 
 /// <summary>
@@ -798,6 +819,8 @@ public static class SfxLab
             Sfx.BuzzShort => BuzzShortPcm(),
             Sfx.BuzzDouble => BuzzDoublePcm(),
             Sfx.ResetWhoosh => ResetWhooshPcm(),
+            // The rejection buzzer (BTN-1).
+            Sfx.Buzzer => BuzzerPcm(),
             _ => Sweep(0.05f, 400f, 400f),
         };
     }
@@ -1596,6 +1619,56 @@ public static class SfxLab
             // Soft both ends — a whoosh that starts at full level is a click.
             float env = Mathf.Sin(Mathf.Pi * u);
             return band * env * ResetWhooshGain;
+        });
+    }
+
+    // --- The rejection buzzer (BTN-1, 2026-09-19) ------------------------------------
+
+    /// <summary>Total length. Short on purpose: the seeker has just made a mistake and is about
+    /// to make another attempt, and a buzzer that outlasts the realisation is nagging.</summary>
+    private const float BuzzerSeconds = 0.26f;
+
+    /// <summary>The two tones, in order. A FALLING interval — a rising one reads as a question
+    /// and this is an answer. 196 Hz is low enough to sit under the room's chatter and clear of
+    /// <see cref="Sfx.Chirp"/>'s 620/830 Hz, which is the bin's ACCEPT sound and must never be
+    /// confused with this one at a glance.</summary>
+    private static readonly float[] BuzzerNotesHz = { 233f, 175f };
+
+    /// <summary>Square-ish, not sine: the odd harmonics are what make it read as an electrical
+    /// buzzer rather than as a tone. Approximated with three odd partials rather than a true
+    /// square so it does not alias into a hiss at 48 kHz.</summary>
+    private const float BuzzerPartial3 = 0.34f;
+    private const float BuzzerPartial5 = 0.18f;
+
+    /// <summary>The rasp: a fast amplitude chop. A buzzer is a contact opening and closing, and
+    /// this is the cheapest honest version of that.</summary>
+    private const float BuzzerRaspHz = 62f;
+    private const float BuzzerRaspDepth = 0.35f;
+
+    /// <summary>Output trim, set so the rendered buffer peaks under full scale — a clamp inside
+    /// <see cref="Render"/> would flatten the tops and turn a buzz into a crunch. Pinned in the
+    /// unit suite, like <see cref="TriumphGain"/>.</summary>
+    private const float BuzzerGain = 0.30f;
+
+    /// <summary><b>Public and returning raw PCM</b>, same as <see cref="TriumphPcm"/> and
+    /// <see cref="GooseHonkPcm"/>: the Godot-free unit suite asserts the shape and the headroom
+    /// with no audio device anywhere.</summary>
+    public static float[] BuzzerPcm()
+    {
+        float half = BuzzerSeconds / BuzzerNotesHz.Length;
+        return Render(BuzzerSeconds, (t, u) =>
+        {
+            int note = Mathf.Clamp((int)(t / half), 0, BuzzerNotesHz.Length - 1);
+            float hz = BuzzerNotesHz[note];
+            float phase = Mathf.Tau * hz * t;
+            float voice = Mathf.Sin(phase)
+                          + BuzzerPartial3 * Mathf.Sin(3f * phase)
+                          + BuzzerPartial5 * Mathf.Sin(5f * phase);
+            float rasp = 1f - BuzzerRaspDepth * (0.5f + 0.5f * Mathf.Sin(Mathf.Tau * BuzzerRaspHz * t));
+            // One envelope over the whole thing, with a hard-ish edge: a buzzer starts at full
+            // and stops, it does not swell (which is exactly what Sfx.Buzz, the insect, does).
+            float env = Envelope(u, attack: 0.01f, curve: 0.9f);
+            return voice * rasp * env * BuzzerGain;
         });
     }
 
