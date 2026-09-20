@@ -8,8 +8,9 @@
 .DESCRIPTION
     THE DEBT THIS PAYS. docs/PRUNE-BACKLOG.md listed "the authored-prop adoption proof": BASE-1
     deleted the fork's Run-AuthoredPropTest.ps1 because the supermarket had no authored props to
-    adopt, and wrote that it "belongs with SHELF-1's hundred props". There are now 133 of them --
-    130 in the search room and BTN-1's three on the holding room's rack.
+    adopt, and wrote that it "belongs with SHELF-1's hundred props". There are now 144 of them --
+    130 in the search room, BTN-1's three on the holding room's rack, and HOLD-1's eleven in the
+    practice corner.
 
     WHAT IS ACTUALLY AT RISK, and it is not whether AdoptAuthoredProps runs. It is the ID
     ASSIGNMENT RULE: ids start at 1000 and are handed out in ORDINAL NODE-PATH SORT ORDER, which
@@ -22,28 +23,40 @@
 
     So this suite asserts the BLOCK, not just the mechanism:
 
-        1000         HoldingRoom/ObjectRack/Deal_0   the near-miss can      PropKind.Can
-        1001         HoldingRoom/ObjectRack/Deal_1   the near-miss produce  PropKind.Produce
-        1002         HoldingRoom/ObjectRack/Deal_2   the near-miss box      PropKind.Box
-        1003..1006   SearchRoom/Prop_0..Prop_3       CARRY-1's four crates  PropKind.Crate
-        1007..1012   Stock/Bin_0..5                  the six floor bins     PropKind.Box
-        1013..1060   Stock/Box_000..047              cereal boxes           PropKind.Box
-        1061..1108   Stock/Can_000..047              cans                   PropKind.Can
-        1109..1132   Stock/Produce_*                 produce                PropKind.Produce
+        1000         ObjectRack/Deal_0        the rack's near-miss can      PropKind.Can
+        1001         ObjectRack/Deal_1        the rack's near-miss produce  PropKind.Produce
+        1002         ObjectRack/Deal_2        the rack's near-miss box      PropKind.Box
+        1003..1010   PracticeCorner/Cube_00.. the eight practice crates     PropKind.Crate
+        1011         PracticeCorner/Near_00   practice near-miss can        PropKind.Can
+        1012         PracticeCorner/Near_01   practice near-miss produce    PropKind.Produce
+        1013         PracticeCorner/Near_02   practice near-miss box        PropKind.Box
+        1014..1017   SearchRoom/Prop_0..3     CARRY-1's four crates         PropKind.Crate
+        1018..1023   Stock/Bin_0..5           the six floor bins            PropKind.Box
+        1024..1071   Stock/Box_000..047       cereal boxes                  PropKind.Box
+        1072..1119   Stock/Can_000..047       cans                          PropKind.Can
+        1120..1143   Stock/Produce_*          produce                       PropKind.Produce
 
-    RE-DERIVED BY HOLD-1 (2026-09-19) WHEN BTN-1 WAS MERGED IN, and the shift is this suite's own
-    thesis arriving on schedule. The rack lives in HoldingRoom.tscn and "HoldingRoom" sorts before
-    "SearchRoom" in the ordinal node-path sort, so BTN-1's three objects take 1000..1002 and
-    EVERY search-room id above moved up by exactly three. SHELF-1's Stock/ container protected the
-    crates from the products in the same room; nothing can protect a room from a room that sorts
-    before it, because the room name is a PREFIX of every path under it. Three numbers were not
-    re-typed but re-READ, off the server's own per-prop adoption lines in
-    tests/logs/authoredprop.server.out.log.
+    RE-DERIVED TWICE BY HOLD-1 (2026-09-19), and the shift is this suite's own thesis arriving on
+    schedule -- twice in one lane. First when BTN-1 was merged in: its rack took 1000..1002 and
+    every search-room id moved up by three. Then again when this lane's own practice corner
+    landed: eleven more props in the holding room, and the search room moved up by eleven more.
+    The rule underneath both is one sentence -- "HoldingRoom" sorts before "SearchRoom" and a
+    room name is a PREFIX of every path under it, so SHELF-1's Stock/ trick, which protects the
+    crates from the products in the SAME room, cannot protect a room from a room that sorts
+    before it. No number here was re-typed; every one was re-READ off the server's own per-prop
+    adoption lines in tests/logs/authoredprop.server.out.log.
+
+    THIS SUITE KEEPS ITS LITERALS ON PURPOSE, while Run-PlaceTest and Run-ButtonsTest now DERIVE
+    theirs (Get-AuthoredPropId, _Common.ps1). The division is the point. Those two use an id to
+    stage something and do not care what it is, so a literal there is a dependency nobody can see
+    in a diff and the fix is to stop typing it. This suite exists to ASSERT the block, so the
+    numbers ARE its subject -- a version of it that derived them would pass whatever the world
+    did, which is the one thing it must not do.
 
     FIVE PHASES OF EVIDENCE, each answering something the others cannot:
 
       1. THE SERVER'S OWN COUNT. PropManager prints "[props] adopted N authored prop(s) in T ms
-         (ids A..B)" on every peer since SHELF-1. The server's line must say 133 and 1000..1132.
+         (ids A..B)" on every peer since SHELF-1. The server's line must say 144 and 1000..1143.
          T is REPORTED, never gated -- adopt time is a number SHELF-1's packet asks for, and a
          budget nobody has agreed to is not a test.
 
@@ -52,7 +65,7 @@
          different ranges is the failure mode that produces two players holding "prop 1042" and
          meaning different objects. Nothing on the wire would catch it.
 
-      3. COMPLETE IN THE LATE JOINER'S FIRST SAMPLE. Bot B connects ~8 s after bot A, and all 133
+      3. COMPLETE IN THE LATE JOINER'S FIRST SAMPLE. Bot B connects ~8 s after bot A, and all 144
          ids must be in the FIRST line it ever writes. That is the difference between "adopted"
          and "streamed": an authored prop is never spawned and never sent, so a late joiner that
          had to wait for a dump would be showing an empty shop for a frame or two.
@@ -60,10 +73,10 @@
       4. THE KIND OF EVERY ID, against the block table above, on both peers. This is what makes a
          rename a red rather than a rumour.
 
-      5. ONE POSITION PER BLOCK, and cross-peer agreement on ALL of them. The six landmark ids
+      5. ONE POSITION PER BLOCK, and cross-peer agreement on ALL of them. The eight landmark ids
          are the FIRST of each block, checked against the pose authored in SearchRoom.tscn -- a
          rename INSIDE a block keeps every kind right and moves exactly these. Then every one of
-         the 133 is compared between A's and B's final samples: same id, same place, or the two
+         the 144 is compared between A's and B's final samples: same id, same place, or the two
          peers do not agree about what the number means.
 
          BE HONEST ABOUT WHAT THE CROSS-PEER HALF PROVES HERE. Nothing moves in this run, and an
@@ -105,20 +118,25 @@ $ErrorActionPreference = "Stop"
 # --- the block table, which is the subject of this suite ---------------------------------------
 # PropKind ordinals (scripts/net/PropState.cs): Crate 0, Ball 1, Can 2, Box 3, Produce 4.
 $AuthoredFirst = 1000
-$AuthoredLast  = 1132
-$AuthoredCount = $AuthoredLast - $AuthoredFirst + 1     # 133
+$AuthoredLast  = 1143
+$AuthoredCount = $AuthoredLast - $AuthoredFirst + 1     # 144
 $Blocks = @(
-    # BTN-1's rack is three objects of three DIFFERENT kinds, so it is three one-id blocks
-    # rather than one. That is not a workaround: the rack's whole design is one of each shape,
-    # and a "block" here is a run of ids that share a kind.
-    @{ Name = "rack: near-miss can";     First = 1000; Last = 1000; Kind = 2 }
-    @{ Name = "rack: near-miss produce"; First = 1001; Last = 1001; Kind = 4 }
-    @{ Name = "rack: near-miss box";     First = 1002; Last = 1002; Kind = 3 }
-    @{ Name = "CARRY-1 crates";          First = 1003; Last = 1006; Kind = 0 }
-    @{ Name = "floor bins";              First = 1007; Last = 1012; Kind = 3 }
-    @{ Name = "cereal boxes";            First = 1013; Last = 1060; Kind = 3 }
-    @{ Name = "cans";                    First = 1061; Last = 1108; Kind = 2 }
-    @{ Name = "produce";                 First = 1109; Last = 1132; Kind = 4 }
+    # The rack is three objects of three DIFFERENT kinds, so it is three one-id blocks rather
+    # than one. That is not a workaround: the rack's whole design is one of each shape, and a
+    # "block" here is a run of ids that share a kind. HOLD-1's three practice near-misses are
+    # the same three shapes for the same reason.
+    @{ Name = "rack: near-miss can";         First = 1000; Last = 1000; Kind = 2 }
+    @{ Name = "rack: near-miss produce";     First = 1001; Last = 1001; Kind = 4 }
+    @{ Name = "rack: near-miss box";         First = 1002; Last = 1002; Kind = 3 }
+    @{ Name = "practice crates";             First = 1003; Last = 1010; Kind = 0 }
+    @{ Name = "practice: near-miss can";     First = 1011; Last = 1011; Kind = 2 }
+    @{ Name = "practice: near-miss produce"; First = 1012; Last = 1012; Kind = 4 }
+    @{ Name = "practice: near-miss box";     First = 1013; Last = 1013; Kind = 3 }
+    @{ Name = "CARRY-1 crates";              First = 1014; Last = 1017; Kind = 0 }
+    @{ Name = "floor bins";                  First = 1018; Last = 1023; Kind = 3 }
+    @{ Name = "cereal boxes";                First = 1024; Last = 1071; Kind = 3 }
+    @{ Name = "cans";                        First = 1072; Last = 1119; Kind = 2 }
+    @{ Name = "produce";                     First = 1120; Last = 1143; Kind = 4 }
 )
 
 # The first id of each block, at its AUTHORED world pose. SearchRoom.tscn is instanced at x = +40
@@ -132,12 +150,14 @@ $LandmarkToleranceM = 0.08
 # The rack landmark is the exception to the "+40 on x" sentence above: HoldingRoom.tscn is
 # instanced at the ORIGIN, so its local numbers are already world numbers.
 $Landmarks = @(
-    @{ Id = 1000; Name = "ObjectRack/Deal_0";       At = @(-0.60, 1.090, -4.60) }
-    @{ Id = 1003; Name = "Prop_0 (CARRY-1 crate)";  At = @(36.00, 0.220, 0.00) }
-    @{ Id = 1007; Name = "Stock/Bin_0";             At = @(33.60, 0.000, -4.30) }
-    @{ Id = 1013; Name = "Stock/Box_000";           At = @(36.19, 0.565, -1.16) }
-    @{ Id = 1061; Name = "Stock/Can_000";           At = @(36.31, 0.485, -3.26) }
-    @{ Id = 1109; Name = "Stock/Produce_000";       At = @(44.85, 0.505, -1.40) }
+    @{ Id = 1000; Name = "ObjectRack/Deal_0";      At = @(-0.60, 1.090, -4.60) }
+    @{ Id = 1003; Name = "PracticeCorner/Cube_00"; At = @(-3.55, 0.220, -0.90) }
+    @{ Id = 1011; Name = "PracticeCorner/Near_00"; At = @(-4.55, 0.760, -1.10) }
+    @{ Id = 1014; Name = "Prop_0 (CARRY-1 crate)"; At = @(36.00, 0.220, 0.00) }
+    @{ Id = 1018; Name = "Stock/Bin_0";            At = @(33.60, 0.000, -4.30) }
+    @{ Id = 1024; Name = "Stock/Box_000";          At = @(36.19, 0.565, -1.16) }
+    @{ Id = 1072; Name = "Stock/Can_000";          At = @(36.31, 0.485, -3.26) }
+    @{ Id = 1120; Name = "Stock/Produce_000";      At = @(44.85, 0.505, -1.40) }
 )
 
 # Cross-peer agreement. A client mirrors a Resting prop from the server's broadcast, so the two
@@ -170,7 +190,7 @@ function Start-AuthoredBot([string]$Tag, [string]$Name, [int]$DurationSec) {
     return $p
 }
 
-# "[props] adopted 133 authored prop(s) in 4.21 ms (ids 1000..1132)" -> @{Count;First;Last;Ms}
+# "[props] adopted 144 authored prop(s) in 4.21 ms (ids 1000..1143)" -> @{Count;First;Last;Ms}
 function Get-AdoptLine([string]$Path, [string]$Who) {
     if (-not (Test-Path $Path)) { Add-Failure "$Who wrote no log at all ($Path)"; return $null }
     $line = @(Select-String -Path $Path -Pattern '^\[props\] adopted ' | ForEach-Object { $_.Line }) |
@@ -332,7 +352,7 @@ if ($script:Failures.Count -eq 0) {
     Write-Host "        the five id blocks carry the kinds SearchRoom.tscn authors, on both peers" -ForegroundColor DarkGray
 }
 
-# --- 5: landmark poses, and cross-peer agreement on all 133 -----------------------------------
+# --- 5: landmark poses, and cross-peer agreement on all 144 -----------------------------------
 if ($samplesA.Count -gt 0) {
     $lastA = Get-AuthoredMap $samplesA[-1]
     foreach ($lm in $Landmarks) {

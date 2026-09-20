@@ -103,6 +103,11 @@ public sealed partial class SupermarketWorldSelfTest : Node3D
         "res://scenes/game/world/supermarket/RoundClock.tscn",
         "res://scenes/game/world/supermarket/ShelfUnit.tscn",
         "res://scenes/game/world/supermarket/EndCap.tscn",
+        // HOLD-1 (2026-09-19). Listed for CLOCK-1's measured reason, which is the whole point of
+        // this being a LIST: CountNodes stops at an instance boundary, so a prefab that is not
+        // named here is invisible from its room's count and a child it builds in _Ready is never
+        // seen by anything. There is no mechanism that notices a prefab was forgotten.
+        "res://scenes/game/world/supermarket/HoldingBoard.tscn",
     };
 
     private readonly List<string> _failures = new();

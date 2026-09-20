@@ -369,6 +369,30 @@ public partial class Gameplay : Node3D
             }
         }
 
+        // HOLD-1 (2026-09-19): the practice corner's snap pad, on the SERVER side.
+        //
+        // InteractionSlot is a client-side lab type and the server knows nothing about it
+        // (CARRY-1's handoff says so in as many words), so a pad that was only a slot node would
+        // snap in the feel lab and do nothing at all in a networked session. This is the shape
+        // that handoff prescribes: a validator that reads the pads the server already has in its
+        // own copy of the world and answers PlacementDecision.Snap(pad.RestPose(intended)).
+        //
+        // SERVER ONLY, and only when the world actually has pads. PropManager.PlacementValidator
+        // stays null in every other case, which is the shipped free-placement default that the
+        // whole carry verb is built on; a session with no practice corner is byte-for-byte
+        // unchanged. PracticePadValidator.Next exists so TASK-1's tower pads chain behind this
+        // rather than fighting over the one reference — see that class.
+        if (net.Role == NetworkManager.SessionRole.Server)
+        {
+            var pads = new System.Collections.Generic.List<Sandbox.Feel.InteractionSlot>();
+            CollectPracticePads(worldNode, pads);
+            if (pads.Count > 0)
+            {
+                _propManager.PlacementValidator = new Round.PracticePadValidator { Pads = pads };
+                ServerLog.Info("practice pads", $"count={pads.Count}");
+            }
+        }
+
         // The round's diegetic half (CLOCK-1, 2026-09-19): one 10 Hz poll that paints every
         // RoundClock on every wall and fires the round's audio cues off the same two views.
         //
@@ -734,6 +758,22 @@ public partial class Gameplay : Node3D
         _propManager.ResetForNewPlaythrough();
         _reconnects.ResetForNewPlaythrough();
         ServerLog.Info("round reset", "slices=props,reconnect-registry");
+    }
+
+    /// <summary>Every <c>InteractionSlot</c> authored into the world, depth first. A method
+    /// rather than an inline lambda for <see cref="EnumerateAvatars"/>'s reason: one home for
+    /// the walk. It does NOT read <c>InteractionSlot</c>'s static registry, because that holds
+    /// every slot loaded anywhere including the feel lab's, and a server-side rule should own
+    /// the list of things it enforces (see <see cref="Round.PracticePadValidator.Pads"/>).</summary>
+    private static void CollectPracticePads(Node n,
+        System.Collections.Generic.List<Sandbox.Feel.InteractionSlot> found)
+    {
+        foreach (Node child in n.GetChildren())
+        {
+            if (child is Sandbox.Feel.InteractionSlot slot)
+                found.Add(slot);
+            CollectPracticePads(child, found);
+        }
     }
 
     /// <summary>Every live avatar. A method rather than an

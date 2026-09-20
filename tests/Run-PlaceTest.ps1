@@ -9,7 +9,8 @@
 
     Runs one headless server in the real "supermarket" world with --spawn-room search, so every
     bot spawns in the SEARCH room, which is the only room with authored props in it (SearchRoom.tscn:
-    Prop_0..Prop_3, adopted as ids 1003..1006 -- see the $PropA..$PropD block below for why
+    Prop_0..Prop_3, whose adopted ids are DERIVED from the server's own log at run time -- see
+    the $PropA..$PropD block below for why
     those numbers moved), an authored RoomBounds volume, and a freestanding
     interior pillar. The pillar is there for exactly one reason: "inside a wall" needs a transform
     that is inside the room's BOUNDS and inside STATIC GEOMETRY at once, and every real wall is the
@@ -85,10 +86,14 @@ $ErrorActionPreference = "Stop"
 # world build for exactly that. Done here as a constant bump rather than a rewrite because this
 # is another lane's suite and the four values are the whole dependency; the next lane to move
 # them should spend the twenty lines instead.
-$PropA = 1003   # SearchRoom/Prop_0, world (36, 0.22, 0)
-$PropB = 1006   # SearchRoom/Prop_3, world (38, 0.22, 0)
-$PropC = 1004   # SearchRoom/Prop_1, world (36, 0.22, 2)
-$PropD = 1005   # SearchRoom/Prop_2, world (36, 0.22, -2)
+# DERIVED AT RUN TIME, NOT TYPED. Filled in from the server's own adoption log the moment it
+# reports listening -- see Get-AuthoredPropId in _Common.ps1 for the whole argument. The NODE
+# PATHS are the contract now; the numbers are whatever the world happens to hand out today.
+$PropAPath = "SearchRoom/Prop_0"   # world (36, 0.22, 0)
+$PropBPath = "SearchRoom/Prop_3"   # world (38, 0.22, 0)
+$PropCPath = "SearchRoom/Prop_1"   # world (36, 0.22, 2)
+$PropDPath = "SearchRoom/Prop_2"   # world (36, 0.22, -2)
+$PropA = -1; $PropB = -1; $PropC = -1; $PropD = -1
 
 # A's intended pose. y = 0.225 is the crate's half-height plus 5 mm, i.e. resting on the floor
 # rather than hovering: the assertion is "within 0.05 m of where it was asked to go", so a
@@ -118,6 +123,12 @@ try {
         Write-Fail "server never reported listening; see $serverOut"
     }
     Write-Host "        server up (pid $($server.Id))"
+
+    $PropA = Get-AuthoredPropId $serverOut $PropAPath
+    $PropB = Get-AuthoredPropId $serverOut $PropBPath
+    $PropC = Get-AuthoredPropId $serverOut $PropCPath
+    $PropD = Get-AuthoredPropId $serverOut $PropDPath
+    Write-Host "        authored prop ids this run: A=$PropA B=$PropB C=$PropC D=$PropD (derived from the server's adoption log)"
 
     Write-Host "[2/3] launching four scripted place bots..." -ForegroundColor Cyan
 

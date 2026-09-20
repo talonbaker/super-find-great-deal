@@ -320,6 +320,34 @@ public static class HideSeekText
     }
 
     /// <summary>
+    /// <b>The board's footer</b> (HOLD-1, 2026-09-19): the last thing that finished, still on
+    /// the wall while the next thing is being set up.
+    ///
+    /// <para><b>It is <see cref="MatchLine"/> plus exactly one case</b>, and the extra case is
+    /// the one a BOARD has and a strip does not. <c>MatchLine</c> is empty during Holding after
+    /// an ORDINARY round, because the strip's live phase line is the better thing to show in a
+    /// one-line readout. A board has a header carrying the phase already, so its footer is free
+    /// to keep showing the card — which is what the packet asks for ("a footer with the last
+    /// tally line"), and what makes the two players standing at the rack able to see what just
+    /// happened while they decide to go again.</para>
+    ///
+    /// <para><b>The KIND of sentence is still chosen by <see cref="ChooseMatchSentence"/>.</b>
+    /// This does not re-derive the phase rules; it calls the same chooser and fills in the one
+    /// hole with the round card. Empty before the first round commits, which is the only time
+    /// there is genuinely nothing to say.</para>
+    /// </summary>
+    public static string BoardFooter(in HideSeekView view, Func<int, string>? nameOf,
+        in HideSeekTuning tuning)
+    {
+        if (view.LastTally is not { } card)
+            return string.Empty;
+        string match = MatchLine(view, nameOf, tuning);
+        return match.Length > 0
+            ? match
+            : RoundTallyLine(card, nameOf, tuning, LeaverOf(view, card));
+    }
+
+    /// <summary>
     /// <b>The whole strip line for a view</b>, match-aware: <see cref="MatchLine"/> when it has
     /// something to say, and the ordinary phase/clock/role/round line otherwise.
     ///

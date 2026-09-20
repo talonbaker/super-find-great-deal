@@ -69,9 +69,16 @@ $ErrorActionPreference = "Stop"
 
 # --- the world, in world space -----------------------------------------------------------------
 # HoldingRoom.tscn is instanced at the origin; SearchRoom.tscn at x = +40.
-$RackBoxPropId   = 1002        # ObjectRack/Deal_2 -- the cereal box, nearest the START button
-$SearchTargetId  = 1004        # SearchRoom/Prop_1, world (36, 0.22, 2)   -- phase 3's target
-$SearchDecoyId   = 1006        # SearchRoom/Prop_3, world (38, 0.22, 0)   -- phase 3's wrong prop
+# DERIVED AT RUN TIME FROM THE SERVER'S OWN ADOPTION LOG, not typed -- see Get-AuthoredPropId in
+# _Common.ps1. These three numbers have now moved twice in two days (CARRY-1 -> BTN-1 ->
+# HOLD-1's practice corner) and the node paths have not moved at all, so the paths are the
+# contract. The rack's OWN three are the exception and are still asserted as literals below:
+# 1000..1002 is a PROPERTY of the level (nothing sorts before HoldingRoom/ObjectRack) and this
+# suite is the thing that would notice if it stopped being true.
+$RackTargetPath  = "HoldingRoom/ObjectRack/Deal_2"
+$SearchTargetPath = "SearchRoom/Prop_1"   # world (36, 0.22, 2)   -- phase 3's target
+$SearchDecoyPath  = "SearchRoom/Prop_3"   # world (38, 0.22, 0)   -- phase 3's wrong prop
+$RackBoxPropId = -1; $SearchTargetId = -1; $SearchDecoyId = -1
 # The bin's interior, in world space: two crates side by side, both clear of its walls, and the
 # spot each courier walks to in order to be in reach of its own pose.
 #
@@ -192,6 +199,17 @@ try {
         Stop-Proc $server
         Write-Fail "phase 1: the server never reported listening on udp/$Port; see buttons-p1-server.out.log"
     }
+
+    # THE AUTHORED PROP IDS FOR THIS WHOLE RUN, derived once, here. Phase 3 has to pass
+    # --reach-target on the SERVER'S COMMAND LINE, which is before that server has logged
+    # anything -- so the derivation cannot happen there. It happens off phase 1's server, whose
+    # world is the same world (adoption is a pure function of the scene files), and the three
+    # phases then share the answer. See Get-AuthoredPropId in _Common.ps1.
+    $RackBoxPropId  = Get-AuthoredPropId $p1Out $RackTargetPath
+    $SearchTargetId = Get-AuthoredPropId $p1Out $SearchTargetPath
+    $SearchDecoyId  = Get-AuthoredPropId $p1Out $SearchDecoyPath
+    Write-Host ("        authored prop ids this run: rack box=$RackBoxPropId " +
+                "target=$SearchTargetId decoy=$SearchDecoyId (derived from the adoption log)")
 
     # BOT A -- the hider. Walks to the rack's box (live position, retried grab), grabs no earlier
     # than its own t=20, and presses START three times:

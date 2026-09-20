@@ -77,6 +77,17 @@ public partial class RoundAudio : Node
     /// dedicated-server process this node is usually never added at all.</summary>
     private static readonly List<RoundClock> Clocks = new();
 
+    /// <summary>
+    /// <b>The boards</b> (HOLD-1, 2026-09-19), kept in their own list rather than folded in with
+    /// the clocks above. A clock and a board are painted by the same poll from the same view,
+    /// but a clock is also an AUDIO EMITTER — <see cref="Fire"/> plays the positional layer once
+    /// per clock, which is what makes the buzzer come out of the building. A board is furniture
+    /// that reads; putting it in <see cref="Clocks"/> would silently give every cue an extra
+    /// voice out of a wall that is not a clock, and the voice budget is the one place in this
+    /// file where "one more entry in the list" is not free.
+    /// </summary>
+    private static readonly List<HoldingBoard> Boards = new();
+
     private static RoundAudio? _instance;
 
     private double _poll;
@@ -117,6 +128,18 @@ public partial class RoundAudio : Node
 
     /// <inheritdoc cref="RegisterClock"/>
     public static void UnregisterClock(RoundClock clock) => Clocks.Remove(clock);
+
+    /// <summary>A board joining the world. Called from <c>HoldingBoard._Ready</c>; safe before
+    /// this node exists and safe if it never does. <see cref="Boards"/> says why it is not the
+    /// same list as the clocks.</summary>
+    public static void RegisterBoard(HoldingBoard board)
+    {
+        if (!Boards.Contains(board))
+            Boards.Add(board);
+    }
+
+    /// <inheritdoc cref="RegisterBoard"/>
+    public static void UnregisterBoard(HoldingBoard board) => Boards.Remove(board);
 
     public override void _Ready()
     {
@@ -161,8 +184,12 @@ public partial class RoundAudio : Node
             // chimes at a transition it did not see.
             _last = null;
             if (!_logOnly)
+            {
                 foreach (RoundClock clock in Clocks)
                     clock.Blank();
+                foreach (HoldingBoard board in Boards)
+                    board.Blank();
+            }
             return;
         }
 
@@ -174,6 +201,16 @@ public partial class RoundAudio : Node
                 Fire(cue);
             foreach (RoundClock clock in Clocks)
                 clock.Apply(view, driver.NameOf, driver.Tuning);
+            // The board needs one thing the clock does not: who is reading it, for the pronoun
+            // in that peer's own row. Multiplayer.GetUniqueId() is what RoundStripWidget already
+            // reads for the same question, so the strip and the board cannot disagree about
+            // which row is yours.
+            if (Boards.Count > 0)
+            {
+                int self = (int)Multiplayer.GetUniqueId();
+                foreach (HoldingBoard board in Boards)
+                    board.Apply(view, self, driver.NameOf, driver.Tuning);
+            }
         }
 
         _last = view;
@@ -271,6 +308,17 @@ public partial class RoundAudio : Node
             GD.Print($"{LogPrefix} {stamp} clock {room} "
                      + $"{(phase.Length > 0 ? phase : "-")} {mmss} "
                      + $"shown={(shown.Length > 0 ? shown.Replace(' ', '_') : "-")}");
+        }
+
+        // The board prints its OWN line with its own prefix rather than joining the clock's
+        // format: it carries N rows and a footer that already contains spaces, so squeezing it
+        // into a whitespace-delimited clock line would make both harder to parse. Same stamp,
+        // same poll, so the two are trivially pairable on one timeline.
+        foreach (HoldingBoard board in Boards)
+        {
+            if (!GodotObject.IsInstanceValid(board))
+                continue;
+            GD.Print(board.LogLine(stamp));
         }
     }
 
