@@ -62,6 +62,7 @@ public sealed partial class StockSelfTest : Node3D
     private readonly List<string> _failures = new();
     private int _holesChecked;
     private int _posesChecked;
+    private int _propBlocked;
     private float _worstPenetrationM;
     private string _worstWhere = "(none)";
 
@@ -321,6 +322,21 @@ public sealed partial class StockSelfTest : Node3D
 
                 PlacementIntegrity.Verdict v = PlacementIntegrity.Check(body, at);
                 _posesChecked++;
+
+                // A PROP in the way is not this test's failure, and the distinction is
+                // PlacementIntegrity's own (see Verdict.BlockerIsProp): "a prop inside a WALL is
+                // the defect S5b exists to prevent, a prop inside another PROP is usually two
+                // crates the solver is about to push apart by itself." The neighbours of a hole
+                // are SHELF-1's carryable facings -- objects the hider can pick up and move --
+                // and REACH-1's layer 3 counts a movable prop as a hit that COUNTS rather than
+                // as an obstruction. Only static geometry produces InsideStatic, which is the
+                // sentence this test is here to make impossible. Counted, not waved through.
+                if (v.Fault == PlacementIntegrity.PlacementFault.Overlapping && v.BlockerIsProp)
+                {
+                    _propBlocked++;
+                    continue;
+                }
+
                 if (v.PenetrationM > _worstPenetrationM)
                 {
                     _worstPenetrationM = v.PenetrationM;
@@ -340,6 +356,7 @@ public sealed partial class StockSelfTest : Node3D
             body.QueueFree();
 
         GD.Print($"{Prefix}   holes checked={_holesChecked} poses={_posesChecked} "
+                 + $"blockedByAnotherProp={_propBlocked} "
                  + $"worstPenetration={_worstPenetrationM:0.000} m at {_worstWhere} "
                  + $"(tolerance {PlacementIntegrity.DefaultOverlapToleranceM:0.000} m)");
     }
@@ -400,6 +417,7 @@ public sealed partial class StockSelfTest : Node3D
             GD.PrintErr($"{Prefix} FAIL {why}");
         }
         GD.Print($"{SummaryPrefix} holes={_holesChecked} poses={_posesChecked} "
+                 + $"propBlocked={_propBlocked} "
                  + $"worstPenetrationM={_worstPenetrationM:0.000} "
                  + $"failures={_failures.Count} "
                  + $"result={(_failures.Count == 0 ? "PASS" : "FAIL")}");

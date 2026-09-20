@@ -347,38 +347,53 @@ public static class ShelfStock
             int want = rng.NextRange(MinGapsPerBoard, MaxGapsPerBoard);
             var taken = new List<(int First, int Last)>();
 
+            // A hole may only be cut in INTACT stock: every slot it spans must still be carrying
+            // its board's full depth. Two reasons, and the second is the one that bites.
+            //
+            // A span that is already partly empty is where a CARRYABLE FACING stands. Counting it
+            // as a hole would (a) report a hiding place the level did not author, and (b) hand
+            // the placement check a pose with one of SHELF-1's cans already standing in it -- so
+            // the suite would be measuring a prop-vs-prop overlap and calling it a hole that is
+            // too small.
+            int fullMask = mask;
+            bool SpanIsIntact(int firstSlot)
+            {
+                if (firstSlot < 0 || firstSlot + gapSlots > across)
+                    return false;
+                foreach ((int f, int l) in taken)
+                    // One stocked slot of separation, so two holes never merge into one and the
+                    // collision runs between them stay distinct.
+                    if (firstSlot <= l + 1 && firstSlot + gapSlots - 1 >= f - 1)
+                        return false;
+                for (int s = firstSlot; s < firstSlot + gapSlots; s++)
+                    if (filled[b][s] != fullMask)
+                        return false;
+                return true;
+            }
+
             for (int g = 0; g < want; g++)
             {
                 int first = -1;
-                // Try a few placements; a board that is already mostly hole just gets fewer.
-                for (int attempt = 0; attempt < 12; attempt++)
+                for (int attempt = 0; attempt < 24; attempt++)
                 {
                     int candidate = rng.NextInt(Math.Max(1, across - gapSlots + 1));
-                    bool clashes = false;
-                    foreach ((int f, int l) in taken)
-                    {
-                        // One filled slot of separation, so two holes never merge into one and
-                        // the collision runs between them stay distinct.
-                        if (candidate <= l + 1 && candidate + gapSlots - 1 >= f - 1)
+                    if (!SpanIsIntact(candidate))
+                        continue;
+                    first = candidate;
+                    break;
+                }
+                // A DETERMINISTIC FALLBACK, not a nicety: the packet's rule is at least one hole
+                // on every board, and on a board where the facings happen to leave few intact
+                // spans two dozen random draws can miss all of them. Scanning guarantees a hole
+                // wherever one is geometrically possible, so the "every board keeps a hole"
+                // assertion is about the GEOMETRY rather than about the luck of a seed.
+                if (first < 0)
+                    for (int candidate = 0; candidate + gapSlots <= across; candidate++)
+                        if (SpanIsIntact(candidate))
                         {
-                            clashes = true;
+                            first = candidate;
                             break;
                         }
-                    }
-                    // A candidate whose slots are already empty is where a FACING stands, not a
-                    // hole: counting it would report a hole the level did not author and would
-                    // hand the placement check a pose with a carryable can already in it.
-                    if (!clashes)
-                    {
-                        bool anyStock = false;
-                        for (int s = candidate; s < candidate + gapSlots && !anyStock; s++)
-                            anyStock = filled[b][s] != 0;
-                        if (!anyStock)
-                            continue;
-                        first = candidate;
-                        break;
-                    }
-                }
                 if (first < 0)
                     continue;
 

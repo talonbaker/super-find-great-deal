@@ -134,7 +134,7 @@ public static class StockBake
     }
 
     private static readonly Regex FacingHeader = new(
-        "^\[node name=\"(?<n>(Can|Box|Produce)_\d{3})\" type=\"Node3D\" parent=\"Stock\"\]",
+        @"^\[node name=""(?<n>(Can|Box|Produce)_\d{3})"" type=""Node3D"" parent=""Stock""\]",
         RegexOptions.Compiled);
 
     /// <summary>

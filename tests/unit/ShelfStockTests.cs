@@ -298,19 +298,14 @@ public class ShelfStockTests
             foreach (StockGap gap in fill.Gaps)
                 for (int s = gap.FirstSlot; s < gap.FirstSlot + gap.SlotCount; s++)
                 {
-                    // Which rows are empty in this column?
-                    var empty = new List<int>();
-                    for (int r = 0; r < rows; r++)
-                    {
-                        if ((ShelfStock.DepthMask(fill.Material, gap.Board) & (1 << r)) == 0)
-                            continue;
-                        if (!occupied.Contains((gap.Board, s, r)))
-                            empty.Add(r);
-                    }
-                    Assert.NotEmpty(empty);
-
-                    // Walk from the face the hole opens to, inward. Every row from that face up
-                    // to the deepest empty one must be empty: that IS "nothing in front of it".
+                    // Walk inward from the face the hole opens to and count the rows that are
+                    // actually empty. The hole's own cleared depth must all be inside that run:
+                    // that IS "nothing in front of it".
+                    //
+                    // Compared against the GAP's own ClearedRows rather than against every empty
+                    // row in the column, and the difference is not pedantry -- the facing
+                    // carve-out can also empty rows at the OTHER end of the same column, and
+                    // those are a carryable can standing there, not an unreachable hole.
                     var order = new List<int>();
                     for (int r = 0; r < rows; r++)
                         if ((ShelfStock.DepthMask(fill.Material, gap.Board) & (1 << r)) != 0)
@@ -325,10 +320,11 @@ public class ShelfStockTests
                             break;
                         cleared++;
                     }
-                    Assert.True(cleared >= empty.Count,
-                        $"{fill.Seed} board {gap.Board} slot {s}: {empty.Count} empty row(s) but only "
-                        + $"{cleared} of them reach the {(gap.OpenToNegZ ? "-Z" : "+Z")} face. A hole with "
-                        + "bulk in front of it is one REACH-1 refuses the Confirm on (OccludedByStatic).");
+                    Assert.True(cleared >= gap.ClearedRows,
+                        $"{fill.Seed} board {gap.Board} slot {s}: the hole clears {gap.ClearedRows} "
+                        + $"row(s) but only {cleared} of them reach the "
+                        + $"{(gap.OpenToNegZ ? "-Z" : "+Z")} face. A hole with bulk in front of it is "
+                        + "one REACH-1 refuses the Confirm on (OccludedByStatic).");
                 }
         }
     }

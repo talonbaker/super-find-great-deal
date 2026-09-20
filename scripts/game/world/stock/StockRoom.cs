@@ -260,8 +260,6 @@ public static class StockRoom
         foreach (RoomBay bay in bays)
         {
             StockMaterial material = MaterialFor(bay);
-            BaySpec spec = bay.IsEndCap ? ShelfStock.EndCap : ShelfStock.ShelfUnit;
-
             BayFill fill = FillBay(bay, facings);
 
             float yaw = bay.YawDeg * MathF.PI / 180f;
