@@ -103,6 +103,7 @@ public partial class BotHarness : Node
         MaybeCapture();
         MaybeCaptureAtTick();
         MaybePlace();
+        MaybePress();
         if (MaybeFinishAfterHolding())
             return;
         if (_elapsed >= _options.DurationSec)
@@ -173,6 +174,61 @@ public partial class BotHarness : Node
     }
 
     private double _placeStartedSec = -1;
+
+    // --press: index of the next scheduled press. Marks arrive sorted ascending from
+    // LaunchOptions, so one cursor is enough — the same shape --capture-at uses.
+    private int _nextPressIndex;
+
+    /// <summary>
+    /// <b>The scripted button press</b> (BTN-1, <c>tests/Run-ButtonsTest.ps1</c>). Fires the
+    /// shipped client verb at each <c>--press</c> mark, at most one per frame.
+    ///
+    /// <para><b>It calls <c>RoundControls.ClientRequestPress</c></b> — the exact method
+    /// <c>RoundButton.Press</c> calls on a human's Interact edge — so the server sees a press
+    /// that is indistinguishable from a player's, gate and all. What it does NOT exercise is
+    /// <c>InteractHighlighter</c>'s "which interactable did you mean" pick, which is a question
+    /// about where a person is looking and belongs to the two-client headed gate rather than to
+    /// a bot. Same split, and the same reason, as <see cref="MaybePlace"/>'s.</para>
+    ///
+    /// <para><b>It does NOT walk the bot to the button.</b> The server re-checks reach against
+    /// authoritative positions, so a bot standing on its spawn marker pressing a button across
+    /// the room is refused with <c>TooFarAway</c> — which is a real case worth staging, and is
+    /// why the suite pairs this flag with <c>--carry-script</c>'s walk when it wants an accepted
+    /// press. A press flag that teleported the bot into range would be a flag that cannot
+    /// produce the refusal.</para>
+    ///
+    /// <para><b>Fires exactly once per mark, refusal included</b>, for <see cref="MaybePlace"/>'s
+    /// reason: a retry would turn a correct refusal into a flood of identical ones and make "the
+    /// round did not start" unfalsifiable.</para>
+    /// </summary>
+    private void MaybePress()
+    {
+        if (_nextPressIndex >= _options.PressScript.Count
+            || _elapsed < _options.PressScript[_nextPressIndex].AtSec)
+        {
+            return;
+        }
+        (string kind, double at) = _options.PressScript[_nextPressIndex];
+        _nextPressIndex++;
+        Round.RoundButtonKind button = kind switch
+        {
+            "confirm" => Round.RoundButtonKind.Confirm,
+            "end" => Round.RoundButtonKind.End,
+            _ => Round.RoundButtonKind.Start,
+        };
+        Round.RoundControls? controls = Round.RoundControls.Instance;
+        if (controls == null)
+        {
+            // Loud rather than silent: a world with no RoundControls is a world with no buttons,
+            // and a suite whose presses went nowhere would read as a round that refused them.
+            GD.PushWarning($"[bot] {_options.DisplayName} --press {kind}@{at:F1} had no "
+                           + "RoundControls to ask — this world has no round buttons.");
+            return;
+        }
+        GD.Print($"[bot] {_options.DisplayName} PRESSING {button} at {_elapsed:F2}s "
+                 + $"(scheduled {at:F1}s)");
+        controls.ClientRequestPress(button);
+    }
 
     private bool MaybeFinishAfterHolding()
     {
@@ -568,7 +624,22 @@ public partial class BotHarness : Node
             // The ROOMS ride along with the routes deliberately: "both peers say pa" is also
             // what two UNKNOWN rooms produce through the fail-open rule, so a suite asserting
             // only the route could pass on a session where the round never synced at all.
-            Voice.VoiceManager.Instance.GetEmitRoutingVerdict());
+            Voice.VoiceManager.Instance.GetEmitRoutingVerdict(),
+            // SHELF-1 (2026-09-19): THIS PEER'S OWN PHYSICS FRAME TIME, milliseconds.
+            //
+            // ReachCostProbe measures the same monitor on the SERVER and is the only frame-time
+            // instrument this repo had. SHELF-1's packet asks for the number on the CLIENT as
+            // well, and the reason is not symmetry: a client does not simulate a loose prop (it
+            // lerps a frozen kinematic body toward a streamed transform), so "130 props cost the
+            // server 6 ms" says nothing at all about what they cost the player watching them.
+            // The two numbers are about different work and both have to be read.
+            //
+            // Sampled per LOGGED sample rather than per frame, so it is a 5 Hz spot reading of a
+            // per-frame quantity and its percentiles are coarser than the probe's 60 Hz ones.
+            // That is deliberately cheap: a per-frame accumulator here would be a measurement rig
+            // running inside every bot in the repo, which is exactly what ReachCostProbe's own
+            // header argues against.
+            (float)(Performance.GetMonitor(Performance.Monitor.TimePhysicsProcess) * 1000.0));
         string line = JsonSerializer.Serialize(sample, JsonOptions);
         if (_writer != null)
         {
@@ -636,7 +707,9 @@ public partial class BotHarness : Node
         int PlaceDeny,
         // VOICE-1: the routing verdict, as `vroute`. See its computation site and
         // VoiceManager.GetEmitRoutingVerdict.
-        Voice.VoiceRouting.Verdict Vroute);
+        Voice.VoiceRouting.Verdict Vroute,
+        // SHELF-1: this peer's own physics frame time in ms, as `pms`. See its computation site.
+        float Pms);
 
     // THE FIRST-PERSON LENS, in world space (INT-0, 2026-09-19). X/Y/Z is the lens itself, not the
     // rig node it hangs off; Dx/Dy/Dz is the direction it faces (-Z of its own basis, which is

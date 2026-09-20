@@ -200,9 +200,42 @@ $ErrorActionPreference = "Stop"
 # SearchRoom.tscn is instanced at x = 40 in Supermarket.tscn and its RoomBounds is 14 x 10, so
 # the room is world x in [33, 47], z in [-5, 5]. Its four authored crates sit at x = 36 and 38
 # and the SearchPillar at (46, 2.5); everything below keeps clear of all five.
-$CanAt       = "40,0.35,-3"
-$BoxAt       = "42,0.35,-3"
-$ProduceAt   = "44,0.35,-3"
+#
+# EVERY COORDINATE IN THIS BLOCK MOVED (SHELF-1, 2026-09-19), AND THE ROOM IS WHY. The search
+# room was an empty box when this fixture was written; it now has four aisles of shelving 0.5 m
+# deep running its length at z = -3.15, -1.05, +1.05, +3.15, with 1.6 m walkways between them.
+# Three things followed, all measured on the first run against the dressed room:
+#
+#   1. z = -3 IS INSIDE A SHELF. The can, the box and the produce were seeded in the first
+#      aisle's bays. The can came to rest at (40.11, 0.07, -3.00) wedged under a shelf board.
+#   2. A BOT CANNOT WALK FROM ONE WALKWAY TO ANOTHER. DeterministicWalkIntentSource and
+#      ScriptedCarryIntentSource both go in a STRAIGHT LINE and MoveAndSlide only slides; there
+#      is no routing. SfxCanBot spawned at marker 0 (35.5, 0), walked at (40, -3), and stopped
+#      dead against the second aisle's face at (40.09, -0.65). Its grab never fired, and the
+#      suite reported "tin: prop 1 never fired TinPick on PickedUp" -- a sound assertion about a
+#      pickup that never happened.
+#   3. SO EACH DRIVER'S PROP LIVES IN THAT DRIVER'S OWN WALKWAY, matched to the spawn marker
+#      its join order gets it (measured from the bots' own first samples, not assumed):
+#        SfxCanBot     marker 0 (35.5,  0.0)  -> the can at (34.3, 0.0), one metre BEHIND it
+#        SfxBoxBot     marker 2 (38.5,  2.1)  -> the box     at z =  2.1
+#        SfxProduceBot marker 3 (41.5, -2.1)  -> the produce at z = -2.1
+#        (the windowed witness takes marker 1 (44.5, 0.0) and walks to nothing)
+#      The stack and the two free-fallers are seeded, dropped and never walked to, so they go
+#      together in the +Z edge walkway (z = 4.2), keeping SFX-1's own x values, clear of the two
+#      bins at x = 33.6 and 46.4.
+#
+#   4. A CHARACTERBODY3D DOES NOT PUSH A RIGIDBODY3D, so CARRY-1's four crates are WALLS to a
+#      walking bot. The can first went to (40, 0, 0) -- the same walkway as the bot, no shelf in
+#      the way -- and SfxCanBot moved 7 cm and stopped: Prop_0 sits at (36, 0.22, 0) and the bot
+#      halted at x = 35.635, which is the crate's face minus the body radius, to the millimetre.
+#      So the can is seeded at x = 34.3, one metre BEHIND the bot's own marker, where the only
+#      thing between them is floor.
+#
+# The SUBJECT of this suite has not moved an inch: same seven props, same kinds, same drop, same
+# relative geometry in the once-per-contact stack. Only the staging did, and it had to.
+$CanAt       = "34.3,0.35,0"
+$BoxAt       = "42,0.35,2.1"
+$ProduceAt   = "38,0.35,-2.1"
 # THE ONCE-PER-CONTACT FIXTURE: a can dropped onto a CRATE, in the far corner away from every
 # bot and every authored prop. --seed-props-drop releases both; the crate is already at rest, the
 # can falls 0.73 m onto it at roughly 3.8 m/s -- over the 2.0 m/s audible floor, under the 8 m/s
@@ -215,8 +248,8 @@ $ProduceAt   = "44,0.35,-3"
 # 0.035 m and being pushed out) sends the upper one down beside it instead of onto it. A crate
 # presents a 0.44 m square face. The rule under test is "one contact, one sound", which does not
 # care what the two bodies are made of -- so the fixture should be the one that cannot miss.
-$StackLowAt  = "45,0.25,4"
-$StackHighAt = "45,1.20,4"
+$StackLowAt  = "45,0.25,4.2"
+$StackHighAt = "45,1.20,4.2"
 
 # THE FREE-FALLERS, one cardboard and one produce, and they exist because of a measured lesson:
 # a bot's THROW is not a reliable way to produce an impact. Measured on the previous run -- the
@@ -225,8 +258,8 @@ $StackHighAt = "45,1.20,4"
 # so "produce never fired ProduceThump" was a fact about a ballistic arc rather than about the
 # sound. A controlled 1.14 m fall arrives at ~4.7 m/s every single time. Tin needs no free-faller
 # because the stacked pair already gives it one.
-$BoxFallAt     = "43,1.20,3"
-$ProduceFallAt = "41,1.20,3"
+$BoxFallAt     = "43,1.20,4.2"
+$ProduceFallAt = "41,1.20,4.2"
 
 # THE PLACE FIXTURE (SFX-2). A can, on its own, far from everything else, for one driver to
 # grab and SET DOWN 0.3 m away. The verb has to be a real --carry-place through
@@ -452,8 +485,12 @@ try {
     $heap = @()
     $kinds = @("can", "box", "produce", "can", "box")
     for ($i = 0; $i -lt 40; $i++) {
+        # SHELF-1: the heap moved into the CENTRAL WALKWAY (z in [-0.8, 0.8]). Its old span,
+        # z = -2.0 to +1.15, straddled the second and third aisles, so a third of the heap was
+        # seeded inside shelving and the concurrency event this phase measures was partly
+        # forty props settling against a shelf board rather than against each other.
         $x = 38.0 + ($i % 5) * 0.45
-        $z = -2.0 + [math]::Floor($i / 5) * 0.45
+        $z = -0.7 + [math]::Floor($i / 5) * 0.2
         $y = 0.5 + ($i % 8) * 0.28
         $heap += ("{0:F2},{1:F2},{2:F2},{3}" -f $x, $y, $z, $kinds[$i % 5])
     }

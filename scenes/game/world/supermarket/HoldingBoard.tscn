@@ -1,0 +1,100 @@
+[gd_scene load_steps=4 format=3 uid="uid://holdboard0sfgdmvp"]
+
+; HOLD-1 (2026-09-19) — THE BOARD. Who is in this game, what they are about to do, what they have
+; scored, and what just happened. It hangs in the holding room, which is where both players spend
+; the wait before every round and where the seeker is shut in for the whole of Hiding.
+;
+; BUILT THE SAME WAY AS RoundClock.tscn, ON PURPOSE AND BY INSTRUCTION (packet HOLD-1: "built the
+; same way as CLOCK-1's RoundClock ... share the panel construction"). Read that file's header
+; first -- every rule in it applies here verbatim and is deliberately NOT restated:
+;   - no collision (a wall panel with a body on it is a lip you catch on at head height);
+;   - no colour in this file (the panel's albedo and every label's modulate come from UiTokens
+;     through UiThemeService at runtime, so a board that loses its binding renders WHITE and
+;     screams rather than quietly reverting to a retired palette -- and so that
+;     tests/unit/UiNoBespokeStylingTests.NoScene_TypesItsOwnColour stays green);
+;   - no [Export] set on an instance line, ever, on this Godot/Mono build;
+;   - a Label3D with no rotation faces +Z, and a .tscn's twelve transform floats are basis ROWS.
+;
+; SIZE AND WHY. The panel is 3.6 x 2.2 m. The packet asks for "readable from 4 m in first person",
+; and the rows are what a player reads: font_size 40 at the default pixel_size 0.005 is 0.20 m of
+; glyph, which at 4 m subtends 0.050 rad -- about 44 px of a 1152-line frame at FOV 75 (it was 44
+; at first; HoldingBoardLayout.RowGlyphM records the two characters that bought). The header
+; and the footer are font_size 32 (0.16 m, ~35 px at 4 m) because they are read once rather than
+; scanned, and because the footer is the longest line in the game and needs the room.
+;
+; HOW MANY ROWS, AND WHY IT IS A FIXED FOUR. SupermarketWorld declares four HoldingSpawn markers
+; and Gameplay.SpawnPositionFor wraps on them, so four bodies is what this room is built for (the
+; game is two). Four row labels are AUTHORED here rather than spawned per player, because a level
+; that builds nodes in _Ready is exactly what SupermarketWorldSelfTest's packed-vs-live count
+; exists to catch -- see .claude/rules/godot-scenes.md, and CLOCK-1's measurement of what happens
+; when a prefab is left out of SectionScenes. An empty row is blanked, not removed. A fifth human
+; is reported on the Overflow line rather than silently dropped.
+;
+; THE LAYOUT, in panel-local metres (the panel is centred on this node, so y spans -1.1..+1.1):
+;   Header   +0.84   font 32     MATCH 1 · ROUND 1 OF 2 · HOLDING
+;   Row0     +0.40   font 40     ADA · NEXT: YOU HIDE · 7
+;   Row1     +0.10   font 40
+;   Row2     -0.20   font 40
+;   Row3     -0.50   font 40
+;   Overflow -0.70   font 22     +1 MORE
+;   Footer   -0.92   font 32     ROUND 1 OF 2 · ADA hid · 3 sorted · found at 1:12 · BEN +48
+; Every label sits at z = +0.06, which is 0.02 m proud of the panel's 0.08 m slab -- the same
+; clearance RoundClock.tscn uses, and enough that no glyph z-fights the board behind it.
+;
+; THE LABELS' Text VALUES BELOW ARE PLACEHOLDERS AND ARE NEVER SEEN. HoldingBoard._Ready hides the
+; whole node until the round is synced, for RoundClock's own reason: "Holding, round 1, nobody
+; scoring" and "I have not heard from the server yet" are the same bytes, and a board that shows
+; the first while it means the second is worse than a blank wall. They are authored non-empty so
+; the file is openable in the editor and shows its own layout.
+
+[ext_resource type="Script" path="res://scripts/game/round/HoldingBoard.cs" id="1_board"]
+
+[sub_resource type="BoxMesh" id="BoxMesh_panel"]
+size = Vector3(3.6, 2.2, 0.08)
+
+[sub_resource type="StandardMaterial3D" id="Mat_panel"]
+resource_name = "holding board panel (albedo comes from UiTokens at runtime)"
+resource_local_to_scene = true
+roughness = 0.85
+
+[node name="HoldingBoard" type="Node3D"]
+script = ExtResource("1_board")
+
+[node name="Panel" type="MeshInstance3D" parent="."]
+mesh = SubResource("BoxMesh_panel")
+surface_material_override/0 = SubResource("Mat_panel")
+
+[node name="HeaderLabel" type="Label3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.84, 0.06)
+text = "MATCH 1"
+font_size = 32
+
+[node name="Row0Label" type="Label3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.4, 0.06)
+text = "—"
+font_size = 40
+
+[node name="Row1Label" type="Label3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.1, 0.06)
+text = "—"
+font_size = 40
+
+[node name="Row2Label" type="Label3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.2, 0.06)
+text = "—"
+font_size = 40
+
+[node name="Row3Label" type="Label3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, 0.06)
+text = "—"
+font_size = 40
+
+[node name="OverflowLabel" type="Label3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.7, 0.06)
+text = "—"
+font_size = 22
+
+[node name="FooterLabel" type="Label3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.92, 0.06)
+text = "—"
+font_size = 32

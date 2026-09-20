@@ -47,6 +47,13 @@ public partial class Gameplay : Node3D
     private CycleDriver _cycleDriver = null!;
     private RunDriver _runDriver = null!;
     private Round.HideSeekDriver _hideSeekDriver = null!;
+    private Round.RoundControls _roundControls = null!;
+
+    /// <summary>REACH-1's fact source on the server, or null off-server — handed to
+    /// <see cref="_roundControls"/> so BTN-1's rack can aim the reachability audit at whatever
+    /// the hider actually took off the shelf. Held as a field only to keep the two registrations
+    /// in their required order (see where it is assigned).</summary>
+    private Round.ReachabilityFactSource? _reachFacts;
 
     private Label _connectingLabel = null!;
     private Label _roomCodeLabel = null!;
@@ -339,6 +346,7 @@ public partial class Gameplay : Node3D
             if (net.Options.ReachTargetPropId >= 0)
                 reach.TargetPropId = net.Options.ReachTargetPropId;
             _hideSeekDriver.Register(reach);
+            _reachFacts = reach;
 
             if (net.Options.ReachSelfTest)
             {
@@ -354,7 +362,34 @@ public partial class Gameplay : Node3D
                     Name = "ReachCostProbe",
                     Props = _propManager,
                     DurationSec = net.Options.ReachCostSec,
+                    // SHELF-1: <= 0 means never shove, which is how the at-rest frame time is
+                    // measured at all. See LaunchOptions.CostShoveEverySec.
+                    ShoveEverySec = net.Options.CostShoveEverySec,
                 });
+            }
+        }
+
+        // HOLD-1 (2026-09-19): the practice corner's snap pad, on the SERVER side.
+        //
+        // InteractionSlot is a client-side lab type and the server knows nothing about it
+        // (CARRY-1's handoff says so in as many words), so a pad that was only a slot node would
+        // snap in the feel lab and do nothing at all in a networked session. This is the shape
+        // that handoff prescribes: a validator that reads the pads the server already has in its
+        // own copy of the world and answers PlacementDecision.Snap(pad.RestPose(intended)).
+        //
+        // SERVER ONLY, and only when the world actually has pads. PropManager.PlacementValidator
+        // stays null in every other case, which is the shipped free-placement default that the
+        // whole carry verb is built on; a session with no practice corner is byte-for-byte
+        // unchanged. PracticePadValidator.Next exists so TASK-1's tower pads chain behind this
+        // rather than fighting over the one reference — see that class.
+        if (net.Role == NetworkManager.SessionRole.Server)
+        {
+            var pads = new System.Collections.Generic.List<Sandbox.Feel.InteractionSlot>();
+            CollectPracticePads(worldNode, pads);
+            if (pads.Count > 0)
+            {
+                _propManager.PlacementValidator = new Round.PracticePadValidator { Pads = pads };
+                ServerLog.Info("practice pads", $"count={pads.Count}");
             }
         }
 
@@ -370,6 +405,28 @@ public partial class Gameplay : Node3D
         //
         // After the driver, because its very first poll reads HideSeekDriver.Instance.
         Round.RoundAudio.Attach(this);
+        // BTN-1 (2026-09-19): the three round buttons, the object rack and the drop-off bin.
+        //
+        // AFTER the round driver, because it registers a fact source with it. AFTER REACH-1's
+        // source, because that one must be FIRST among the real sources (the first-non-null
+        // TargetRetrievable rule above) — this lane answers null to that fact precisely so it
+        // could never win the race, and registering behind it as well makes the ordering a fact
+        // rather than a property of one method. AFTER AdoptAuthoredProps, because the rack's
+        // three objects must already carry their prop ids.
+        //
+        // Present on EVERY peer, like every node in this block: the lamp on each button is
+        // DERIVED on each client from the round wire and the replicated holder view rather than
+        // pushed, so nothing new rides the wire for the affordance (RoundControls.LampFactsFor).
+        _roundControls = new Round.RoundControls { Name = Round.RoundControls.NodeName };
+        AddChild(_roundControls);
+        _roundControls.Setup(net.Role == NetworkManager.SessionRole.Server,
+            _propManager, _players, _hideSeekDriver, worldNode,
+            net.Options.ReachTargetPropId);
+        // The RACK is the production path for the target's identity; --reach-target stays as the
+        // dev-script stopgap REACH-1 shipped it as, and loses to the rack the moment a hider
+        // picks something up, because the rack's answer is measured rather than typed.
+        _roundControls.Reach = _reachFacts;
+
         // WHAT USED TO BE HERE, in one line each, because every one of these blocks carried a
         // "THIS IS THE ONLY CONSTRUCTION SITE" warning and deleting them is exactly the move those
         // warnings were written against: the lake (WaterService plus the chill overlays and the
@@ -701,6 +758,22 @@ public partial class Gameplay : Node3D
         _propManager.ResetForNewPlaythrough();
         _reconnects.ResetForNewPlaythrough();
         ServerLog.Info("round reset", "slices=props,reconnect-registry");
+    }
+
+    /// <summary>Every <c>InteractionSlot</c> authored into the world, depth first. A method
+    /// rather than an inline lambda for <see cref="EnumerateAvatars"/>'s reason: one home for
+    /// the walk. It does NOT read <c>InteractionSlot</c>'s static registry, because that holds
+    /// every slot loaded anywhere including the feel lab's, and a server-side rule should own
+    /// the list of things it enforces (see <see cref="Round.PracticePadValidator.Pads"/>).</summary>
+    private static void CollectPracticePads(Node n,
+        System.Collections.Generic.List<Sandbox.Feel.InteractionSlot> found)
+    {
+        foreach (Node child in n.GetChildren())
+        {
+            if (child is Sandbox.Feel.InteractionSlot slot)
+                found.Add(slot);
+            CollectPracticePads(child, found);
+        }
     }
 
     /// <summary>Every live avatar. A method rather than an

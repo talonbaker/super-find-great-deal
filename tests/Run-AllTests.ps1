@@ -175,6 +175,41 @@ try {
         # is the other reason it goes at the end.
         @{ Name = "Round: sorting job (TASK-1)";        Script = "Run-SortTest.ps1" }
 
+        # --- SHELF-1 (2026-09-19): the authored-prop adoption proof, OWED BACK since the fork ---
+        # This is the suite the "TWO OF THOSE ARE OWED BACK" note below names, returned with the
+        # 130 authored props the search room now carries. A server and two bots on udp/7908,
+        # the second joining eight seconds late on purpose: an authored prop is adopted locally
+        # from the scene file and is never spawned and never streamed, so a late joiner's FIRST
+        # sample is where that claim is either true or false.
+        #
+        # Registered AFTER CLOCK-1's rather than beside the other prop suites, and it is the same
+        # reason the registry is ordered at all: this one is the newest and the standing rule is
+        # that a new suite joins at the end, where a marathon that dies partway through has
+        # already run everything that was green before it.
+        @{ Name = "Props: authored adoption (SHELF-1)"; Script = "Run-AuthoredPropTest.ps1" }
+
+        # --- BTN-1 (2026-09-19): the round buttons and the drop-off bin ---
+        # Registered after SHELF-1's by HOLD-1's merge, on the same standing rule: a new suite
+        # joins at the end.
+        #
+        # THREE server launches on its own port (7906), one of them with three bots, so like the
+        # suite above it takes part in the join-index spawn dealing and belongs after everything
+        # that does not. About two minutes.
+        #
+        # Its first phase is the only suite in this registry that drives the round WITHOUT
+        # --round-script: a bot walks to the rack, picks an object up and presses a real button,
+        # and the round starts because the button said so. That is the one thing no other suite
+        # here can report on, and it is why this one is worth its two minutes.
+        @{ Name = "Round: buttons + drop-off bin (BTN-1)"; Script = "Run-ButtonsTest.ps1" }
+
+        # --- HOLD-1 (2026-09-19): the holding room's board, and a peer that saw none of it ---
+        # Last, on the standing rule. A server and THREE bots on udp/7909, the third launched on
+        # the server's own Holding -> Hiding line so it arrives mid-round having witnessed
+        # nothing; what it asserts is that its FIRST painted board equals the host's. About a
+        # minute and a half. Like the two suites above it takes part in the join-index spawn
+        # dealing, which is the other reason it belongs at the end.
+        @{ Name = "Round: holding board (HOLD-1)"; Script = "Run-HoldingBoardTest.ps1" }
+
         # WHAT WAS REMOVED HERE AT THE FORK (BASE-1, 2026-09-19), so a reader of an old handoff
         # can tell "deleted" from "lost": the bubble-test world, the shared bubble counter and the
         # last-bubble celebration, the TV portal, the Puffin Lab, the watcher's night gate, the
@@ -187,6 +222,12 @@ try {
         # will need them: the AUTHORED-PROP adoption proof belongs with SHELF-1's hundred props,
         # and Run-CarryNetTest's removed PHASE 3 -- a prop surviving its holder's teleport --
         # belongs with ROUND-1's phase-driven room changes. See the note in that script.
+        #
+        # THE FIRST OF THOSE TWO IS PAID (SHELF-1, 2026-09-19): Run-AuthoredPropTest.ps1 is
+        # registered above. It is not the deleted script restored -- the old one proved an
+        # authored prop could be carried and thrown, which Run-CarryTest and Run-PlaceTest now
+        # both cover -- it proves the thing 130 authored props actually put at risk, which is
+        # the id-assignment rule. The teleport phase is still owed.
     )
 
     $results = @()

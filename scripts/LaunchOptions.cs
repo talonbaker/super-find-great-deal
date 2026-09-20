@@ -716,6 +716,38 @@ public sealed class LaunchOptions
     /// </summary>
     public string StartleFile { get; private set; } = "";
     // --- end DOOR-1 -------------------------------------------------------------------------------
+    // --- the round buttons (BTN-1, 2026-09-19) ----------------------------------------------------
+    /// <summary>
+    /// <c>--press "start@6,start@14,confirm@30"</c>: <b>a BOT flag</b> that fires the shipped
+    /// press verb at the given elapsed seconds of this bot's own clock. Entries are
+    /// <c>&lt;start|confirm|end&gt;@&lt;seconds&gt;</c>, comma separated; empty (every real
+    /// launch, and every existing suite) means nothing is scheduled and nothing costs anything.
+    ///
+    /// <para><b>It drives the SHIPPED verb</b> — <c>RoundControls.ClientRequestPress</c>, the
+    /// same method <c>RoundButton.Press</c> calls when a human presses Interact — so what a suite
+    /// built on it exercises is the real gate, the real fact latch and the real broadcast. That
+    /// is the first of the two rules <c>BotHarness</c>'s own comment left for this lane, written
+    /// out of the retired honk probes: a scripted press through a test-only hook proves things
+    /// about the harness.</para>
+    ///
+    /// <para><b>The second rule does not apply here, and it is worth saying why.</b> That comment
+    /// warns that a rule the server enforces and the client MIRRORS needs a deliberately
+    /// non-compliant client to reach the authoritative copy. There is no mirror to defeat:
+    /// <c>RoundButton.Press</c> asks unconditionally, with no local gate and no debounce — the
+    /// client never decides whether a press is allowed — so the shipped verb already reaches the
+    /// server on every press, including the ones that will be refused. This flag can therefore
+    /// stage a refusal by pressing at the wrong moment, which is exactly what the suite does.</para>
+    ///
+    /// <para><b>Elapsed seconds, and the suite must treat them as a BUDGET.</b> Anchoring a
+    /// press on an observed event (the way <c>--carry-place</c> anchors on an observed hold)
+    /// would be better and is not possible for the interesting case: the first press of the
+    /// BTN-1 smoke has to land when the OTHER BOT IS NOT THERE, which is an absence, and the
+    /// only clock either process shares at that point is its own. Every assertion downstream is
+    /// anchored on a server log line instead.</para>
+    /// </summary>
+    public IReadOnlyList<(string Kind, double AtSec)> PressScript => _pressScript;
+    private readonly List<(string Kind, double AtSec)> _pressScript = new();
+    // --- end BTN-1 --------------------------------------------------------------------------------
 
     // --- REACH-1 (2026-09-19): placement integrity layers 2 and 3 ---------------------------------
 
@@ -743,6 +775,15 @@ public sealed class LaunchOptions
     /// tick, and a measurement rig that runs in a real session is a measurement rig that is part
     /// of the thing it measures.</para></summary>
     public double ReachCostSec { get; private set; }
+
+    /// <summary><c>--cost-shove-every &lt;seconds&gt;</c>: SHELF-1 (2026-09-19). Overrides
+    /// <c>ReachCostProbe.ShoveEverySec</c> (default 3). <b>Zero or negative means never shove</b>,
+    /// which is the whole reason this exists: the probe is the only instrument in the repo that
+    /// measures server physics frame time, and SHELF-1's packet asks for that number BOTH under
+    /// a shove AND at rest. Without this flag "at rest" is unmeasurable — the probe would knock
+    /// every prop in the room loose three seconds into the window it is sampling. Ignored
+    /// unless <c>--reach-cost</c> attached the probe at all.</summary>
+    public double CostShoveEverySec { get; private set; } = 3.0;
 
     // --- end REACH-1 ------------------------------------------------------------------------------
 
@@ -1230,6 +1271,15 @@ public sealed class LaunchOptions
                     else
                         GD.PushWarning("[reach] --reach-cost: not a positive number of seconds; ignored");
                     break;
+                case "--cost-shove-every":
+                    // NOT gated on > 0: zero and negative are the MEANINGFUL values here (never
+                    // shove — the at-rest measurement). Only an unparseable argument is ignored.
+                    if (double.TryParse(Next(args, ref i).Trim(), NumberStyles.Float,
+                            CultureInfo.InvariantCulture, out double shoveEvery))
+                        options.CostShoveEverySec = shoveEvery;
+                    else
+                        GD.PushWarning("[reach] --cost-shove-every: not a number of seconds; ignored");
+                    break;
                 case "--build-ui-theme":
                     options.BuildUiTheme = true;
                     break;
@@ -1511,6 +1561,40 @@ public sealed class LaunchOptions
                     options.StartleFile = Next(args, ref i);
                     break;
                 // --- end DOOR-1 --------------------------------------------------------------
+                case "--press":
+                {
+                    // "<start|confirm|end>@<seconds>[,...]". A malformed entry is DROPPED with a
+                    // warning rather than defaulted to t=0, the same call --round-script and
+                    // --seed-test-props already make: a press silently firing on the first frame
+                    // is a fixture in the wrong place, and the suite would then fail on the round
+                    // rather than on its own arguments.
+                    foreach (string raw in Next(args, ref i).Split(','))
+                    {
+                        string entry = raw.Trim();
+                        if (entry.Length == 0)
+                            continue;
+                        int at = entry.LastIndexOf('@');
+                        if (at <= 0 || !double.TryParse(entry[(at + 1)..], NumberStyles.Float,
+                                CultureInfo.InvariantCulture, out double sec) || sec < 0)
+                        {
+                            GD.PushWarning($"[buttons] --press: dropped malformed entry '{entry}' " +
+                                           "(expected <start|confirm|end>@<seconds>)");
+                            continue;
+                        }
+                        string kind = entry[..at].Trim().ToLowerInvariant();
+                        if (kind is not ("start" or "confirm" or "end"))
+                        {
+                            GD.PushWarning($"[buttons] --press: dropped entry '{entry}' — " +
+                                           "the buttons are start, confirm and end");
+                            continue;
+                        }
+                        options._pressScript.Add((kind, sec));
+                    }
+                    // Sorted so the harness walks one cursor forward, exactly as CaptureAtSec is.
+                    options._pressScript.Sort((a, b) => a.AtSec.CompareTo(b.AtSec));
+                    break;
+                }
+                // --- end BTN-1 ---------------------------------------------------------------
                 // --- perf followups (2026-08-07) -------------------------------------------
                 case "--net-stats":
                     options.NetStatsLog = Next(args, ref i);

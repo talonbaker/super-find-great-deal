@@ -669,19 +669,32 @@ public class SortRuleTests
     /// serialises this enum as an int in every <c>prop_presentation.tres</c>, so a member that
     /// moved would silently re-point a profile at a different sound.
     ///
-    /// <para>43–45 are BTN-1's reservation: it is branched off REACH-1's tip and cannot see this
-    /// file, so TASK-1 starts at 46 and both merges are appends. That is the same arrangement
-    /// that made DOOR-1's, SFX-1's and CLOCK-1's three blind enum edits merge for free at
-    /// INT-0B, and this is the test that keeps the gap from being "tidied".</para>
+    /// <para>43–45 were BTN-1's reservation: TASK-1 was branched off INT-0B's tip and could not
+    /// see BTN-1's edit, so it started at 46 and both merges were appends. That is the same
+    /// arrangement that made DOOR-1's, SFX-1's and CLOCK-1's three blind enum edits merge for
+    /// free at INT-0B, and it worked: nothing was renumbered.</para>
+    ///
+    /// <para><b>AMENDED AT INT-1 (2026-09-19), and this is the point of the amendment.</b>
+    /// TASK-1 asserted 43, 44 and 45 were ABSENT, which was a statement that BTN-1 had not landed
+    /// yet — a correct assertion whose subject has now ARRIVED through HOLD-1's branch. Each is
+    /// replaced by the fact its absence was standing in for: <b>43 IS <c>Sfx.Buzzer</c></b>, and
+    /// 44–45 are the free remainder. Nothing was changed to make a test pass; what changed is
+    /// that the reservation was honoured, which is exactly what this test was watching for.
+    /// (INT-0B §5 repaired two assertions of precisely this shape at the previous merge.)</para>
     /// </summary>
     [Fact]
-    public void TheNewOrdinalsStartAt46_AndBtn1sGapIsLeftAlone()
+    public void TheNewOrdinalsStartAt46_AndBtn1sReservationWasHonoured()
     {
         Assert.Equal(46, (int)Sfx.SortGood);
         Assert.Equal(47, (int)Sfx.SortBad);
 
         int[] taken = Enum.GetValues<Sfx>().Select(v => (int)v).ToArray();
-        Assert.DoesNotContain(43, taken);
+
+        // 43 is what the gap was FOR, and it is BTN-1's bin-rejection buzzer.
+        Assert.Equal(43, (int)Sfx.Buzzer);
+        // 44 and 45 are still free. Asserted so that a lane appending at 48 while 44 sits empty
+        // is a deliberate choice rather than an oversight, and so that anything that DOES take
+        // one has to come through this test and say so.
         Assert.DoesNotContain(44, taken);
         Assert.DoesNotContain(45, taken);
 

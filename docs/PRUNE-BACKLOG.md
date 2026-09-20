@@ -112,11 +112,21 @@ clearly-unreferenced ones (`assets/environment/bubbletest`, `resources/materials
 `assets/models/puffinlab`, `assets/run`, `assets/materials/water`, three orphaned shaders) WERE
 removed after checking every reference; this entry is the rest.
 
-## 7. Two suites that are owed back, not gone
+## 7. Two suites that are owed back, not gone (one paid)
 
-- **The authored-prop adoption proof.** `tests/Run-AuthoredPropTest.ps1` was deleted because the
-  supermarket has no authored props to adopt. `PropManager.AdoptAuthoredProps` is untouched and
-  still runs on every world build. It belongs with **SHELF-1**'s hundred props.
+- ~~**The authored-prop adoption proof.**~~ **PAID — SHELF-1, 2026-09-19.**
+  `tests/Run-AuthoredPropTest.ps1` was deleted because the supermarket had no authored props to
+  adopt. It has 130 now, and the suite is back on udp/7908, registered last in
+  `Run-AllTests.ps1`.
+  **It is not the deleted script restored, and the difference is the point.** The old one proved
+  an authored prop could be grabbed, thrown and settled to the same place on two peers — all of
+  which `Run-CarryTest` and `Run-PlaceTest` now cover on the same authored crates. What 130
+  authored props actually put at risk is the ID ASSIGNMENT RULE: ids are handed out by ordinal
+  node-path sort, so the id of every prop depends on the name of every other one, and nothing
+  about a rename is visible in a diff. The new suite asserts the whole id block (count, range,
+  per-block `PropKind`, the authored pose of each block's first id) on a server, on a client
+  present from the start and on one that joins eight seconds late, and it is proved able to fail
+  by renaming one product node.
 - **Carry through a teleport.** `tests/Run-CarryNetTest.ps1`'s PHASE 3 proved that a carried prop
   survives its holder being teleported by the server — the prop follows only because
   `NetworkedProp.BindToHolder` re-derives its transform from the holder's carry anchor every

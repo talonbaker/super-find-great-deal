@@ -1417,6 +1417,10 @@ public partial class SandboxAvatar : CharacterBody3D, IServerConfirmedBody
         // state, the same live server-derived state every other holder check in this file reads.
         if (net.Options.CarryGrabRetrySec >= 0 && isHolding == null)
             isHolding = () => Props?.FindHeldBy(Multiplayer.GetUniqueId()) != null;
+        // SHELF-1: --carry-target-prop steers the GRAB as well as the walk. See
+        // ScriptedGrabPropId for the run where a bot walked at crate 1002 and came away with a
+        // cereal box off the next shelf.
+        ScriptedGrabPropId = net.Options.CarryTargetPropId;
         return new ScriptedCarryIntentSource(this, net.Options.CarryTarget, net.Options.CarryGrabAtSec,
             net.Options.CarryHoldSec, net.Options.CarryThrowSec,
             net.Options.CarryWalk ? net.Options.CarryWalkTo : (Vector3?)null,
@@ -2876,18 +2880,62 @@ public partial class SandboxAvatar : CharacterBody3D, IServerConfirmedBody
             GD.Print($"[fire] no verb registered for the held item (kind={(kind.HasValue ? kind.Value.ToString() : "empty")})");
     }
 
+    /// <summary>
+    /// <b>A scripted bot's named prop</b> — the prop id <c>--carry-target-prop</c> gave, or −1
+    /// (the default, and the only value a human player ever has). When it is set and that prop
+    /// is free and inside <see cref="PickupRadius"/>, <see cref="FindNearestCarryable"/> returns
+    /// THAT prop instead of running the nearest/aim rule.
+    ///
+    /// <para><b>Why (SHELF-1, 2026-09-19, measured).</b> <c>--carry-target-prop</c> already
+    /// existed, and CARRY-1's note on <c>LaunchOptions.CarryTargetPropId</c> records the lesson
+    /// it was born from: <i>"walk to (−2.5, 0.5, −2.5)" is only the same instruction as "walk to
+    /// the ball" while nobody has moved the ball.</i> It steered the WALK and stopped there,
+    /// which was enough while a suite's room contained three props.</para>
+    ///
+    /// <para>The search room now authors 130. <c>Run-PlaceTest</c>'s bot D walked at crate 1002,
+    /// fired its grab at the 1.2 m arrive radius — and came away holding <b>1013</b>, a cereal
+    /// box on the next shelf. Nothing was wrong: the crate lies at y = 0.22 and the box at
+    /// y = 0.565, so from an avatar 1.2 m short the crate was 1.22 m away and the box 1.02 m,
+    /// and the nearest-carryable rule did exactly what it says. That rule is RIGHT for a player
+    /// (you grab what is under your hand) and it is the whole texture of a stocked aisle. It is
+    /// simply not an instruction a suite can use to name an object any more. <b>The same lesson,
+    /// one step further: "grab whatever is nearest" is not the same instruction as "grab the
+    /// ball".</b></para>
+    ///
+    /// <para><b>It narrows, never widens.</b> The named prop still has to be free and still has
+    /// to be inside the same <see cref="PickupRadius"/>; if it is not, the ordinary rule runs and
+    /// the bot grabs whatever a player would have. So a suite cannot use this to reach through a
+    /// wall, and a scripted grab that would have been refused for distance still is.</para>
+    ///
+    /// <para>−1 for every human player, every unscripted bot, and every suite that does not pass
+    /// the flag, so nothing that worked before behaves differently.</para>
+    /// </summary>
+    public int ScriptedGrabPropId { get; set; } = -1;
+
     /// <summary>The free carryable in reach that Interact would grab (also what the
     /// highlight poll shimmers). Aim-aware when <see cref="AimCamera"/> is set, so the
-    /// grabbed thing is the looked-at thing, not merely the nearest one.</summary>
+    /// grabbed thing is the looked-at thing, not merely the nearest one.
+    ///
+    /// <para>Overridden by <see cref="ScriptedGrabPropId"/> when a suite has named a prop — see
+    /// that property for the measurement that made it necessary.</para></summary>
     public Carryable? FindNearestCarryable()
     {
         var candidates = new System.Collections.Generic.List<InteractTargeting.Candidate>();
+        Carryable? named = null;
         foreach (Node node in GetTree().GetNodesInGroup(Carryable.Group))
         {
-            if (node is Carryable c && !c.IsHeld)
-                candidates.Add(new InteractTargeting.Candidate(c, c.GlobalPosition, PickupRadius));
+            if (node is not Carryable c || c.IsHeld)
+                continue;
+            candidates.Add(new InteractTargeting.Candidate(c, c.GlobalPosition, PickupRadius));
+            if (ScriptedGrabPropId >= 0
+                && c.GetParentOrNull<MpFoundation.Game.Props.NetworkedProp>() is { } np
+                && np.PropId == ScriptedGrabPropId
+                && GlobalPosition.DistanceTo(c.GlobalPosition) <= PickupRadius)
+            {
+                named = c;
+            }
         }
-        return InteractTargeting.Pick(candidates, GlobalPosition, AimCamera) as Carryable;
+        return named ?? InteractTargeting.Pick(candidates, GlobalPosition, AimCamera) as Carryable;
     }
 
     /// <summary>

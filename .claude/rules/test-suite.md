@@ -954,7 +954,14 @@ stands, which is the list to read before picking the next one:
 wave-2 lanes were merged and their five separate part-tables could finally be resolved into one).
 Every number below is a REGISTERED suite's bind port on the merged tree, audited by grepping
 every `$Port` in `tests/` after the last merge: **all distinct.** Read this table before picking
-the next one, and take **7908**.
+the next one, and take **7910** (INT-1, 2026-09-19 — the table below is the WHOLE wave, all
+three merges in, and it is the only copy).
+
+> **Updated by SHELF-1, 2026-09-19.** 7905-7908 are now spoken for; the next free number is
+> **7909**. The four were HANDED OUT BY THE ORCHESTRATOR, which is this section's own lesson
+> applied: BTN-1, TASK-1 and SHELF-1 branched off two different bases within an hour of each
+> other and none of their `tests/` directories contains the other two's suites, so a grep in any
+> one of the three worktrees would have produced 7905 three times.
 
 | Port | Suite | Lane |
 |---|---|---|
@@ -968,11 +975,35 @@ the next one, and take **7908**.
 | 7902 | `Run-MaterialSfxTest.ps1` | SFX-1 (SFX-2 merges at INT-1 on the same port) |
 | 7903 | `Run-ReachTest.ps1` | REACH-1 |
 | **7904** | **`Run-RoundClockTest.ps1`** (and `Capture-RoundClock.ps1`, unregistered) | **CLOCK-1** |
-| 7905 / 7906 | *reserved, no suite on this branch* | wave-3 lanes branched off INT-0B |
-| **7907** | **`Run-SortTest.ps1`** | **TASK-1** |
+| 7905 | *the match-end clock probe, unregistered and manual* | INT-0B (§8.5) |
+| **7906** | **`Run-ButtonsTest.ps1`** | **BTN-1** |
+| **7907** | **`Run-SortTest.ps1`** (and `Capture-SortRoom.ps1`, unregistered) | **TASK-1** |
+| **7908** | **`Run-AuthoredPropTest.ps1`** | **SHELF-1** |
+| **7909** | **`Run-HoldingBoardTest.ps1`** (and `Capture-HoldingBoard.ps1`, unregistered) | **HOLD-1** |
 
 Everything below 7893 is the pre-fork ladder and is unchanged: 7777, 7778, 7788, 7799, 7807,
 7809/7810, 7815, 7816, 7817, 7818, 7821, 7822, 7830, 7831, 7834.
+
+> **Updated by HOLD-1's BTN-1 merge, 2026-09-19.** BTN-1 carried a fifth partial copy of this
+> ladder on its own branch (its `tests/` could not see 7904/7905/7907/7908) and it is DROPPED
+> here rather than kept beside this one — five lanes each writing down the part of the ladder
+> they could see is exactly how 7899 was claimed twice. Its two real claims are folded into the
+> table above: **7906 is `Run-ButtonsTest.ps1`, registered**, and 7901 stays reserved and unused.
+> BTN-1's branch listed 7905 as SFX-2's; INT-0B's row (the unregistered match-end clock probe)
+> is the one on the merged tree and is what the table says. **HOLD-1 claims 7909** for
+> `Run-HoldingBoardTest.ps1`; the next free number is **7910**.
+
+> **Audited on the fully merged tree, INT-1, 2026-09-19.** One grep of every `$Port` in `tests/`
+> after the last of the three merges: **every REGISTERED suite's port is distinct.** Four numbers
+> appear twice and all four are a registered suite beside its OWN unregistered capture or
+> measurement harness, which is the pattern CLOCK-1 established and every lane since has
+> followed — 7904 `Run-RoundClockTest` + `Capture-RoundClock`, 7907 `Run-SortTest` +
+> `Capture-SortRoom`, 7908 `Run-AuthoredPropTest` + `Measure-ShopFloor`, 7909
+> `Run-HoldingBoardTest` + `Capture-HoldingBoard`. **Each pair is never run together** (both
+> halves take the machine-wide mutex, and only the registered half is in `Run-AllTests.ps1`), so
+> a marathon can never collide with one. Stated rather than left for the next reader to
+> rediscover as four scary-looking duplicates.
+
 
 7903 was **given by the orchestrator, not computed from a snapshot of `tests/`** — which is
 INT-0's lesson above applied rather than re-learned. 7899-7902 do not appear in this branch's
@@ -1202,6 +1233,13 @@ from a snapshot of `tests/` -- INT-0's lesson applied rather than re-learned for
 here cannot see them and would happily have produced 7905. The one ladder table in the REACH-1
 section above has the row; **the next free number is 7908.**
 
+> **Corrected at INT-1, 2026-09-19** (the entry above is kept as TASK-1 wrote it; this file's
+> header forbids deleting another agent's entry). **7908 was not free** — SHELF-1 took it for
+> `Run-AuthoredPropTest.ps1` on a branch TASK-1 could not see, and HOLD-1 then took 7909. This
+> is the SAME defect the entry itself is about, one wave later and from the other side: TASK-1
+> read the ladder correctly and the ladder was a snapshot. **The next free number is 7910**, and
+> the one table in the REACH-1 section is the only place that sentence should ever be written.
+
 Baseline, machine busy throughout (BTN-1's suite held the machine-wide mutex for ~11 minutes
 immediately before the first run and its Godot processes were alive during all four):
 
@@ -1367,3 +1405,223 @@ settle, not because each settle got dearer, and the p95 is within 1 % of REACH-1
 is 5 % below it. The p50 roughly doubling is 18 more rigid bodies being simulated on a machine
 running another lane's suite. **SHELF-1's hundred will move all four again.**
 
+
+## SHELF-1 (2026-09-19): udp/7908, and two things a 130-prop room taught the suites
+
+`tests/Run-AuthoredPropTest.ps1` claims **udp/7908** and is registered last in
+`tests/Run-AllTests.ps1`. It is the "authored-prop adoption proof" `docs/PRUNE-BACKLOG.md` has
+listed as owed since the fork, returned with the props that made it worth having.
+
+### An id assigned by node-path sort is a dependency nobody can see in a diff
+
+`PropManager.AdoptAuthoredProps` hands out ids from 1000 in **ordinal node-path sort order**, so
+the id of every prop in a room is a function of the NAME of every other prop in it. That is fine
+until a room has more than a handful. The search room now authors 130, and `Run-PlaceTest.ps1`
+names 1000, 1001, 1002 and 1003 in its own source as CARRY-1's four crates.
+
+**Every product SHELF-1 added sorts before `Prop_`** — `Bin_`, `Box_`, `Can_` and `Produce_` all
+start below `P` — so dropping them in beside the crates would have renumbered CARRY-1's four by
+126 and turned another lane's suite red for a reason no reviewer would find from the diff. They
+live under a container node named **`Stock`** instead, because `S` sorts after `P`. That is the
+whole trick, and it is written into `SearchRoom.tscn` at the node so the next person to add a
+prop there reads it before they name it.
+
+**The generalisation, which is the part worth keeping:** when a system derives identity from a
+sort over names, adding a sibling is an edit to every existing id. Put the new population in its
+own container and choose the container's name against the sort, not against taste.
+
+### Zero-pad any name an ordinal sort will order
+
+`Can_10` sorts between `Can_1` and `Can_2`. Every product in the room is padded to three digits
+(`Can_000`), so the id order and the reading order are the same thing. An unpadded set would have
+been deterministic and identical on every peer — and wrong about which object a level author was
+looking at.
+
+## BTN-1: udp/7906, and two staging traps worth more than the suite (2026-09-19)
+
+### The ladder, extended
+
+`tests/Run-ButtonsTest.ps1` claims **udp/7906** for all three of its phases, **given by the
+orchestrator** rather than computed from a snapshot of `tests/` — INT-0's lesson applied rather
+than re-learned for the second time. 7904 and 7905 do not appear in this branch's `tests/` at all
+(their suites are on unmerged lane branches), so a grep here would happily have produced 7904.
+
+> BTN-1's own copy of the ladder table was DROPPED by HOLD-1's merge (2026-09-19) — the one
+> table lives in the REACH-1 section above and now carries 7906 as this suite's. See the note
+> under it.
+
+### An authored prop's id is a fact about the WHOLE world, and a suite that types one will break
+
+`PropManager.AdoptAuthoredProps` numbers authored props by sorting on NODE PATH across every room
+at once. BTN-1 put three objects on a rack in `HoldingRoom.tscn`; `HoldingRoom/...` sorts before
+`SearchRoom/...`, so those three took 1000..1002 and **the search room's four crates moved from
+1000..1003 to 1003..1006**. `tests/Run-PlaceTest.ps1` named all four by literal and had to be
+bumped by hand.
+
+**SHELF-1's hundred aisle props will do it again**, and any of them whose node name sorts before
+`Prop_0` will move that room's own four a second time. The server now prints one line per adopted
+prop at world build, so a suite can read the ids instead of typing them:
+
+```
+[props] authored prop 1002 <- /root/Gameplay/World/HoldingRoom/ObjectRack/Deal_2 (Crate)
+```
+
+Note the path: the seam scene is added to `Gameplay` under the node name **`World`**, not
+`Supermarket`, so a pattern anchored on the scene's own name matches nothing.
+
+### A scripted PLACE is measured from the HAND, and the walk stops 1.2 m short
+
+**Measured, on this suite's first run: both couriers were refused `TooFarToPlace` and nothing
+reached the bin, which reads exactly like a bin that does not work.** Two constants compose into a
+trap:
+
+- `PropManager.RequestPlace` measures `PlaceReachM + GrabRangeTolerance` = **1.65 m** from the
+  avatar's CARRY ANCHOR — about 0.9 m in front of the body, swinging with its heading — not from
+  the body. `Run-PlaceTest.ps1`'s header already says "the hand"; it is easy to read as the body.
+- `ScriptedCarryIntentSource.ArriveRadius` is **1.2 m**, so `--carry-walk-to` leaves the bot that
+  far short of the point it was given, in whatever direction it happened to approach from.
+
+So a walk-to placed a comfortable-looking 1.2 m from the target pose puts the hand 1.6-1.7 m away
+and the place is refused. **Aim `--carry-walk-to` AT the thing, not next to it** — a bot that is
+blocked by a solid object arrives by being blocked, which is both closer and far more repeatable
+than a free-space stopping point.
+
+Reusable discriminator: `[server] place denied peer=N reason=TooFarToPlace` in the server log
+separates this from every bin/pad/validator rule. The suite now echoes those lines
+unconditionally, for the CARRY-1 reason — read the server log before reaching for the flake list.
+
+### A wrapper that holds the suite mutex around a suite deadlocks against its own child
+
+Ten minutes were lost to `waiting for machine-wide full-suite lock ... held by: pid <my own
+wrapper>`. Most scripts in `tests/` take `Enter-SuiteMutex` themselves; a few (`Run-SupermarketWorldTest.ps1`)
+do not. A helper that wraps the mutex around one of the former can never proceed — the mutex is
+not reentrant across processes. **Wrap the BUILD and IMPORT in the mutex and release before
+invoking a suite that takes its own.**
+
+### The session scratchpad is shared between lanes on this machine
+
+A helper written to the scratchpad as `RunUnderMutex.ps1` was overwritten mid-session by another
+worktree's file of the same name, and the next invocation ran against that other worktree. Same
+class as the shared-stash hazard: **give scratch files a lane-specific subdirectory**, not just a
+lane-specific name.
+
+### `Carry: regrab-while-loose` — fourth confirmation, and the band has not moved
+
+The BTN-1 marathon (36 suites, 35 PASS / 1 FAIL) went red on this suite alone, printing the exact
+staging string this file already names: `bot A never completed held -> loose -> held-again for
+prop 2 (reached phase 2) - regrab staging broken`. Standalone with `-SkipBuild` immediately after,
+three times: **3/3 PASS, worst hold distance 1.05-1.09 m** (holder's own view 1.05/1.06/1.06 over
+96/96/100 samples; independent witness 1.08/1.09/1.07 over 95/95/99). That is inside the
+0.89-1.09 m band recorded here three times before it.
+
+**The machine was not idle for any of these** — another lane's `Run-AllTests.ps1` and its Godot
+processes were live throughout the marathon and through all three re-runs — which per SHADER-2's
+entry above makes a 3/3 clear a stronger flake verdict than an idle-machine pass.
+
+## HOLD-1 (2026-09-19): udp/7909, and four things measured merging two lanes into one room
+
+`tests/Run-HoldingBoardTest.ps1` claims **udp/7909** and is registered last in
+`tests/Run-AllTests.ps1`; `tests/Capture-HoldingBoard.ps1` is unregistered and manual on the same
+number. **The next free port is 7910.** The one ladder table is in the REACH-1 section above.
+
+### An `[Export]` is not a level-authoring surface in this project, in EITHER shape
+
+CLOCK-1's entry (and `godot-scenes.md`) records the trap as *"an `[Export]` on a nested
+PackedScene instance line is silently dropped"*. **It is broader than that.** HOLD-1 authored an
+`InteractionSlot` INLINE in `HoldingRoom.tscn` -- a plain node with `script = ExtResource(...)`
+on it, not an instance of anything -- and set four exported properties on it
+(`radius`, `rest_height`, `snap_rotation`, `show_marker`). All four read back as their C#
+defaults.
+
+**The failure was loud, and only because a list already existed.**
+`Run-SupermarketWorldTest` said:
+
+```
+FAIL res://scenes/game/world/supermarket/HoldingRoom.tscn: 87 node(s) packed but 88 live.
+```
+
+`show_marker = false` never arrived, so `InteractionSlot` built its own marker ring in `_Ready`
+and the room grew a node its `.tscn` does not declare. Without the packed-vs-live check this
+would have been a silently oversized room and three silently wrong physics constants.
+
+**The fix that works is a NODE NAME, because a node name is native.** `InteractionSlot._Ready`
+now adopts a child called `SlotMarker` when the level authored one and builds its own only when
+there is none, and the pad sets no properties at all. Same move `RoundClock.ResolveRoom` made for
+the same reason. This is the fourth payment in this repo: `PropManager.AuthoredKindOf` (2026-07),
+`Carryable.LoadLiftM`, `RoundClock.Room`, and now this.
+
+### A guard can be protected by the KEY TYPE, and a peer id is not a good enough counterexample
+
+`HoldingBoardModel.Rows` sorts the score map's keys so two peers paint the same row order.
+**Deleting `ids.Sort()` left every ordering assertion green** -- CELEBRATE-1's trap, arriving
+through a door nobody had used. `ImmutableDictionary<int,int>` enumerates in HASH order, `int`'s
+hash IS the value, and the trie's traversal of small positive ints comes out ASCENDING.
+
+The obvious "use realistic data instead of toy data" fix is **not enough**, and that is the part
+worth keeping. Measured with four real peer ids lifted out of `tests/logs/`:
+
+```
+1076010669, 652333145, 1788870000, 233849852
+  enumerate as -> 233849852, 652333145, 1076010669, 1788870000   (already sorted)
+```
+
+So a sort over `int` keys is unobservable through anything the shipped wire can produce. **To
+prove the guard, its call site had to be made to reach it**: the test builds the map with an
+`IEqualityComparer<int>` that hashes to the NEGATED key, which reverses the traversal, and
+carries a positive control asserting the map really does enumerate differently before asserting
+the rows come out ascending anyway. It goes red the moment the sort goes away.
+
+**And the test's own helper had to be fixed first.** `View(scores: hostile)` was calling
+`.ToImmutableDictionary()`, which silently rebuilt the map with the DEFAULT comparer -- so the
+hostile test passed against a deliberately unsorted implementation. A fixture that normalises its
+input can defeat the thing it was written to catch.
+
+### A render is the only witness some defects have, and that cuts both ways
+
+CELEBRATE-1's entry is about captures that are worthless (a flat grey frame passing as green).
+This is the converse. `HoldingBoard.SetLine` early-outs when the new text equals the last text,
+and the last text started as `""`. An empty row therefore **never got written**, so four labels
+sat on the wall showing the placeholder the `.tscn` authors so it is openable in the editor.
+
+Nothing in `tests/unit` could see it -- the model returns the right strings and the bug is in the
+pusher. **Nothing in the scene suite could either**, and that is the sharp half: the suite reads
+the board through `CurrentText`, which returns the same `_last*` fields the early-out compares,
+so both halves agreed with each other while disagreeing with the wall. The first capture showed
+it immediately. **When a readout's log line is built from the same cache as its own
+change-detection, the log cannot see a paint that never happened.**
+
+### Two suite-staging facts about the dressed search room and the two-player loop
+
+Both cost a run each and both generalise past this lane.
+
+- **`HideSeekLoop` needs EXACTLY two humans to Start**, not at least two. A capture script with
+  three windowed lenses produced `[round] refused: NeedTwoPlayers - TWO PLAYERS ARE NEEDED TO
+  START (phase=Holding humans=3)` and 72 seconds of frames that all read `HOLDING`. A third peer
+  is fine once the round is RUNNING -- `Run-ButtonsTest` phase 3 and this suite both rely on that
+  -- but it must arrive after the Start. The corollary bit too: a suite that gates its late
+  joiner on `Holding -> Hiding` while that joiner IS the second player is a deadlock, and it
+  fails with "the server never left Holding", which reads exactly like a broken round script.
+- **`--carry-walk-to` is ONE point walked in a STRAIGHT LINE, and the dressed search room has no
+  cross-aisle except at its ends** (bays span world x in [35.4, 44.6], walkways are 1.6 m).
+  `Gameplay.SpawnPositionFor` deals `SearchSpawn` markers by JOIN INDEX, so a suite's third bot
+  lands one walkway over from its first two. Measured: a courier sent from (38.5, 2.1) to a crate
+  at (36, 0) **stopped dead at (36.01, 1.45)** against `Aisle2_Bay0` and never grabbed anything;
+  the phase reported "the target was never delivered to the bin", which reads exactly like a bin
+  that does not work. **Walk a bot along its own walkway, never diagonally**, and choose which
+  prop it carries by where it spawns.
+
+### Derive an authored prop id, do not type it
+
+Three renumberings in two days (CARRY-1's four crates went 1000-1003 -> 1003-1006 -> 1014-1017)
+and `tests/_Common.ps1` now has `Get-AuthoredPropId -ServerLog <path> -PathSuffix
+"SearchRoom/Prop_0"`, reading `PropManager`'s own `[props] authored prop N <- <path>` line.
+Adoption is logged BEFORE `[server] listening`, so a suite that already waits for the listening
+line needs no second wait. `Run-PlaceTest` and `Run-ButtonsTest` use it; `Run-AuthoredPropTest`
+deliberately keeps its literals, because the block IS its subject and a version that derived them
+would pass whatever the world did.
+
+**A container name can only order things WITHIN one room.** SHELF-1's `Stock` works because it
+sorts after `Prop_` in the same room. Nothing in the holding room can sort after the search room,
+because the room name is a PREFIX of every path under it -- so a prop added to an
+alphabetically-earlier room renumbers every later room, always, and the only durable answer is
+for the suites to stop typing the number.

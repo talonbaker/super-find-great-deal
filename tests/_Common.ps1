@@ -239,3 +239,51 @@ function Exit-SuiteMutex($Handle) {
         try { Remove-Item -Path $script:SuiteLockFile -Force -ErrorAction SilentlyContinue } catch {}
     }
 }
+
+# --- Authored prop ids, DERIVED rather than typed (HOLD-1, 2026-09-19) -------------------------
+#
+# WHY THIS EXISTS. PropManager.AdoptAuthoredProps hands out ids from 1000 in ordinal NODE-PATH
+# sort order across the WHOLE world, so the id of any authored prop is a function of the NAME of
+# every other authored prop in the game. Adding a prop to a room that sorts earlier renumbers
+# every room after it, silently, with nothing in a diff to see. It has now happened three times
+# in two days: CARRY-1's four crates were 1000..1003, BTN-1's rack pushed them to 1003..1006, and
+# HOLD-1's practice corner pushed them to 1014..1017.
+#
+# BTN-1's handoff bumped the literals by hand and wrote down what the durable fix was: "The
+# durable fix is for a suite to DERIVE these from the server's own adoption log rather than type
+# them ... The next lane to move them should spend the twenty lines instead." This is those
+# lines. PropManager prints one line per adopted prop at world build:
+#
+#     [props] authored prop 1014 <- /root/Gameplay/World/SearchRoom/Prop_0 (Crate)
+#
+# NOTE THE PATH SHAPE. The seam scene is added to Gameplay under the node name "World", not
+# "Supermarket" -- a pattern anchored on the scene's own file name matches nothing.
+#
+# ORDERING: adoption happens at world build, which is BEFORE "[server] listening" is printed, so
+# a suite that has already waited for the listening line can read these immediately and does not
+# need a second wait.
+
+# One authored prop's id, by the TAIL of its node path (e.g. "SearchRoom/Prop_0"). Fails the
+# suite loudly rather than returning a default: a wrong id here produces a bot that grabs nothing
+# and a phase that reads like the feature under test is broken.
+function Get-AuthoredPropId([string]$ServerLog, [string]$PathSuffix) {
+    if (-not (Test-Path $ServerLog)) {
+        Write-Fail "Get-AuthoredPropId: $ServerLog does not exist yet - wait for the server's listening line first"
+    }
+    $escaped = [regex]::Escape($PathSuffix)
+    $hit = Select-String -Path $ServerLog -Pattern "authored prop (\d+) <- \S*$escaped \(" |
+        Select-Object -First 1
+    if ($null -eq $hit) {
+        Write-Fail ("Get-AuthoredPropId: no '[props] authored prop N <- .../$PathSuffix' line in " +
+                    "$ServerLog. Either the node was renamed or moved, or the world did not build.")
+    }
+    return [int]$hit.Matches[0].Groups[1].Value
+}
+
+# Every authored prop id in the world, as an ordered array. For a suite that wants the block
+# rather than one member.
+function Get-AuthoredPropIds([string]$ServerLog) {
+    if (-not (Test-Path $ServerLog)) { return @() }
+    return @(Select-String -Path $ServerLog -Pattern "authored prop (\d+) <- " |
+        ForEach-Object { [int]$_.Matches[0].Groups[1].Value })
+}

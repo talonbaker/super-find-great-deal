@@ -1,4 +1,4 @@
-[gd_scene load_steps=33 format=3]
+[gd_scene load_steps=41 format=3]
 
 [ext_resource type="Script" path="res://scripts/game/world/BurstDoor.cs" id="1_burstdoor"]
 
@@ -39,6 +39,10 @@
 ; The vestibule is sealed on its other three sides and has its own dimmer light, so a hider in
 ; the main room sees nothing of it even for the frames between the teleport and the burst.
 
+; BTN-1 (2026-09-19) — the END ROUND button, authored at the bottom of this file so this room's
+; packed-vs-live node count covers it.
+
+[ext_resource type="Script" path="res://scripts/game/round/RoundButton.cs" id="1_button"]
 [ext_resource type="PackedScene" path="res://scenes/game/world/supermarket/RoundClock.tscn" id="9_clock"]
 [ext_resource type="PackedScene" path="res://scenes/game/world/supermarket/SupplyCrate.tscn" id="10_crate"]
 [ext_resource type="PackedScene" path="res://scenes/game/world/supermarket/SortBin.tscn" id="11_bin"]
@@ -131,6 +135,52 @@ size = Vector3(1.56, 2.18, 0.14)
 ; be pushed into is a gap they can be stuck in.
 [sub_resource type="BoxShape3D" id="BoxShape3D_door_blocker"]
 size = Vector3(1.6, 2.2, 0.4)
+
+; --- BTN-1: the button's parts. Same recipe as the other two rooms' — a shared prefab would be
+; the obvious move and is the wrong one here: SupermarketWorldSelfTest compares each room's
+; PACKED node count against its LIVE one, and an instanced sub-scene contributes one node to the
+; packed side and all of its children to the live side. Authoring the plate in each room keeps
+; the check honest AND keeps the rule the check exists for — every part of a level is authored in
+; its own scene file, openable in the editor.
+
+[sub_resource type="BoxMesh" id="BoxMesh_btn"]
+size = Vector3(0.34, 0.34, 0.12)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_btn"]
+size = Vector3(0.34, 0.34, 0.12)
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_cap"]
+top_radius = 0.1
+bottom_radius = 0.1
+height = 0.06
+radial_segments = 24
+
+[sub_resource type="BoxMesh" id="BoxMesh_lamp"]
+size = Vector3(0.26, 0.05, 0.02)
+
+[sub_resource type="StandardMaterial3D" id="Mat_btn_base"]
+resource_name = "round button plate"
+albedo_color = Color(0.21, 0.22, 0.24, 1)
+roughness = 0.7
+metallic = 0.3
+
+[sub_resource type="StandardMaterial3D" id="Mat_btn_cap"]
+resource_local_to_scene = true
+resource_name = "round button cap"
+albedo_color = Color(0.85, 0.85, 0.83, 1)
+roughness = 0.45
+emission_enabled = true
+emission = Color(0.85, 0.85, 0.83, 1)
+emission_energy_multiplier = 0.2
+
+[sub_resource type="StandardMaterial3D" id="Mat_btn_lamp"]
+resource_local_to_scene = true
+resource_name = "round button lamp"
+albedo_color = Color(0.13, 0.14, 0.13, 1)
+roughness = 0.35
+emission_enabled = true
+emission = Color(0.13, 0.14, 0.13, 1)
+emission_energy_multiplier = 0.05
 
 [node name="TaskRoom" type="Node3D"]
 
@@ -353,6 +403,51 @@ shape = SubResource("BoxShape3D_bounds")
 
 [node name="RoundClock" parent="." instance=ExtResource("9_clock")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.35, -4.94)
+
+
+; BTN-1 (2026-09-19) — THE END ROUND BUTTON, on the +X wall beside the burst-door wall.
+;
+; BESIDE IT, NOT ON IT, and that is the packet's word taken literally for a reason. WallZPos is
+; the wall DOOR-1 replaces with the burst door; a control mounted on the thing that is about to
+; fly open would be a control that moves, and at the one moment both players are looking at it.
+; This sits on the +X wall a metre and a half short of that corner, where the seeker walking in
+; through the door and the hider standing at their tower can both reach it.
+;
+; MOUNTING: local +Z out of the wall — see HoldingRoom.tscn's StartButton header. This wall faces
+; −X, so the basis is a quarter turn the other way and its twelve floats are (0,0,−1, 0,1,0,
+; 1,0,0), written as basis ROWS (.claude/rules/godot-scenes.md). x = 4.94 is the wall's inner
+; face (5.0) minus the plate's half-depth.
+;
+; EITHER PLAYER MAY PRESS IT (IRoundFactSource.AnyPressedEnd, verbatim): the beat after the
+; startle belongs to both of them, and whoever has had enough of it ends it.
+
+[node name="EndButton" type="StaticBody3D" parent="." groups=["pressable", "round_button", "round_button_end"]]
+transform = Transform3D(0, 0, -1, 0, 1, 0, 1, 0, 0, 4.94, 1.15, 3.6)
+script = ExtResource("1_button")
+
+[node name="Collision" type="CollisionShape3D" parent="EndButton"]
+shape = SubResource("BoxShape3D_btn")
+
+[node name="Base" type="MeshInstance3D" parent="EndButton"]
+mesh = SubResource("BoxMesh_btn")
+surface_material_override/0 = SubResource("Mat_btn_base")
+
+[node name="Cap" type="MeshInstance3D" parent="EndButton"]
+transform = Transform3D(1, 0, 0, 0, 0, -1, 0, 1, 0, 0, 0.03, 0.07)
+mesh = SubResource("CylinderMesh_cap")
+material_override = SubResource("Mat_btn_cap")
+
+[node name="Lamp" type="MeshInstance3D" parent="EndButton"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.125, 0.07)
+mesh = SubResource("BoxMesh_lamp")
+material_override = SubResource("Mat_btn_lamp")
+
+[node name="Label" type="Label3D" parent="EndButton"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.26, 0.07)
+pixel_size = 0.0018
+text = "END ROUND"
+font_size = 96
+outline_size = 18
 
 ; TASK-1 (2026-09-19) -- THE SORTING JOB. Everything below is the hider job: a supply crate of
 ; eighteen sortables, three bins along the +Z wall, and one poll node.

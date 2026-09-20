@@ -1,0 +1,95 @@
+[gd_scene load_steps=8 format=3 uid="uid://shelfunit0sfgdmvp"]
+
+; SHELF-1 (2026-09-19) — ONE BAY OF SUPERMARKET SHELVING. Four of these end to end make one
+; aisle in SearchRoom.tscn; the end-cap that closes an aisle is EndCap.tscn, the same
+; construction 0.9 m shorter.
+;
+; 2.30 m long (x) x 1.80 m tall (y) x 0.50 m deep (z), origin at the FLOOR, centred on the bay.
+; Two uprights and three shelf boards, every one a BoxShape3D with a matching BoxMesh — the
+; packet's construction verbatim. No back panel, deliberately: a bay you can see and shove a can
+; THROUGH is what makes an aisle a place you root around in rather than a wall with tins on it,
+; and it is what lets a product knocked off one side land on the floor of the other.
+;
+; SHELF HEIGHTS 0.40 / 0.95 / 1.50 (board centres; boards are 0.05 thick, so the standing
+; surfaces are 0.425 / 0.975 / 1.525). The gaps are 0.50 m clear, which is the number the tallest
+; product has to live inside: a cereal box is 0.28 m tall and rides at 0.14 above the board.
+; 1.80 m is eye height plus a little, so the top of a bay HIDES the aisle behind it from a
+; standing player — the whole reason the room is worth searching.
+;
+; ONE GREY, AND IT IS NOT THE WALLS'. SearchRoom's walls are a cool green-grey (0.43, 0.50, 0.44);
+; this is a light neutral grey a clear step lighter and off the green axis, so four aisles read as
+; four aisles in a capture instead of dissolving into the room. Flat, unshaded-ish (roughness
+; 0.85, metallic 0), no texture and no emission: nothing in this room may glow except a product,
+; and nothing structural should compete with the one object the seeker is hunting.
+;
+; THIS PREFAB IS LEVEL GEOMETRY, SO IT IS LISTED IN SupermarketWorldSelfTest.SectionScenes. It
+; carries no script and builds nothing, which is exactly why the listing is cheap — but the list
+; is the only mechanism that notices a prefab at all (godot-scenes.md, CLOCK-1), so being
+; obviously safe today is not a reason to be absent from it.
+
+[sub_resource type="StandardMaterial3D" id="Mat_shelf"]
+resource_name = "shelving (light neutral grey)"
+albedo_color = Color(0.7, 0.71, 0.74, 1)
+roughness = 0.85
+metallic = 0.0
+
+[sub_resource type="BoxMesh" id="BoxMesh_upright"]
+size = Vector3(0.06, 1.8, 0.5)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_upright"]
+size = Vector3(0.06, 1.8, 0.5)
+
+[sub_resource type="BoxMesh" id="BoxMesh_board"]
+size = Vector3(2.3, 0.05, 0.5)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_board"]
+size = Vector3(2.3, 0.05, 0.5)
+
+[node name="ShelfUnit" type="StaticBody3D"]
+
+[node name="UprightNeg" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.12, 0.9, 0)
+shape = SubResource("BoxShape3D_upright")
+
+[node name="UprightPos" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.12, 0.9, 0)
+shape = SubResource("BoxShape3D_upright")
+
+[node name="Board0" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.4, 0)
+shape = SubResource("BoxShape3D_board")
+
+[node name="Board1" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.95, 0)
+shape = SubResource("BoxShape3D_board")
+
+[node name="Board2" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
+shape = SubResource("BoxShape3D_board")
+
+[node name="Visual" type="Node3D" parent="."]
+
+[node name="MeshUprightNeg" type="MeshInstance3D" parent="Visual"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.12, 0.9, 0)
+mesh = SubResource("BoxMesh_upright")
+surface_material_override/0 = SubResource("Mat_shelf")
+
+[node name="MeshUprightPos" type="MeshInstance3D" parent="Visual"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.12, 0.9, 0)
+mesh = SubResource("BoxMesh_upright")
+surface_material_override/0 = SubResource("Mat_shelf")
+
+[node name="MeshBoard0" type="MeshInstance3D" parent="Visual"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.4, 0)
+mesh = SubResource("BoxMesh_board")
+surface_material_override/0 = SubResource("Mat_shelf")
+
+[node name="MeshBoard1" type="MeshInstance3D" parent="Visual"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.95, 0)
+mesh = SubResource("BoxMesh_board")
+surface_material_override/0 = SubResource("Mat_shelf")
+
+[node name="MeshBoard2" type="MeshInstance3D" parent="Visual"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
+mesh = SubResource("BoxMesh_board")
+surface_material_override/0 = SubResource("Mat_shelf")

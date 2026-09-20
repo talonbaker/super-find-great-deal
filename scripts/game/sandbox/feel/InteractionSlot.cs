@@ -214,9 +214,45 @@ public partial class InteractionSlot : Node3D
 
 	public override void _ExitTree() => Registry.Remove(this);
 
+	/// <summary>The marker's node name. A LEVEL may author a child of this name and this class
+	/// will adopt it rather than building one — see <see cref="_Ready"/>.</summary>
+	public const string MarkerNodeName = "SlotMarker";
+
 	public override void _Ready()
 	{
 		if (!ShowMarker) { SetProcess(false); return; }
+
+		// A LEVEL MAY BRING ITS OWN MARKER, and if it has, this class MUST NOT build a second
+		// one (HOLD-1, 2026-09-19). SupermarketWorldSelfTest counts a room's PACKED nodes against
+		// its LIVE ones and fails on any difference, so a slot dropped into a level scene adds a
+		// node the .tscn does not declare and turns the suite red — measured here, exactly that,
+		// 87 packed / 88 live on HoldingRoom.tscn.
+		//
+		// ShowMarker = false is NOT a way out, and that is the finding worth keeping: the export
+		// was authored on an INLINE node (script set directly, not a nested PackedScene instance)
+		// and it still read back as its C# default. This project's Godot/Mono build drops an
+		// exported C# property set in a .tscn in BOTH shapes, not only the nested-instance one
+		// that PropManager.AuthoredKindOf, Carryable.LoadLiftM and RoundClock.Room recorded.
+		//
+		// So the level authors a child called SlotMarker and this adopts it: same flash, same
+		// state colours, no node created. The alternative would have been a fourth payment for
+		// the same trap.
+		var authored = GetNodeOrNull<MeshInstance3D>(MarkerNodeName);
+		if (authored != null)
+		{
+			_marker = authored;
+			_markerMat = authored.MaterialOverride as StandardMaterial3D;
+			if (_markerMat != null && !_markerMat.ResourceLocalToScene)
+			{
+				// Duplicated for RoundClock's reason: a shared material means the last slot to
+				// _Ready decides the colour of all of them, and these flash independently.
+				_markerMat = (StandardMaterial3D)_markerMat.Duplicate();
+				authored.MaterialOverride = _markerMat;
+			}
+			RefreshMarker();
+			SetProcess(false);
+			return;
+		}
 
 		// A THIN FLAT RING AT THE CATCH RADIUS. It was a filled disc first, and the first capture of
 		// the stage settled it: three translucent discs overlapping on a bench read as spilled

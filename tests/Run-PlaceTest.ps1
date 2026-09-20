@@ -9,7 +9,9 @@
 
     Runs one headless server in the real "supermarket" world with --spawn-room search, so every
     bot spawns in the SEARCH room, which is the only room with authored props in it (SearchRoom.tscn:
-    Prop_0..Prop_3, adopted as ids 1000..1003), an authored RoomBounds volume, and a freestanding
+    Prop_0..Prop_3, whose adopted ids are DERIVED from the server's own log at run time -- see
+    the $PropA..$PropD block below for why
+    those numbers moved), an authored RoomBounds volume, and a freestanding
     interior pillar. The pillar is there for exactly one reason: "inside a wall" needs a transform
     that is inside the room's BOUNDS and inside STATIC GEOMETRY at once, and every real wall is the
     boundary, so a crate pushed into one would fail the bounds test first and the overlap test
@@ -17,15 +19,15 @@
 
     Four bots, each grabbing its own prop so nothing contends:
 
-      - PlaceBotA  grabs 1000, carries it to (40, ·, 0), and PLACES it at a scripted transform
+      - PlaceBotA  grabs 1003, carries it to (40, ·, 0), and PLACES it at a scripted transform
                    0.2 m further on, at 35 degrees of yaw. The legal case.
-      - PlaceBotB  grabs 1003 and stands still, then asks to place it 5 m away. The beyond-reach
+      - PlaceBotB  grabs 1006 and stands still, then asks to place it 5 m away. The beyond-reach
                    case. B is ALSO the independent witness to A's placement — the assertion that
                    matters is made on B's log, not on A's, because a holder agreeing with itself
                    about where it put something proves nothing about replication.
-      - PlaceBotC  grabs 1001, walks to the pillar, and asks to place INSIDE it. Refused
+      - PlaceBotC  grabs 1004, walks to the pillar, and asks to place INSIDE it. Refused
                    DoesNotFitThere (4), prop still held.
-      - PlaceBotD  grabs 1002, walks to the +X wall, and asks to place THROUGH it, at a transform
+      - PlaceBotD  grabs 1005, walks to the +X wall, and asks to place THROUGH it, at a transform
                    outside the room's bounds volume. Refused OutsideRoom (5), prop still held.
 
     Every bot logs one JSONL sample per tick (BotHarness), now including each prop's ORIENTATION
@@ -34,11 +36,11 @@
 
     Asserted:
 
-      1. Placed where asked, as seen by someone else - in bot B's LAST sample, prop 1000 is
+      1. Placed where asked, as seen by someone else - in bot B's LAST sample, prop 1003 is
          unheld and sits within 0.05 m and 5 degrees of A's intended transform.
-      2. Beyond reach is refused    - B's newest refusal is TooFarToPlace (3) and B still holds 1003.
-      3. Inside geometry is refused - C's newest refusal is DoesNotFitThere (4) and C still holds 1001.
-      4. Outside the room is refused- D's newest refusal is OutsideRoom (5) and D still holds 1002.
+      2. Beyond reach is refused    - B's newest refusal is TooFarToPlace (3) and B still holds 1006.
+      3. Inside geometry is refused - C's newest refusal is DoesNotFitThere (4) and C still holds 1004.
+      4. Outside the room is refused- D's newest refusal is OutsideRoom (5) and D still holds 1005.
 
     Assertions 2-4 check the REASON, not merely "nothing happened": a refusal for the wrong reason
     and a packet that never arrived both look like "the prop is still held", and the whole point of
@@ -66,10 +68,32 @@ $ErrorActionPreference = "Stop"
 # --- the world, in world space -----------------------------------------------------------------
 # SearchRoom.tscn is instanced at x = +40 by Supermarket.tscn, so every coordinate below is the
 # room's own local value plus 40. Interior: x in [33, 47], z in [-5, 5], floor top y = 0.
-$PropA = 1000   # Prop_0, world (36, 0.22, 0)
-$PropB = 1003   # Prop_3, world (38, 0.22, 0)
-$PropC = 1001   # Prop_1, world (36, 0.22, 2)
-$PropD = 1002   # Prop_2, world (36, 0.22, -2)
+# THE IDS MOVED, AND THEY WILL MOVE AGAIN (BTN-1, 2026-09-19). PropManager.AdoptAuthoredProps
+# numbers authored props by sorting on NODE PATH across the whole world, so adding props to ANY
+# room renumbers every room after it alphabetically. BTN-1 put three objects on a rack in
+# HoldingRoom.tscn; "HoldingRoom/..." sorts before "SearchRoom/...", so those three took
+# 1000..1002 and this room's four moved up by three.
+#
+# HOLD-1 (2026-09-19) merged BTN-1 and SHELF-1 into one tree and RE-DERIVED these four off the
+# server's own adoption log rather than trusting either branch's copy. They did not move a second
+# time, and the reason is worth keeping: SHELF-1's hundred-and-twenty-six products live under a
+# container node named Stock/, and "S" sorts after "P", so they land ABOVE Prop_0..3 rather than
+# under them. 1003..1006 is the value on the merged tree, verified against
+# "[props] authored prop 1003 <- /root/Gameplay/World/SearchRoom/Prop_0 (Crate)".
+#
+# The durable fix is for a suite to DERIVE these from the server's own adoption log rather than
+# type them -- the server now prints one "[props] authored prop <id> <- <path>" line per prop at
+# world build for exactly that. Done here as a constant bump rather than a rewrite because this
+# is another lane's suite and the four values are the whole dependency; the next lane to move
+# them should spend the twenty lines instead.
+# DERIVED AT RUN TIME, NOT TYPED. Filled in from the server's own adoption log the moment it
+# reports listening -- see Get-AuthoredPropId in _Common.ps1 for the whole argument. The NODE
+# PATHS are the contract now; the numbers are whatever the world happens to hand out today.
+$PropAPath = "SearchRoom/Prop_0"   # world (36, 0.22, 0)
+$PropBPath = "SearchRoom/Prop_3"   # world (38, 0.22, 0)
+$PropCPath = "SearchRoom/Prop_1"   # world (36, 0.22, 2)
+$PropDPath = "SearchRoom/Prop_2"   # world (36, 0.22, -2)
+$PropA = -1; $PropB = -1; $PropC = -1; $PropD = -1
 
 # A's intended pose. y = 0.225 is the crate's half-height plus 5 mm, i.e. resting on the floor
 # rather than hovering: the assertion is "within 0.05 m of where it was asked to go", so a
@@ -100,7 +124,25 @@ try {
     }
     Write-Host "        server up (pid $($server.Id))"
 
+    $PropA = Get-AuthoredPropId $serverOut $PropAPath
+    $PropB = Get-AuthoredPropId $serverOut $PropBPath
+    $PropC = Get-AuthoredPropId $serverOut $PropCPath
+    $PropD = Get-AuthoredPropId $serverOut $PropDPath
+    Write-Host "        authored prop ids this run: A=$PropA B=$PropB C=$PropC D=$PropD (derived from the server's adoption log)"
+
     Write-Host "[2/3] launching four scripted place bots..." -ForegroundColor Cyan
+
+    # EACH BOT NAMES ITS PROP (--carry-target-prop), ADDED BY SHELF-1 AND NOT OPTIONAL ANY MORE.
+    # This suite used to say "walk to (36, 0.22, -2) and press E", and in a room containing four
+    # crates that was the same instruction as "pick up crate 1002". The search room now authors
+    # 130 props: on the first run against the dressed room, bot D pressed E at its 1.2 m arrive
+    # radius and came away holding 1013, a cereal box on the next shelf -- correctly, because a
+    # crate at y = 0.22 is 1.22 m from an avatar standing 1.2 m short and a box at y = 0.565 on
+    # the aisle 0.94 m away is 1.02 m. Nearest-carryable is the right rule for a player and it is
+    # the whole texture of a stocked aisle; it is simply no longer a way for a suite to name an
+    # object. The flag already existed for CARRY-1's version of this lesson ("walk to the ball",
+    # not "walk to (x, z)") and SHELF-1 extended it to the grab. See
+    # SandboxAvatar.ScriptedGrabPropId -- it narrows the choice, never widens the reach.
 
     # Bots connect in order, and the server hands out search-room markers 0..3 by join order, so
     # each of the four starts at its own marker. Two bots on one marker spawn inside each other,
@@ -113,6 +155,7 @@ try {
     $botA = Start-Godot @("--bot", "--address", "127.0.0.1:$Port", "--name", "PlaceBotA",
         "--log", $aLog, "--duration", $DurationSec, "--world", "supermarket",
         "--carry-script", "36,0.22,0,1.0,-1", "--carry-grab-retry", "0.6",
+        "--carry-target-prop", $PropA,
         "--carry-walk-to", "40,0",
         "--carry-place", "$PlaceX,$PlaceY,$PlaceZ,$PlaceYawDeg,7") "placeA"
     $procs += $botA
@@ -125,6 +168,7 @@ try {
     $botB = Start-Godot @("--bot", "--address", "127.0.0.1:$Port", "--name", "PlaceBotB",
         "--log", $bLog, "--duration", $DurationSec, "--world", "supermarket",
         "--carry-script", "38,0.22,0,1.0,-1", "--carry-grab-retry", "0.6",
+        "--carry-target-prop", $PropB,
         "--carry-place", "45,1,0,0,7") "placeB"
     $procs += $botB
     Start-Sleep -Milliseconds 400
@@ -136,6 +180,7 @@ try {
     $botC = Start-Godot @("--bot", "--address", "127.0.0.1:$Port", "--name", "PlaceBotC",
         "--log", $cLog, "--duration", $DurationSec, "--world", "supermarket",
         "--carry-script", "36,0.22,2,1.0,-1", "--carry-grab-retry", "0.6",
+        "--carry-target-prop", $PropC,
         "--carry-walk-to", "46,2.5",
         "--carry-place", "46,1,2.5,0,7") "placeC"
     $procs += $botC
@@ -148,6 +193,7 @@ try {
     $botD = Start-Godot @("--bot", "--address", "127.0.0.1:$Port", "--name", "PlaceBotD",
         "--log", $dLog, "--duration", $DurationSec, "--world", "supermarket",
         "--carry-script", "36,0.22,-2,1.0,-1", "--carry-grab-retry", "0.6",
+        "--carry-target-prop", $PropD,
         "--carry-walk-to", "47,-3",
         "--carry-place", "47.35,1,-3,0,7") "placeD"
     $procs += $botD

@@ -78,6 +78,23 @@ public sealed partial class SupermarketWorldSelfTest : Node3D
     /// design — that is the documented exception <see cref="CountNodes"/> exists for, and
     /// listing it would assert the opposite of what CARRY-1 decided.</para>
     ///
+    /// <para><b>SHELF-1 (2026-09-19) adds the shelving.</b> <c>ShelfUnit.tscn</c> and
+    /// <c>EndCap.tscn</c> are instanced eighteen times between them into the search room and are
+    /// unambiguously LEVEL geometry — static frames a level author places — so they belong here
+    /// by CLOCK-1's rule. Neither carries a script today, which is why both are trivially equal;
+    /// that is not a reason to leave them out, because the list is the ONLY mechanism that
+    /// notices a prefab at all, and "it has no script yet" is a fact about today. Proved the
+    /// entry works rather than assumed it: a temporary <c>AddChild(new Node3D())</c> planted in
+    /// a script attached to <c>ShelfUnit.tscn</c>'s root left all four pre-existing rows green
+    /// and turned <c>ShelfUnit.tscn</c> red at <c>12 packed but 13 live</c> — the same plant,
+    /// and the same result, CLOCK-1 measured on <c>RoundClock</c>.</para>
+    ///
+    /// <para><c>FloorBin.tscn</c> and the three <c>Deal*.tscn</c> near-miss prefabs are
+    /// deliberately NOT here, for exactly <c>Crate.tscn</c>'s reason: they are
+    /// <see cref="MpFoundation.Game.Sandbox.Carryable"/>s, and a <c>Carryable</c> builds its
+    /// outline shell and blob shadow at runtime by design. A bin IS floor furniture to look at,
+    /// but it is a gameplay prop to the engine, and this list is about what builds itself.</para>
+    ///
     /// <para><b>The same exclusion covers TASK-1's three sortable prefabs</b>
     /// (<c>SortCube.tscn</c>, <c>SortBall.tscn</c>, <c>SortCan.tscn</c>), and it is worth saying
     /// out loud because that packet asked for them. Each is a <c>Carryable</c> and therefore
@@ -96,6 +113,15 @@ public sealed partial class SupermarketWorldSelfTest : Node3D
         "res://scenes/game/world/supermarket/SearchRoom.tscn",
         "res://scenes/game/world/supermarket/TaskRoom.tscn",
         "res://scenes/game/world/supermarket/RoundClock.tscn",
+        "res://scenes/game/world/supermarket/ShelfUnit.tscn",
+        "res://scenes/game/world/supermarket/EndCap.tscn",
+        // HOLD-1 (2026-09-19). Listed for CLOCK-1's measured reason, which is the whole point of
+        // this being a LIST: CountNodes stops at an instance boundary, so a prefab that is not
+        // named here is invisible from its room's count and a child it builds in _Ready is never
+        // seen by anything. There is no mechanism that notices a prefab was forgotten.
+        "res://scenes/game/world/supermarket/HoldingBoard.tscn",
+        // TASK-1 (2026-09-19), arriving through INT-1's merge. Both are level furniture with no
+        // Carryable anywhere in them, which is the whole test for membership here.
         "res://scenes/game/world/supermarket/SortBin.tscn",
         "res://scenes/game/world/supermarket/SupplyCrate.tscn",
     };
