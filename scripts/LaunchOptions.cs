@@ -723,6 +723,15 @@ public sealed class LaunchOptions
     /// of the thing it measures.</para></summary>
     public double ReachCostSec { get; private set; }
 
+    /// <summary><c>--cost-shove-every &lt;seconds&gt;</c>: SHELF-1 (2026-09-19). Overrides
+    /// <c>ReachCostProbe.ShoveEverySec</c> (default 3). <b>Zero or negative means never shove</b>,
+    /// which is the whole reason this exists: the probe is the only instrument in the repo that
+    /// measures server physics frame time, and SHELF-1's packet asks for that number BOTH under
+    /// a shove AND at rest. Without this flag "at rest" is unmeasurable — the probe would knock
+    /// every prop in the room loose three seconds into the window it is sampling. Ignored
+    /// unless <c>--reach-cost</c> attached the probe at all.</summary>
+    public double CostShoveEverySec { get; private set; } = 3.0;
+
     // --- end REACH-1 ------------------------------------------------------------------------------
 
     // --- CLOCK-1 (2026-09-19) ---------------------------------------------------------------------
@@ -1208,6 +1217,15 @@ public sealed class LaunchOptions
                         options.ReachCostSec = reachCost;
                     else
                         GD.PushWarning("[reach] --reach-cost: not a positive number of seconds; ignored");
+                    break;
+                case "--cost-shove-every":
+                    // NOT gated on > 0: zero and negative are the MEANINGFUL values here (never
+                    // shove — the at-rest measurement). Only an unparseable argument is ignored.
+                    if (double.TryParse(Next(args, ref i).Trim(), NumberStyles.Float,
+                            CultureInfo.InvariantCulture, out double shoveEvery))
+                        options.CostShoveEverySec = shoveEvery;
+                    else
+                        GD.PushWarning("[reach] --cost-shove-every: not a number of seconds; ignored");
                     break;
                 case "--build-ui-theme":
                     options.BuildUiTheme = true;

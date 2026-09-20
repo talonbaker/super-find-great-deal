@@ -846,9 +846,20 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
     /// every peer instanced the exact same .tscn. On the server this ALSO seeds the authoritative
     /// PropRegistry at that same id + kind + current (authored) transform, so grab/drop/throw
     /// arbitration and the late-join dump work for authored props exactly like runtime-spawned
-    /// ones. A no-op for worlds with no authored props ("open"/"propsync" today).</summary>
+    /// ones. A no-op for worlds with no authored props ("open"/"propsync" today).
+    ///
+    /// <para><b>It prints what it did, and since SHELF-1 (2026-09-19) how long it took</b> —
+    /// <c>[props] adopted N authored prop(s) in T ms (ids A..B)</c>, on every peer including
+    /// dedicated servers and headless bots. Two reasons, neither of them logging for its own
+    /// sake. The search room went from four authored props to a hundred and thirty, and "what
+    /// does adoption cost" is a question with an answer nobody had measured; and the id RANGE on
+    /// the line is what <c>tests/Run-AuthoredPropTest.ps1</c> reads to prove a server and a
+    /// late-joining client agree about the block before either of them has moved anything. The
+    /// walk is O(nodes) and the sort O(n log n), both once per world build, so the stopwatch is
+    /// not itself a cost worth gating behind a flag.</para></summary>
     public void AdoptAuthoredProps(Node worldRoot)
     {
+        long startedTicks = System.Diagnostics.Stopwatch.GetTimestamp();
         var found = new System.Collections.Generic.List<NetworkedProp>();
         CollectNetworkedProps(worldRoot, found);
         found.Sort((a, b) => string.CompareOrdinal(a.GetPath().ToString(), b.GetPath().ToString()));
@@ -872,7 +883,18 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
                     $"authored prop id {id} already occupied — id-space collision (see RISK-AUDIT-2026-07-12.md 5.1d)");
             }
         }
+
+        double ms = (System.Diagnostics.Stopwatch.GetTimestamp() - startedTicks)
+                    * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+        GD.Print($"{AdoptLogPrefix} adopted {found.Count} authored prop(s) in {ms:0.00} ms"
+                 + (found.Count > 0
+                     ? $" (ids {AuthoredIdBase}..{AuthoredIdBase + found.Count - 1})"
+                     : " (no ids)"));
     }
+
+    /// <summary>The prefix on the adoption line, so a suite greps for this rather than for a
+    /// sentence somebody may reword.</summary>
+    public const string AdoptLogPrefix = "[props]";
 
     /// <summary>An authored prop's shape, read from its physical collider rather than
     /// <see cref="Carryable.Kind"/> — confirmed by direct instrumentation that Godot never applies

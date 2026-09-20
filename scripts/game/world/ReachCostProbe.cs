@@ -54,6 +54,13 @@ public sealed partial class ReachCostProbe : Node
     /// so the audit runs on all 150 inside one or two physics ticks. The two bots are still in
     /// the room, walking, so the avatar physics and the snapshot traffic are real. Read the
     /// number as an upper bound.</para>
+    ///
+    /// <para><b>Zero or negative means NEVER shove</b> (SHELF-1, 2026-09-19, via
+    /// <c>--cost-shove-every</c>). That turns this probe into the AT-REST instrument as well as
+    /// the under-load one: same sampler, same warm-up, same percentile rule, one variable
+    /// changed — which is the only way the two numbers in SHELF-1's handoff are comparable to
+    /// each other. A room full of sleeping rigid bodies is a real measurement and it is the one
+    /// a player spends most of a round inside.</para>
     /// </summary>
     public double ShoveEverySec { get; set; } = 3.0;
 
@@ -76,7 +83,10 @@ public sealed partial class ReachCostProbe : Node
 
     public override void _Ready() =>
         GD.Print($"{Prefix} measuring for {DurationSec:0.0} s "
-                 + $"(after a {WarmupSec:0.0} s warm-up)");
+                 + $"(after a {WarmupSec:0.0} s warm-up), "
+                 + (ShoveEverySec > 0.0
+                     ? $"shoving every {ShoveEverySec:0.0} s"
+                     : "AT REST (no shove)"));
 
     public override void _PhysicsProcess(double delta)
     {
@@ -103,11 +113,14 @@ public sealed partial class ReachCostProbe : Node
         if (count > _peakLoose)
             _peakLoose = count;
 
-        _sinceShove += delta;
-        if (_sinceShove >= ShoveEverySec)
+        if (ShoveEverySec > 0.0)
         {
-            _sinceShove = 0.0;
-            Shove();
+            _sinceShove += delta;
+            if (_sinceShove >= ShoveEverySec)
+            {
+                _sinceShove = 0.0;
+                Shove();
+            }
         }
 
         if (_measuredFor >= DurationSec)
@@ -151,7 +164,9 @@ public sealed partial class ReachCostProbe : Node
         double peak = _frameMs.Count > 0 ? _frameMs[^1] : 0.0;
 
         GD.Print($"{Prefix} props in world: {_peakLoose}, shove waves: {_shoves} "
-                 + $"(every {ShoveEverySec:0.0} s at {ShoveSpeed:0.0} m/s)");
+                 + (ShoveEverySec > 0.0
+                     ? $"(every {ShoveEverySec:0.0} s at {ShoveSpeed:0.0} m/s)"
+                     : "(at rest — shoving disabled by --cost-shove-every)"));
         GD.Print($"{Prefix} rest audits: {audits} in {secs:0.00} s = {audits / secs:0.0}/s "
                  + $"({corrections} correction(s))");
         GD.Print($"{Prefix} integrity queries: {queries} in {secs:0.00} s = {queries / secs:0.0}/s");

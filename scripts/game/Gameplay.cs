@@ -354,6 +354,9 @@ public partial class Gameplay : Node3D
                     Name = "ReachCostProbe",
                     Props = _propManager,
                     DurationSec = net.Options.ReachCostSec,
+                    // SHELF-1: <= 0 means never shove, which is how the at-rest frame time is
+                    // measured at all. See LaunchOptions.CostShoveEverySec.
+                    ShoveEverySec = net.Options.CostShoveEverySec,
                 });
             }
         }
