@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
 using MpFoundation.Game.Round;
+using MpFoundation.Game.Sandbox;
 using Xunit;
 
 namespace SailNet.Tests;
@@ -572,6 +573,125 @@ public class SortRuleTests
             HideSeekText.StripLine(v, 11, null, HideSeekTuning.Current));
         Assert.Equal("SEEKING · 1:40 · YOU SEEK · ROUND 1",
             HideSeekText.StripLine(v, 22, null, HideSeekTuning.Current));
+    }
+
+    // ==========================================================================================
+    // The two new Sfx members
+    // ==========================================================================================
+
+    public static IEnumerable<object[]> NewSfx() => new[]
+    {
+        new object[] { Sfx.SortGood },
+        new object[] { Sfx.SortBad },
+    };
+
+    private static float[] Pcm(Sfx kind) => kind switch
+    {
+        Sfx.SortGood => SfxLab.SortGoodPcm(),
+        Sfx.SortBad => SfxLab.SortBadPcm(),
+        _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+    };
+
+    [Theory]
+    [MemberData(nameof(NewSfx))]
+    public void EveryNewRecipe_IsFinite(Sfx kind) =>
+        Assert.All(Pcm(kind), s => Assert.True(float.IsFinite(s),
+            $"{kind} rendered a non-finite sample"));
+
+    [Theory]
+    [MemberData(nameof(NewSfx))]
+    public void EveryNewRecipe_IsAudible(Sfx kind)
+    {
+        float[] pcm = Pcm(kind);
+        Assert.True(pcm.Length > 0, $"{kind} rendered nothing at all");
+        float peak = pcm.Max(MathF.Abs);
+        Assert.True(peak > 0.05f, $"{kind} peaks at {peak:0.####} — that is silence, not a sound");
+        double rms = Math.Sqrt(pcm.Select(s => (double)s * s).Sum() / pcm.Length);
+        Assert.True(rms > 0.01, $"{kind} has RMS {rms:0.####} — a click, not the sound described");
+    }
+
+    /// <summary><c>SfxLab.Render</c> CLAMPS, so a recipe that overshot flattens rather than blows
+    /// up — audible as a crunch and invisible to every other check here. SFX-1's own first run
+    /// found three recipes hard against the rail this way.</summary>
+    [Theory]
+    [MemberData(nameof(NewSfx))]
+    public void EveryNewRecipe_StaysUnderZeroDbfs(Sfx kind)
+    {
+        float peak = Pcm(kind).Max(MathF.Abs);
+        Assert.True(peak < 1.0f, $"{kind} peaks at {peak:0.####} — the clamp is flattening it");
+    }
+
+    [Theory]
+    [MemberData(nameof(NewSfx))]
+    public void EveryNewRecipe_StartsAndEndsNearSilence(Sfx kind)
+    {
+        float[] pcm = Pcm(kind);
+        Assert.True(MathF.Abs(pcm[0]) < 0.05f, $"{kind} starts at {pcm[0]:0.###} — that clicks");
+        Assert.True(MathF.Abs(pcm[^1]) < 0.05f, $"{kind} ends at {pcm[^1]:0.###} — that clicks");
+    }
+
+    /// <summary>Both fire per OBJECT rather than per round, so they have to be short: a hider
+    /// sorting well hears the first of these every few seconds for three minutes.</summary>
+    [Fact]
+    public void BothCuesAreShorterThanTheRoundCuesTheySitBeside()
+    {
+        double good = SfxLab.SortGoodPcm().Length / (double)SfxLab.SampleRateHz;
+        double bad = SfxLab.SortBadPcm().Length / (double)SfxLab.SampleRateHz;
+        double note = SfxLab.NotePcm().Length / (double)SfxLab.SampleRateHz;
+        double buzz = SfxLab.RoundBuzzPcm().Length / (double)SfxLab.SampleRateHz;
+        Assert.True(good < note, $"SortGood {good:0.###}s is not shorter than Note {note:0.###}s");
+        Assert.True(bad < buzz, $"SortBad {bad:0.###}s is not shorter than RoundBuzz {buzz:0.###}s");
+    }
+
+    /// <summary>The two are a PAIR and must be distinguishable by ear, not by attention. The
+    /// cheapest measurable half of that is the spectral centre: the good tick lives around a
+    /// kilohertz and the correction around two hundred hertz, so a player facing away still
+    /// knows which one fired.</summary>
+    [Fact]
+    public void TheGoodTickIsBrightAndTheCorrectionIsDull()
+    {
+        Assert.True(ZeroCrossingRate(SfxLab.SortGoodPcm())
+                    > 3.0 * ZeroCrossingRate(SfxLab.SortBadPcm()),
+            "SortGood and SortBad are too close in pitch to tell apart without looking");
+    }
+
+    private static double ZeroCrossingRate(float[] pcm)
+    {
+        int crossings = 0;
+        for (int i = 1; i < pcm.Length; i++)
+            if ((pcm[i - 1] < 0f) != (pcm[i] < 0f))
+                crossings++;
+        return crossings / (pcm.Length / (double)SfxLab.SampleRateHz);
+    }
+
+    /// <summary>
+    /// <b>The ordinals, pinned, and the reserved gap left alone.</b> <c>EventResponse.Sound</c>
+    /// serialises this enum as an int in every <c>prop_presentation.tres</c>, so a member that
+    /// moved would silently re-point a profile at a different sound.
+    ///
+    /// <para>43–45 are BTN-1's reservation: it is branched off REACH-1's tip and cannot see this
+    /// file, so TASK-1 starts at 46 and both merges are appends. That is the same arrangement
+    /// that made DOOR-1's, SFX-1's and CLOCK-1's three blind enum edits merge for free at
+    /// INT-0B, and this is the test that keeps the gap from being "tidied".</para>
+    /// </summary>
+    [Fact]
+    public void TheNewOrdinalsStartAt46_AndBtn1sGapIsLeftAlone()
+    {
+        Assert.Equal(46, (int)Sfx.SortGood);
+        Assert.Equal(47, (int)Sfx.SortBad);
+
+        int[] taken = Enum.GetValues<Sfx>().Select(v => (int)v).ToArray();
+        Assert.DoesNotContain(43, taken);
+        Assert.DoesNotContain(44, taken);
+        Assert.DoesNotContain(45, taken);
+
+        // One list, every ordinal once -- the assertion INT-0B added after the three-lane merge.
+        Assert.Equal(taken.Length, taken.Distinct().Count());
+
+        // And the round's own cues did not move underneath this append.
+        Assert.Equal(38, (int)Sfx.Note);
+        Assert.Equal(39, (int)Sfx.RoundBuzz);
+        Assert.Equal(42, (int)Sfx.ResetWhoosh);
     }
 
     /// <summary>A match sentence still wins outright. MATCH-1's line already carries "3 sorted"

@@ -1,0 +1,49 @@
+[gd_scene load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://scripts/game/sandbox/Carryable.cs" id="1_carryable"]
+[ext_resource type="Script" path="res://scripts/game/sandbox/feel/Interactable.cs" id="2_interactable"]
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_sortcan"]
+top_radius = 0.05
+bottom_radius = 0.05
+height = 0.14
+
+[sub_resource type="CylinderShape3D" id="CylinderShape3D_sortcan"]
+height = 0.14
+radius = 0.05
+
+; No colour here. See SortCube.tscn's note. Metallic is left at zero DELIBERATELY, unlike
+; Can.tscn's 0.85: a metallic surface takes most of its colour from what it reflects, and the one
+; thing a sortable may never be is ambiguous about which colour it is.
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_sortcan"]
+resource_local_to_scene = true
+roughness = 0.45
+metallic = 0.0
+
+; TASK-1 (2026-09-19). A sortable CAN: 0.05 m radius, 0.14 m tall, 0.4 kg.
+;
+; Structure, the colour note and the render-layer-19 note are SortCube.tscn's; read them there.
+;
+; A CYLINDER IS THE ONE COLLIDER SHAPE NOTHING ELSE IN THIS GAME USES, so
+; Carryable.ShapeFromCollider resolves it to Shape.Can with no threshold and no ambiguity -- wire
+; kind Can, material Tin, SortShape.Can. Damped for SortBall.tscn's reason: a cylinder knocked on
+; its side rolls, and a sortable that rolls out of the bin it was put in is a sort the player made
+; and did not get.
+[node name="SortCan" type="RigidBody3D"]
+mass = 0.4
+linear_damp = 1.5
+angular_damp = 2.5
+script = ExtResource("1_carryable")
+kind = 2
+
+[node name="Visual" type="Node3D" parent="."]
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Visual"]
+mesh = SubResource("CylinderMesh_sortcan")
+material_override = SubResource("StandardMaterial3D_sortcan")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("CylinderShape3D_sortcan")
+
+[node name="Interactable" type="Node" parent="."]
+script = ExtResource("2_interactable")

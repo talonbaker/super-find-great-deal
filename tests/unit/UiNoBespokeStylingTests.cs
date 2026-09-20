@@ -188,6 +188,12 @@ public class UiNoBespokeStylingTests
         ("scripts/game/round/RoundClock.cs",
             "CLOCK-1: a diegetic readout. Its panel and digits take UiTokens so the wall and the "
             + "HUD strip cannot disagree about what dark is — the same substrate, on a mesh."),
+        ("scripts/game/world/SortBin.cs",
+            "TASK-1: the other diegetic readout. Its plate's NEUTRAL state and its label's ink "
+            + "come from UiTokens for RoundClock's reason. Its lit state deliberately does not: "
+            + "the three sort colours are the RULE (SortPalette), not chrome, and a red that "
+            + "drifted with the palette would be an unwinnable round rather than a styling "
+            + "regression. SortPalette is a separate file so that exemption is structural."),
     };
 
     /// <summary>The sweep reaches the world chrome, not only <c>scripts/ui/</c>. An absence check

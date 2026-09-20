@@ -10,9 +10,10 @@ public enum Sfx
     // Ordinals are pinned: EventResponse.Sound serializes this enum as an int in every
     // presentation .tres, so a member removed from the middle (13/14 and 18-21 belonged to
     // since-removed items) leaves a gap
-    // rather than shifting its neighbours. Append at 43 (INT-0B, 2026-09-19: wave 2 filled
+    // rather than shifting its neighbours. Append at 48 (TASK-1, 2026-09-19: wave 2 filled
     // 24 (DOOR-1), 25-35 (SFX-1) and 36-42 (CLOCK-1) in one list, every name once, every
-    // ordinal exactly as its lane took it).
+    // ordinal exactly as its lane took it; 43-45 are BTN-1's reservation and TASK-1 took
+    // 46-47).
     None = 0,
     Jump = 1,
     Land = 2,
@@ -197,6 +198,33 @@ public enum Sfx
     /// orchestrator may collapse this onto SFX-1's <c>Whoosh</c> at merge; until then this is the
     /// reset's own cue and nothing else reads it.</para></summary>
     ResetWhoosh = 42,
+
+    // --- The sorting job (TASK-1, 2026-09-19) -------------------------------------------------
+    //
+    // 43-45 reserved: BTN-1 (it is branched off REACH-1's tip and cannot see this file's edit;
+    // leaving the gap makes both merges appends rather than a renumbering, which is exactly what
+    // made DOOR-1/SFX-1/CLOCK-1 merge for free at INT-0B).
+    //
+    // TWO NEW MEMBERS RATHER THAN REUSING Note/RoundBuzz, and the reason is frequency. Note (38)
+    // is CONFIRM -- it fires once a round, at the moment the hider says they are done -- and
+    // RoundBuzz (39) is the hide buzzer, also once a round. These two fire up to eighteen times
+    // in one Seeking phase. Spending a round-structure cue on a per-object receipt would teach
+    // the player that the sound means nothing, and would then make the real Confirm note
+    // unreadable when it finally came. They are also deliberately SHORTER than both (0.11 s and
+    // 0.16 s against 0.2 s and 0.5 s): a sound that fires every few seconds has to be over
+    // before the player has finished turning round.
+
+    /// <summary><b>A correct sort</b> (TASK-1): two quick rising partials, ~0.11 s, positional
+    /// from the bin that took it. A receipt, not a fanfare -- see
+    /// <see cref="SfxLab.SortGoodPcm"/>.</summary>
+    SortGood = 46,
+
+    /// <summary><b>The wrong bin</b> (TASK-1): a short low double-pulse, ~0.16 s, positional from
+    /// the bin that refused it. It costs the player nothing but the time, so it is a correction
+    /// rather than a punishment -- quieter and lower than
+    /// <see cref="RoundBuzz"/>, and over before the hand has come back.
+    /// See <see cref="SfxLab.SortBadPcm"/>.</summary>
+    SortBad = 47,
 }
 
 /// <summary>
@@ -798,6 +826,9 @@ public static class SfxLab
             Sfx.BuzzShort => BuzzShortPcm(),
             Sfx.BuzzDouble => BuzzDoublePcm(),
             Sfx.ResetWhoosh => ResetWhooshPcm(),
+            // The sorting job (TASK-1).
+            Sfx.SortGood => SortGoodPcm(),
+            Sfx.SortBad => SortBadPcm(),
             _ => Sweep(0.05f, 400f, 400f),
         };
     }
@@ -1597,6 +1628,100 @@ public static class SfxLab
             float env = Mathf.Sin(Mathf.Pi * u);
             return band * env * ResetWhooshGain;
         });
+    }
+
+    // --- The sorting job (TASK-1, 2026-09-19) ---------------------------------------------------
+    //
+    // Two recipes, both deliberately SHORT, because both fire per object rather than per round:
+    // a hider who sorts well hears SortGood every three or four seconds for three minutes. Every
+    // number below is a named constant; Talon picked none of them and retuning is his.
+    //
+    // They are a PAIR and are built to be told apart with the ears rather than with attention:
+    // the good one rises and the bad one falls, the good one is bright (two partials near 1 kHz)
+    // and the bad one is dull (one partial near 200 Hz), and the bad one is the only sound in the
+    // task room that repeats itself. Any ONE of those three differences would do it; all three
+    // together mean a player facing away, mid-turn, with a can in their hands still knows.
+
+    /// <summary>The correct sort's length. Over before the player has finished turning round.</summary>
+    private const float SortGoodSeconds = 0.11f;
+
+    /// <summary>The two notes it steps between, in Hz. A rising minor third (880 -> 1046.5,
+    /// A5 -> C6): a step rather than a glide, because a glide this short reads as a chirp.</summary>
+    private const float SortGoodLowHz = 880f;
+    private const float SortGoodHighHz = 1046.5f;
+
+    /// <summary>Where the step happens, as a fraction of the buffer. Slightly past halfway, so
+    /// the second note is the shorter one and the sound ends ON the rise.</summary>
+    private const float SortGoodStepAt = 0.55f;
+
+    /// <summary>A quiet octave above the fundamental. It is what stops the tick sounding like a
+    /// telephone: one sine at this length is a beep, two are a tap on something.</summary>
+    private const float SortGoodPartial2 = 0.28f;
+
+    /// <summary>Attack, seconds. 3 ms: fast enough to read as a tick, slow enough that the
+    /// buffer starts at zero rather than at a step discontinuity -- CLOCK-1 measured that exact
+    /// defect on Tick (its first cut began at 0.137 and the mixer reproduced it as a second
+    /// click on every play).</summary>
+    private const float SortGoodAttackSec = 0.003f;
+
+    /// <summary>Decay shape. Steep: a receipt does not ring.</summary>
+    private const float SortGoodDecayCurve = 2.6f;
+
+    private const float SortGoodGain = 0.42f;
+
+    /// <summary>Renders the correct-sort tick: two stepped rising partials under a steep decay.</summary>
+    public static float[] SortGoodPcm() => Render(SortGoodSeconds, (t, u) =>
+    {
+        float hz = u < SortGoodStepAt ? SortGoodLowHz : SortGoodHighHz;
+        // Phase is continuous within each note rather than across the step, which is what makes
+        // the step audible as two notes instead of one sine with a glitch in it.
+        float local = u < SortGoodStepAt ? t : t - SortGoodStepAt * SortGoodSeconds;
+        float phase = Mathf.Tau * hz * local;
+        float voice = Mathf.Sin(phase) + SortGoodPartial2 * Mathf.Sin(2f * phase);
+        return voice * Envelope(u, SortGoodAttackSec / SortGoodSeconds, SortGoodDecayCurve)
+               * SortGoodGain;
+    });
+
+    /// <summary>The wrong bin's length, including the gap. Longer than the good tick because it
+    /// is two pulses, and still a third of RoundBuzz -- this costs the player nothing but the
+    /// time, so it is a correction and not a punishment.</summary>
+    private const float SortBadPulseSec = 0.06f;
+    private const float SortBadGapSec = 0.04f;
+
+    /// <summary>The two pulses' pitches, in Hz. FALLING, against SortGood's rise, and low enough
+    /// that the two cannot be confused through a wall of task-room noise.</summary>
+    private const float SortBadHighHz = 220f;
+    private const float SortBadLowHz = 165f;
+
+    /// <summary>A little third harmonic so the pulse has an edge on it. A pure low sine at this
+    /// length is felt rather than heard and would read as nothing at all on small speakers.</summary>
+    private const float SortBadPartial3 = 0.32f;
+
+    /// <summary>Edge, seconds. Short both ends -- no bloom, and no click either.</summary>
+    private const float SortBadEdgeSec = 0.006f;
+
+    private const float SortBadGain = 0.38f;
+
+    /// <summary>Renders the wrong-bin correction: two short falling pulses.</summary>
+    public static float[] SortBadPcm() =>
+        Render(SortBadPulseSec * 2f + SortBadGapSec, (t, _) =>
+        {
+            float a = SortBadPulse(t, SortBadHighHz);
+            float b = SortBadPulse(t - (SortBadPulseSec + SortBadGapSec), SortBadLowHz);
+            return (a + b) * SortBadGain;
+        });
+
+    /// <summary>One pulse of the wrong-bin correction, or silence outside its window.</summary>
+    private static float SortBadPulse(float t, float hz)
+    {
+        if (t < 0f || t > SortBadPulseSec)
+            return 0f;
+        float phase = Mathf.Tau * hz * t;
+        float voice = Mathf.Sin(phase) + SortBadPartial3 * Mathf.Sin(3f * phase);
+        // A flat-topped envelope with soft edges: the pulse has to be a BLOCK of sound, not a
+        // decay, or two of them read as one sound with a wobble.
+        float edge = Mathf.Min(t, SortBadPulseSec - t) / SortBadEdgeSec;
+        return voice * Mathf.Clamp(edge, 0f, 1f);
     }
 
     // NOTE (Issue #152): this branch originally carried its own Crackle() recipe, written because

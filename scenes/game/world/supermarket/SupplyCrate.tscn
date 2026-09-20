@@ -1,0 +1,120 @@
+[gd_scene load_steps=10 format=3]
+
+; TASK-1 (2026-09-19) -- THE SUPPLY CRATE. An open tray at waist height holding the round's
+; eighteen sortables. Authored once here and instanced by TaskRoom.tscn.
+;
+; IT IS FURNITURE AND NOTHING ELSE. No script, no volume, no [Export], nothing to configure: the
+; objects that sit in it are authored as siblings in TaskRoom.tscn (they have to be, because
+; PropManager.AdoptAuthoredProps assigns ids by sorted NODE PATH and the level owns that order),
+; and this is the thing they sit on. It is in SupermarketWorldSelfTest.SectionScenes anyway, on
+; the same rule CLOCK-1 3.2 established for RoundClock.tscn: a LEVEL prefab is invisible to the
+; packed-vs-live check until it is in that list, and "it has no script today" is not a property
+; the list should depend on.
+;
+; THE GEOMETRY, and every number in it is a reach decision.
+;   plinth  0.6 m tall, so the tray floor sits at 0.62 m and the rim tops out at 0.82 m against a
+;           1.04 m eyeline. The hider looks slightly down into it and takes objects out without
+;           crouching -- the same height as the bins, deliberately, so a trip between them is a
+;           turn and a walk rather than a stoop at each end.
+;   tray    1.40 x 1.20 m outside, 1.28 x 1.08 m of interior between the rims. The eighteen
+;           objects sit on a 6 x 3 grid at 0.22 x 0.32 m spacing, which leaves at least 0.06 m
+;           between neighbours at the widest object (the 0.16 m ball) so nothing starts the round
+;           already in contact and jostling.
+;   rim     0.20 m, low enough to lift over and high enough that the burst's shove
+;           (DOOR-1's BurstImpulseNs, 6 N.s at the doorway) does not empty the crate across the
+;           floor -- the crate is about 7 m from the door and outside BurstRadiusM anyway, which
+;           is the point: the burst disturbs the WORK, not the supply.
+;
+; All twelve floats of every Transform3D below are basis ROWS (.claude/rules/godot-scenes.md);
+; every one is the identity basis plus a translation.
+
+[sub_resource type="StandardMaterial3D" id="Mat_crate"]
+resource_name = "supply crate (level dressing, warmer than the walls)"
+albedo_color = Color(0.46, 0.38, 0.3, 1)
+roughness = 0.9
+
+[sub_resource type="BoxMesh" id="BoxMesh_plinth"]
+size = Vector3(1.4, 0.6, 1.2)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_plinth"]
+size = Vector3(1.4, 0.6, 1.2)
+
+[sub_resource type="BoxMesh" id="BoxMesh_tray"]
+size = Vector3(1.4, 0.06, 1.2)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_tray"]
+size = Vector3(1.4, 0.06, 1.2)
+
+[sub_resource type="BoxMesh" id="BoxMesh_rim_x"]
+size = Vector3(0.06, 0.2, 1.2)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_rim_x"]
+size = Vector3(0.06, 0.2, 1.2)
+
+[sub_resource type="BoxMesh" id="BoxMesh_rim_z"]
+size = Vector3(1.4, 0.2, 0.06)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_rim_z"]
+size = Vector3(1.4, 0.2, 0.06)
+
+[node name="SupplyCrate" type="Node3D"]
+
+[node name="Plinth" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.3, 0)
+
+[node name="Collision" type="CollisionShape3D" parent="Plinth"]
+shape = SubResource("BoxShape3D_plinth")
+
+[node name="Mesh" type="MeshInstance3D" parent="Plinth"]
+mesh = SubResource("BoxMesh_plinth")
+surface_material_override/0 = SubResource("Mat_crate")
+
+[node name="Tray" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.59, 0)
+
+[node name="Collision" type="CollisionShape3D" parent="Tray"]
+shape = SubResource("BoxShape3D_tray")
+
+[node name="Mesh" type="MeshInstance3D" parent="Tray"]
+mesh = SubResource("BoxMesh_tray")
+surface_material_override/0 = SubResource("Mat_crate")
+
+[node name="RimXNeg" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.67, 0.72, 0)
+
+[node name="Collision" type="CollisionShape3D" parent="RimXNeg"]
+shape = SubResource("BoxShape3D_rim_x")
+
+[node name="Mesh" type="MeshInstance3D" parent="RimXNeg"]
+mesh = SubResource("BoxMesh_rim_x")
+surface_material_override/0 = SubResource("Mat_crate")
+
+[node name="RimXPos" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.67, 0.72, 0)
+
+[node name="Collision" type="CollisionShape3D" parent="RimXPos"]
+shape = SubResource("BoxShape3D_rim_x")
+
+[node name="Mesh" type="MeshInstance3D" parent="RimXPos"]
+mesh = SubResource("BoxMesh_rim_x")
+surface_material_override/0 = SubResource("Mat_crate")
+
+[node name="RimZNeg" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.72, -0.57)
+
+[node name="Collision" type="CollisionShape3D" parent="RimZNeg"]
+shape = SubResource("BoxShape3D_rim_z")
+
+[node name="Mesh" type="MeshInstance3D" parent="RimZNeg"]
+mesh = SubResource("BoxMesh_rim_z")
+surface_material_override/0 = SubResource("Mat_crate")
+
+[node name="RimZPos" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.72, 0.57)
+
+[node name="Collision" type="CollisionShape3D" parent="RimZPos"]
+shape = SubResource("BoxShape3D_rim_z")
+
+[node name="Mesh" type="MeshInstance3D" parent="RimZPos"]
+mesh = SubResource("BoxMesh_rim_z")
+surface_material_override/0 = SubResource("Mat_crate")
