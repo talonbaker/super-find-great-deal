@@ -105,6 +105,16 @@ public static class ControlGlyphs
         {
             new Row("Talk (hold)", new[] { "voice_ptt" }),
         }),
+        // BTN-1 (2026-09-19). The same key, a THIRD meaning — and that is precisely why it earns
+        // a row rather than being folded into CARRY's. A player who has read "Pick up / put down"
+        // knows E acts on objects; the round's three buttons are not objects, they are the only
+        // controls in the game that change what phase everybody is in, and a panel that did not
+        // mention them would leave the player looking for a different key. Appended at the end,
+        // never inserted (this table's standing rule).
+        new("ROUND", new[]
+        {
+            new Row("Press a round button", new[] { "interact" }),
+        }),
     };
 
     /// <summary>Every row in the table, flattened and unfiltered — the declaration of what the

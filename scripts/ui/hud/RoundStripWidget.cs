@@ -54,7 +54,34 @@ public partial class RoundStripWidget : PanelContainer
     private string _refusalText = string.Empty;
     private double _refusalLeft;
 
+    private static RoundStripWidget? _instance;
+    private string _localSentence = string.Empty;
+
     public RoundStripWidget() => MouseFilter = MouseFilterEnum.Ignore;
+
+    /// <summary>
+    /// <b>Say a refusal that never crossed the wire</b> (BTN-1, 2026-09-19). The round's own four
+    /// refusals ride <c>HideSeekWire</c> and are latched by <see cref="Tick"/> below; a BUTTON
+    /// can also refuse for three reasons the round never hears about — wrong phase, wrong role,
+    /// too far away (<c>PressRefusal</c> 5-7) — and those exist precisely because
+    /// <c>HideSeekLoop</c> would fold such a press and drop it in silence.
+    ///
+    /// <para><b>One strip, not a second widget.</b> The player learns in the first round that
+    /// refusals appear on this line; a second plate for three of the seven reasons would teach
+    /// them two places to look under time pressure. It uses the same two-second latch and the
+    /// same flash, so a local sentence and a wire sentence are indistinguishable to read — which
+    /// they should be, because to the player they are the same event.</para>
+    ///
+    /// <para>A no-op on a headless peer and before the HUD exists, so a caller never has to ask
+    /// whether there is a screen — the same contract <c>InteractPrompt.SetTarget</c> and
+    /// <c>RefusalNotice.Say</c> have.</para>
+    /// </summary>
+    public static void SayLocal(string sentence)
+    {
+        if (_instance == null || !GodotObject.IsInstanceValid(_instance) || sentence.Length == 0)
+            return;
+        _instance._localSentence = sentence;
+    }
 
     public override void _Ready()
     {
@@ -77,6 +104,13 @@ public partial class RoundStripWidget : PanelContainer
         // Nothing is painted until the round is synced, so the strip starts out of the frame's way
         // entirely rather than showing a plausible default.
         Visible = false;
+        _instance = this;
+    }
+
+    public override void _ExitTree()
+    {
+        if (ReferenceEquals(_instance, this))
+            _instance = null;
     }
 
     /// <summary>
@@ -99,9 +133,16 @@ public partial class RoundStripWidget : PanelContainer
         // A refusal arrives in ONE message and is gone from the next, so it is latched on arrival
         // rather than read as a level. Re-arming on the same reason restarts the hold, which is
         // what a player pressing twice expects.
-        if (view.Refusal != HideSeekRefusal.None)
+        //
+        // A LOCAL sentence (BTN-1's SayLocal) is consumed here and treated identically from this
+        // line down, which is the whole point: a button's own refusal and the round's refusal are
+        // the same event to the player. The local one wins a tie because it is the newer of the
+        // two and the newest refusal is the one they are currently confused by.
+        string? pending = _localSentence.Length > 0 ? _localSentence : null;
+        _localSentence = string.Empty;
+        if (pending is not null || view.Refusal != HideSeekRefusal.None)
         {
-            string sentence = HideSeekText.RefusalSentence(view.Refusal);
+            string sentence = pending ?? HideSeekText.RefusalSentence(view.Refusal);
             if (sentence.Length > 0)
             {
                 bool fresh = _refusalLeft <= 0.0 || sentence != _refusalText;
