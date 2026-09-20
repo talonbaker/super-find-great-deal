@@ -568,7 +568,22 @@ public partial class BotHarness : Node
             // The ROOMS ride along with the routes deliberately: "both peers say pa" is also
             // what two UNKNOWN rooms produce through the fail-open rule, so a suite asserting
             // only the route could pass on a session where the round never synced at all.
-            Voice.VoiceManager.Instance.GetEmitRoutingVerdict());
+            Voice.VoiceManager.Instance.GetEmitRoutingVerdict(),
+            // SHELF-1 (2026-09-19): THIS PEER'S OWN PHYSICS FRAME TIME, milliseconds.
+            //
+            // ReachCostProbe measures the same monitor on the SERVER and is the only frame-time
+            // instrument this repo had. SHELF-1's packet asks for the number on the CLIENT as
+            // well, and the reason is not symmetry: a client does not simulate a loose prop (it
+            // lerps a frozen kinematic body toward a streamed transform), so "130 props cost the
+            // server 6 ms" says nothing at all about what they cost the player watching them.
+            // The two numbers are about different work and both have to be read.
+            //
+            // Sampled per LOGGED sample rather than per frame, so it is a 5 Hz spot reading of a
+            // per-frame quantity and its percentiles are coarser than the probe's 60 Hz ones.
+            // That is deliberately cheap: a per-frame accumulator here would be a measurement rig
+            // running inside every bot in the repo, which is exactly what ReachCostProbe's own
+            // header argues against.
+            (float)(Performance.GetMonitor(Performance.Monitor.TimePhysicsProcess) * 1000.0));
         string line = JsonSerializer.Serialize(sample, JsonOptions);
         if (_writer != null)
         {
@@ -628,7 +643,9 @@ public partial class BotHarness : Node
         int PlaceDeny,
         // VOICE-1: the routing verdict, as `vroute`. See its computation site and
         // VoiceManager.GetEmitRoutingVerdict.
-        Voice.VoiceRouting.Verdict Vroute);
+        Voice.VoiceRouting.Verdict Vroute,
+        // SHELF-1: this peer's own physics frame time in ms, as `pms`. See its computation site.
+        float Pms);
 
     // THE FIRST-PERSON LENS, in world space (INT-0, 2026-09-19). X/Y/Z is the lens itself, not the
     // rig node it hangs off; Dx/Dy/Dz is the direction it faces (-Z of its own basis, which is

@@ -109,6 +109,23 @@ function Report-Probe([string]$Tag, [string]$Title) {
     foreach ($l in @(Get-Content $out | Where-Object { $_ -match '^\[props\] adopted ' })) {
         Write-Host "  $l" -ForegroundColor DarkGray
     }
+    # THE CLIENT'S OWN FRAME TIME (SHELF-1). A client does not simulate a loose prop -- it lerps
+    # a frozen kinematic body toward a streamed transform -- so the server's number says nothing
+    # about what 130 props cost the player watching them. BotHarness samples `pms` at its 5 Hz
+    # logging cadence, so these percentiles are coarser than the probe's 60 Hz ones and are
+    # labelled as what they are.
+    foreach ($tag in @("${Tag}A", "${Tag}B")) {
+        $jl = Join-Path $script:LogDir "$tag.jsonl"
+        if (-not (Test-Path $jl)) { continue }
+        $ms = @(Get-Content $jl | Where-Object { $_.Trim().Length -gt 0 } |
+                ForEach-Object { ($_ | ConvertFrom-Json).pms } |
+                Where-Object { $null -ne $_ } | Sort-Object)
+        if ($ms.Count -lt 10) { continue }
+        $p50 = $ms[[int][math]::Floor(0.50 * ($ms.Count - 1))]
+        $p95 = $ms[[int][math]::Floor(0.95 * ($ms.Count - 1))]
+        Write-Host ("  [client] {0}: physics frame time over {1} sample(s) at 5 Hz: p50 {2:F3} ms, p95 {3:F3} ms, peak {4:F3} ms" -f
+            $tag, $ms.Count, $p50, $p95, $ms[-1]) -ForegroundColor DarkGray
+    }
     # Bandwidth: ENet's own counters, one JSON object per second (NetStatsLogger). Reported as
     # the mean over the seconds that had two peers connected, which is the only interval the
     # number means anything for.
