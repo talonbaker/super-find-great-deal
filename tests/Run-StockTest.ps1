@@ -230,14 +230,30 @@ try {
             Add-Failure "layer 3 answered OccludedByStatic for a prop in a FULL-DEPTH hole: $($occluded[0]). The hole does not reach a face, so bulk is standing in front of the object."
         }
 
-        # And the round accepted it, which is the whole point of the three layers agreeing.
-        $refused = @($slog | Where-Object { $_ -match 'NobodyCouldReachThat' })
-        if ($refused.Count -gt 0) {
-            Add-Failure "the server refused the Confirm with NobodyCouldReachThat on a prop in an authored hole: $($refused[0])"
+        # THE CONFIRM-TIME AUDIT SPECIFICALLY. REACH-1's IConfirmTimeAudit re-measures on the
+        # press, and that is the verdict the round actually refuses on -- a layer3 line from an
+        # earlier settle proves nothing about the instant the hider committed.
+        $confirmAudit = @($slog | Where-Object { $_ -match '^\[reach\] layer3 \[confirm\]' })
+        if ($confirmAudit.Count -eq 0) {
+            Add-Failure "no '[reach] layer3 [confirm]' line -- the Confirm-time audit never ran, so an acceptance here would prove nothing about layer 3"
+        } else {
+            Write-Host "        $($confirmAudit[-1])" -ForegroundColor DarkGray
+            if ($confirmAudit[-1] -notmatch 'reachable \(Reachable\)') {
+                Add-Failure "the Confirm-time audit on a prop in an authored hole said '$($confirmAudit[-1])'; expected 'reachable (Reachable)'"
+            }
         }
-        $seeking = @($slog | Where-Object { $_ -match 'Hiding ?-> ?Seeking|-> Seeking' })
-        if ($seeking.Count -eq 0 -and $refused.Count -eq 0) {
-            Add-Failure "the round never entered Seeking and no refusal was logged -- the round script did not run. Read stock.server.out.log."
+
+        # And the round accepted it, which is the whole point of the three layers agreeing.
+        $refusals = @($slog | Where-Object { $_ -match '\[round\] refused: (\w+)' } |
+            ForEach-Object { if ($_ -match '\[round\] refused: (\w+)') { $matches[1] } })
+        if ($refusals -contains "NobodyCouldReachThat") {
+            Add-Failure "the server refused the Confirm with NobodyCouldReachThat on a prop standing in an AUTHORED HOLE. That is the exact refusal STOCK-1 exists to make impossible."
+        }
+        $seeking = @($slog | Where-Object { $_ -match '\[round\] phase Hiding -> Seeking' })
+        if ($seeking.Count -eq 0) {
+            Add-Failure "the round never entered Seeking (refusals logged: $($refusals -join ', ')). Read stock.server.out.log before treating this as a STOCK-1 defect -- a round script that did not run is a staging failure."
+        } else {
+            Write-Host "        round entered Seeking on the Confirm press" -ForegroundColor DarkGray
         }
 
         # ---- PHASE 3: the ids did not move ----------------------------------------------------
