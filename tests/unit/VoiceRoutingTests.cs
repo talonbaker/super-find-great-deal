@@ -56,10 +56,31 @@ public class VoiceRoutingTests
     }
 
     [Fact]
-    public void Together_SeekerIsInTheVestibuleBehindTheBurstDoor()
+    public void Together_PutsBothOfThemInTheTaskRoom_BecauseTheDoorIsOpen()
     {
+        // REVIEW-1 I1, 2026-09-20. This test used to assert SupermarketWorld.Vestibule for the
+        // seeker, and the door bursting open is exactly what makes that wrong: the vestibule is
+        // "a destination, not a room -- it is inside the task room's section scene"
+        // (SupermarketWorld.cs), so the room KEY was finer-grained than the acoustic space it
+        // names. Together has no timer and ends only on an End press, so for the whole of the
+        // payoff beat the two players stood two metres apart in one space and heard each other
+        // through the intercom chain (overdrive -> 2.2 kHz lowpass -> boxy reverb, no falloff).
+        //
+        // Vestibule is still the TELEPORT destination key -- HideSeekDriver.OnServerPhaseChanged
+        // reads SpawnPointsFor(Vestibule) directly and is untouched by this.
         Assert.Equal(SupermarketWorld.TaskRoom, Room(HideSeekPhase.Together, Hider));
-        Assert.Equal(SupermarketWorld.Vestibule, Room(HideSeekPhase.Together, Seeker));
+        Assert.Equal(SupermarketWorld.TaskRoom, Room(HideSeekPhase.Together, Seeker));
+    }
+
+    [Fact]
+    public void Together_IsTheOneMidRoundPhaseOnProximity()
+    {
+        // The half of I1 that is about the player rather than about a string. This is the social
+        // payoff the whole startle is built for; a filtered PA voice across two metres is the
+        // failure VoiceRoomTest's "everything exempt" plant exists to catch, arriving here
+        // through the room resolver instead of through the relay.
+        Assert.Equal(VoiceRouting.RouteProximity, Route(HideSeekPhase.Together, Hider, Seeker));
+        Assert.Equal(VoiceRouting.RouteProximity, Route(HideSeekPhase.Together, Seeker, Hider));
     }
 
     [Fact]
@@ -120,10 +141,14 @@ public class VoiceRoutingTests
     [Fact]
     public void EveryMidRoundPhase_IsPaBothWays()
     {
-        // Hiding, Seeking and Together each put the two of them in different rooms, and the
-        // route is symmetric: the hider taunting back is the same channel the seeker taunted on.
+        // Hiding and Seeking each put the two of them in different rooms, and the route is
+        // symmetric: the hider taunting back is the same channel the seeker taunted on.
+        //
+        // TOGETHER IS NOT IN THIS LIST since REVIEW-1 I1 (2026-09-20) -- the door has burst and
+        // they are in one room. Its own test is above, and it asserts proximity rather than
+        // merely omitting the phase, so this list shrinking cannot be a coverage loss.
         foreach (HideSeekPhase phase in new[]
-                 { HideSeekPhase.Hiding, HideSeekPhase.Seeking, HideSeekPhase.Together })
+                 { HideSeekPhase.Hiding, HideSeekPhase.Seeking })
         {
             Assert.Equal(VoiceRouting.RoutePa, Route(phase, Hider, Seeker));
             Assert.Equal(VoiceRouting.RoutePa, Route(phase, Seeker, Hider));
