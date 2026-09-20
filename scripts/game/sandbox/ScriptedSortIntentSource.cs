@@ -48,16 +48,37 @@ public sealed class ScriptedSortIntentSource : IIntentSource
     /// <see cref="BinSlot"/>. A negative slot means "fetch it and keep holding it".</summary>
     public readonly record struct Step(int PropId, int BinSlot);
 
-    /// <summary>How close the body gets to a target before it acts. The same 1.2 m
-    /// <see cref="ScriptedCarryIntentSource"/> uses, for the same reason: it is comfortably
-    /// inside the server's grab reach with room for the prediction error CARRY-1 measured
-    /// (transiently 1.71 m on an idle machine).</summary>
-    private const float ArriveRadius = 1.2f;
+    /// <summary>
+    /// How close the body gets to an object in the crate before it presses grab, metres,
+    /// measured horizontally.
+    ///
+    /// <para><b>1.8 m, not <see cref="ScriptedCarryIntentSource"/>'s 1.2 m, and the difference
+    /// was measured rather than chosen.</b> The sortables sit on a 1.4 m-wide plinth, so a body
+    /// walking at one on the far column of the grid is stopped by the crate itself with the
+    /// object still 1.40 m away. On the first run of <c>tests/Run-SortTest.ps1</c> the bot
+    /// delivered its first two objects, then walked into the crate and stood at (78.85, 1.01)
+    /// for the remaining fifty seconds without ever pressing grab: step 2 wanted the far-column
+    /// object and 1.40 m was outside a 1.2 m radius. Nothing was logged, because a press that is
+    /// never made is not refused.</para>
+    ///
+    /// <para>The server's own reach is 2.25 m (<c>SandboxAvatar.PickupRadius</c> 1.5 plus
+    /// <c>PropManager.GrabRangeTolerance</c> 0.75) measured in 3D from the avatar's origin, so
+    /// 1.8 m horizontal against a 0.7 m-high object is 1.93 m - inside it with room for the
+    /// prediction error CARRY-1 measured (transiently 1.71 m on an idle machine), which is what
+    /// <see cref="GrabRetrySec"/> is then there to absorb.</para>
+    /// </summary>
+    private const float FetchStandM = 1.8f;
 
     /// <summary>Grab-request cadence while standing at the crate. Retried rather than fired
     /// once, for the reason <c>--carry-grab-retry</c> exists: the press is a decision about the
     /// SERVER's body and this brain can only see the predicted one.</summary>
     private const double GrabRetrySec = 0.5;
+
+    /// <summary>How close the body must be to the DROP POINT before it asks to place, metres.
+    /// The server checks the hand against 1.65 m (<c>PropManager.PlaceReachM</c> plus the grab
+    /// tolerance) and the hand is up to 0.9 m in front of the body, so 1.35 m of body distance
+    /// clears it with room for a round trip of lag.</summary>
+    private const float PlaceStandM = 1.35f;
 
     /// <summary>Place-request cadence while standing at the bin. <c>Run-PlaceTest</c>
     /// deliberately fires once because a REFUSAL is what three of its four cases assert; here
@@ -134,6 +155,15 @@ public sealed class ScriptedSortIntentSource : IIntentSource
         if (Done)
             return MoveIntent.None;
 
+        // A DELIVERED OBJECT IS LEFT ALONE. Measured on the first run of tests/Run-SortTest.ps1:
+        // without this, the tick after a hand-off lands the brain sees an empty hand, decides it
+        // still owes step N its object, walks the half metre back to the bin and PICKS THE OBJECT
+        // STRAIGHT BACK OUT -- which then makes AdvanceIfDelivered's "am I still holding it"
+        // guard true again, so the step never advances and the script wedges on its second item.
+        // The log read as a bot placing the same prop three times and then going quiet.
+        if (_placedAt >= 0)
+            return MoveIntent.None;
+
         Step step = _steps[_step];
         int held = _heldPropId();
 
@@ -157,7 +187,7 @@ public sealed class ScriptedSortIntentSource : IIntentSource
                 return MoveIntent.None;   // not replicated yet; stand still rather than guess
             Vector3 toProp = at - _self.Position;
             toProp.Y = 0;
-            if (toProp.Length() > ArriveRadius)
+            if (toProp.Length() > FetchStandM)
                 return new MoveIntent { MoveDir = toProp.Normalized() };
 
             if (_clock >= _lastGrab + GrabRetrySec)
@@ -185,16 +215,28 @@ public sealed class ScriptedSortIntentSource : IIntentSource
         if (bin == null)
             return MoveIntent.None;
 
-        Vector3 toBin = bin.ApproachPoint - _self.Position;
-        toBin.Y = 0;
-        if (toBin.Length() > ArriveRadius)
-            return new MoveIntent { MoveDir = toBin.Normalized() };
+        _delivered.TryGetValue(step.BinSlot, out int nth);
+        Transform3D drop = bin.DropPoint(nth);
+
+        // GATED ON THE DISTANCE TO THE DROP POINT, not to the approach point, and the first run
+        // is why: the server measures a place from the HOLDER'S HAND against
+        // PropManager.PlaceReachM + GrabRangeTolerance (1.65 m), and a body that has merely got
+        // near a stand-here marker can still be over two metres from the spot it is
+        // aiming at. Both of that run's steps were refused TooFarToPlace on their first attempt
+        // and landed on the retry -- which is a fixture that works by accident.
+        Vector3 toDrop = drop.Origin - _self.Position;
+        toDrop.Y = 0;
+        if (toDrop.Length() > PlaceStandM)
+        {
+            Vector3 toBin = bin.ApproachPoint - _self.Position;
+            toBin.Y = 0;
+            if (toBin.LengthSquared() > 1e-6f)
+                return new MoveIntent { MoveDir = toBin.Normalized() };
+        }
 
         if (_clock < _lastPlace + PlaceRetrySec)
             return MoveIntent.None;
         _lastPlace = _clock;
-        _delivered.TryGetValue(step.BinSlot, out int nth);
-        Transform3D drop = bin.DropPoint(nth);
         GD.Print($"[sort-bot] {_who} PLACING prop {step.PropId} into bin {step.BinSlot} at "
                  + $"({drop.Origin.X:F2}, {drop.Origin.Y:F2}, {drop.Origin.Z:F2}) "
                  + $"at {_clock:F2}s (step {_step})");

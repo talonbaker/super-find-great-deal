@@ -167,6 +167,14 @@ try {
         # reason it goes at the end.
         @{ Name = "Round: wall clock + cues (CLOCK-1)";  Script = "Run-RoundClockTest.ps1" }
 
+        # --- TASK-1 (2026-09-19): the task room's sorting job ---
+        # A server and two bots on udp/7907 -- its own port, HANDED OUT by the orchestrator
+        # rather than computed from a snapshot of tests/, which is INT-0's lesson applied
+        # rather than re-learned for the third time. It takes part in the join-index spawn
+        # dealing (the FIRST bot to connect is the hider, by HideSeekLoop's own rule), which
+        # is the other reason it goes at the end.
+        @{ Name = "Round: sorting job (TASK-1)";        Script = "Run-SortTest.ps1" }
+
         # WHAT WAS REMOVED HERE AT THE FORK (BASE-1, 2026-09-19), so a reader of an old handoff
         # can tell "deleted" from "lost": the bubble-test world, the shared bubble counter and the
         # last-bubble celebration, the TV portal, the Puffin Lab, the watcher's night gate, the
