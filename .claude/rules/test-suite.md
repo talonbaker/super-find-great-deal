@@ -68,7 +68,10 @@ paths:
   is the quantity), `Reconnect: grace window`, `Netcode: anti-cheat` ("the grab never landed").
   **Measured here, not carried forward:** `Carry: server-authoritative` and `Carry: throw + loose`
   (SHADER-2, 2026-09-04 — both fail as STAGING, "the grab never landed" / "never staged"; see the
-  dated section at the end of this file).
+  dated section at the end of this file), and **`Carry: place + integrity`** and
+  **`Round: buttons + drop-off bin`** (INT-1, 2026-09-19 — the placed pose is 0.008 m / 0.00 deg
+  standalone and tens of mm / tens of deg when it reds; the buttons red says `TooFarAway` where
+  `NotNow` was staged. Both have their own dated section below).
 
 ## Every test on this branch shares one clock, so no test can see a two-clock bug (HONK-1, 2026-09-04)
 
@@ -942,6 +945,97 @@ streak after the fix is not evidence at that rate, and claiming otherwise would 
 absence-without-a-positive-control this file warns about elsewhere. If
 `TheLiveGravityForActuallyReadsTheModeAndTheTwoBakedKnobs` is ever red again, the first thing to
 check is whether a fourth class has started writing the tuning without joining the collection.
+
+## A fixture staged against an UNDRESSED room is a defect with no owner (INT-1, measured 2026-09-19)
+
+**`Sfx: material voices` was the only real red in INT-1's first marathon, and neither lane that
+made it could have seen it.** SFX-2 added an eighth seeded prop — a lone can for its place
+driver — and chose `(37, 4)` in the search room against the rule its own handoff states: *"≥ 2.2 m
+from every other occupant of the search room."* That was true when it was written and is still
+true. **SHELF-1 then dressed that room**, and `(37, 4)` became a spot in the +Z EDGE WALKWAY with
+no `SearchSpawn` marker in it, behind four unbroken 9.2 m aisles.
+
+The failure, and what it looked like from each end:
+
+```
+- PLACE IS NOT ON THE WIRE: the host never fired ActorEvent.Placed for prop 8 (the scripted
+  place). Events it saw for that prop: . Either the place never landed ... or PropRelease.Placed
+  is not reaching NetworkedProp.BeginLoose.
+```
+
+**Read that message: it names both candidates, and only the bot's own trace tells them apart.**
+From `matsfx.place.jsonl` and its stdout on the merged tree:
+
+| | |
+|---|---|
+| spawned at | `(35.63, 0.56, 0.13)` — marker 0, the z = 0 walkway |
+| ended at | `(36.96, 0.00, 0.65)` — 1.3 m later, against aisle 1's bay face |
+| `heldPropId` | **−1**. It never grabbed anything |
+| `[bot] SfxPlaceBot PLACING` | **absent** |
+| `place denied` on the server | **absent** |
+
+**Both absences are the tell, and TASK-1 §3.3 is why**: *a press that is never made is never
+refused.* `grab denied` and `place denied` are the first things anyone greps for and NEITHER can
+fire for a request that was not sent — so a staging failure of this shape presents as an
+assertion about the WIRE and has no log line anywhere pointing at the floor.
+
+**The generalisation, and it is not about sound.** A fixture's coordinates are a claim about the
+LEVEL, and a level is owned by a different lane on a different branch. Two lanes can each be
+right on their own base and produce a defect in the merge — so:
+
+- **When a lane dresses a room, every fixture already staged in it is that lane's problem too.**
+  SHELF-1 did exactly this for `Run-PlaceTest` and `Run-MaterialSfxTest` (§6) and got the two it
+  could see; SFX-2's eighth prop was on a branch it could not.
+- **At integration, grep every seeded/scripted coordinate in `tests/` against the rooms the wave
+  dressed.** It is one grep and it is cheaper than a marathon.
+- **A suite whose fixture cannot be reached should say so about the FLOOR, not about its
+  subject.** The assertion above is well written — it names both causes — and it still sent the
+  first reader at the wire.
+
+**Fixed at INT-1** by SHELF-1's own rule (put the fixture in the walkway its bot spawns in): the
+can moved to `(45.3, 0)` in the z = 0 walkway and `SfxPlaceBot` is pinned to `SearchSpawn_1`
+(44.5, 0) with `--spawn-index`, 0.8 m away — inside `PickupRadius`, so there is no walk left to
+lose. `Stock/Bin_4` is at `(46.4, 0)` and a `FloorBin` is 0.90 m wide, so the can clears its face
+by 0.65 m.
+
+## Two more suites are load-flaky, both measured at INT-1's marathon (2026-09-19)
+
+Both were red in a 43-suite marathon and **3/3 PASS standalone** immediately afterwards on the
+same tree, machine otherwise idle. Neither is on the list above; both are now.
+
+### `Carry: place + integrity` — the quantity is the placed pose, and it is identical to the DIGIT standalone
+
+| Run | Result | The quantity |
+|---|---|---|
+| marathon, 14th of 43 | **FAIL** | `bot B sees prop 1014 0.055 m from the intended transform (bar 0.05)` and `rotated 15.74 deg from the intended 35 deg yaw (bar 5)` |
+| standalone ×3, idle | **3/3 PASS** | `0.008 m and 0.00 deg` — **the same to the digit on all three runs** |
+
+**A red here whose numbers are 0.008 m / 0.00 deg is impossible; a red whose numbers are tens of
+millimetres and tens of degrees is the prop still settling when the logs stopped.** The three
+refusal assertions beside it (`TooFarToPlace`, `DoesNotFitThere`, `OutsideRoom`) stayed green in
+the marathon, which is what shows the red is about a settle rather than about placement.
+
+### `Round: buttons + drop-off bin` — the red is `TooFarAway` where `NotNow` was staged
+
+| Run | Result | The failing check |
+|---|---|---|
+| marathon, 42nd of 43 | **FAIL** | *"the seeker's START press after the round had begun was not refused with NotNow"* |
+| standalone ×3, idle | **3/3 PASS** | — |
+
+The server's own line says what happened instead:
+
+```
+[buttons] press Start peer=1640182223 refused reason=TooFarAway text="STEP CLOSER TO THE BUTTON"
+```
+
+**BTN-1's handoff predicted this exact shape** (§2, *"Why the reach check runs FIRST"*): *"a bot
+in the wrong phase is usually also in the wrong room and gets `TooFarAway` rather than
+`NotNow`."* `--press` fires on the BOT'S OWN elapsed clock with no anchor — BTN-1's own doc
+explains why it cannot be anchored on an observed event for that press — so under marathon load
+the walk to the button slips past the scheduled second and the server's reach re-check, which
+runs BEFORE the phase gate, answers first. **The discriminator is the REASON in the refusal
+line**: `NotNow` missing with `TooFarAway` present is the walk; `NotNow` missing with nothing
+present is the gate, and that is the real regression this check exists for.
 
 ## REACH-1: udp/7903, and four measured things about the placement audit (2026-09-19)
 

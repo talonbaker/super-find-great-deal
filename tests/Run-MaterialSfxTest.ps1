@@ -287,8 +287,27 @@ $ProduceFallAt = "41,1.20,4.2"
 # within a centimetre of where it started. A can seeded at 0.35 like its neighbours would fall
 # 0.29 m, and a cylinder that tips and rolls two metres puts the scripted PLACE transform out of
 # the bot's 1.65 m reach and turns assertion 10 into a coin flip about a bounce.
-$PlaceCanAt   = "37,0.08,4"
-$PlaceCanTo   = "37.3,0.07,4,20"
+#
+# MOVED AT INT-1 (2026-09-19) FROM (37, 4), AND IT IS A MERGE DEFECT THAT NEITHER LANE COULD
+# SEE. SFX-2 chose (37, 4) against an EMPTY search room, on the rule that it be at least 2.2 m
+# from every other occupant -- true then, and true still. SHELF-1 then DRESSED that room, and
+# (37, 4) became a spot in the +Z EDGE WALKWAY with no SearchSpawn marker in it and four
+# unbroken 9.2 m aisles between it and every marker that does exist. Measured on the merged
+# tree, from SfxPlaceBot's own JSONL: it spawned at (35.63, 0.56, 0.13), moved 1.3 m, stopped
+# at (36.96, 0.00, 0.65) against aisle 1's bay face, and finished with heldPropId = -1. Its
+# stdout has no PLACING line and the server log has no `place denied` line, because -- TASK-1
+# section 3.3 -- A PRESS THAT IS NEVER MADE IS NEVER REFUSED, so the only witness is the trace.
+#
+# The new spot is SHELF-1 section 6.2's own rule applied: PUT THE FIXTURE IN THE WALKWAY ITS BOT
+# SPAWNS IN. SfxPlaceBot is pinned to SearchSpawn_1 (44.5, 0) with --spawn-index, and the can
+# sits 0.8 m further out at (45.3, 0) in the same z = 0 walkway -- inside PickupRadius (1.5 m)
+# from the marker, so there is no walk to lose. The free stretch there is world x in
+# [44.5, 45.95]: Stock/Bin_4 is at (46.4, 0) and a FloorBin is 0.90 m wide, so its face is at
+# 45.95 and the can clears it by 0.65 m. The PLACE goes 0.3 m back TOWARD the marker rather
+# than further out, which keeps it off the bin and inside the 1.65 m the server measures from
+# the carry anchor.
+$PlaceCanAt   = "45.3,0.08,0"
+$PlaceCanTo   = "45.0,0.07,0,20"
 
 # Prop ids are assigned by PropManager.ServerSpawn in seed order, starting at 1 (authored props
 # take 1000+, which is why there is no collision with SearchRoom's four crates).
@@ -394,7 +413,7 @@ try {
             # this ends -- the box bot drew marker 2 on one run and marker 1 on the next, and
             # the run that drew the far marker went red on a pickup that never happened -- and
             # the mapping below is that section's own table, now enforced rather than assumed.
-            "--spawn-index", "SfxCanBot=0,SfxWitness=1,SfxBoxBot=2,SfxProduceBot=3",
+            "--spawn-index", "SfxCanBot=0,SfxWitness=1,SfxBoxBot=2,SfxProduceBot=3,SfxPlaceBot=1",
             "--seed-test-props", $seed1, "--seed-props-drop", $DropAtSec, "--log-sfx", "--windowed") `
         -RedirectStandardOutput $s1Out `
         -RedirectStandardError (Join-Path $script:LogDir "matsfx.host.err.log") `
@@ -517,7 +536,7 @@ try {
             # this ends -- the box bot drew marker 2 on one run and marker 1 on the next, and
             # the run that drew the far marker went red on a pickup that never happened -- and
             # the mapping below is that section's own table, now enforced rather than assumed.
-            "--spawn-index", "SfxCanBot=0,SfxWitness=1,SfxBoxBot=2,SfxProduceBot=3",
+            "--spawn-index", "SfxCanBot=0,SfxWitness=1,SfxBoxBot=2,SfxProduceBot=3,SfxPlaceBot=1",
             "--seed-test-props", $seed2, "--seed-props-drop", $DropAtSec,
             "--log-sfx", "--windowed") `
         -RedirectStandardOutput $s2Out `
