@@ -118,8 +118,24 @@ $ErrorActionPreference = "Stop"
 # --- the block table, which is the subject of this suite ---------------------------------------
 # PropKind ordinals (scripts/net/PropState.cs): Crate 0, Ball 1, Can 2, Box 3, Produce 4.
 $AuthoredFirst = 1000
-$AuthoredLast  = 1143
-$AuthoredCount = $AuthoredLast - $AuthoredFirst + 1     # 144
+$AuthoredLast  = 1161
+$AuthoredCount = $AuthoredLast - $AuthoredFirst + 1     # 162
+#
+# RE-DERIVED AT INT-1 (2026-09-19) FROM THIS SUITE'S OWN ADOPTION LOG on the fully merged tree,
+# not re-typed and not predicted. The run that produced these numbers printed:
+#
+#   [props] adopted 162 authored prop(s) in 169.96 ms (ids 1000..1161)
+#
+# 144 (HOLD-1's rack + practice corner + search room) + TASK-1's 18 sortables. "TaskRoom" sorts
+# AFTER "SearchRoom", so TASK-1's block went to the END and NOTHING BELOW 1144 MOVED -- which is
+# the one happy case of SHELF-1's rule, and worth stating for that reason: TASK-1's own branch
+# numbered these 1004..1021, because on ITS base the search room held only four crates. An id is
+# a fact about the WHOLE world, so a lane's own number is only ever true on that lane's base.
+#
+# THIS SUITE KEEPS ITS LITERALS ON PURPOSE. SHELF-1 gave Run-PlaceTest and Run-ButtonsTest
+# Get-AuthoredPropId so they DERIVE the ids they stage with; this one exists to ASSERT the
+# block, and a version that derived them would pass whatever the world did. That division is
+# the point, and it is why this table had to be updated by hand and those two did not.
 $Blocks = @(
     # The rack is three objects of three DIFFERENT kinds, so it is three one-id blocks rather
     # than one. That is not a workaround: the rack's whole design is one of each shape, and a
@@ -137,7 +153,24 @@ $Blocks = @(
     @{ Name = "cereal boxes";                First = 1024; Last = 1071; Kind = 3 }
     @{ Name = "cans";                        First = 1072; Last = 1119; Kind = 2 }
     @{ Name = "produce";                     First = 1120; Last = 1143; Kind = 4 }
-)
+    # TASK-1's eighteen sortables, arriving at INT-1. EIGHTEEN ONE-ID BLOCKS AND NOT THREE RUNS,
+    # and that is the crate's design rather than an awkward table: the supply crate is
+    # INTERLEAVED cube / ball / can, deliberately, so no row and no column of its 6 x 3 grid is
+    # a group under either sort rule -- a pre-sorted crate would hand the player round 1's
+    # answer. A "block" here is a run of ids sharing a kind, and in an interleaved crate every
+    # run is length one. Kinds come from the COLLIDER via Carryable.ShapeFromCollider, the same
+    # table that decides the sound: SortCube is a cubic BoxShape3D -> Crate (0), SortBall is a
+    # SphereShape3D r 0.08 <= 0.17 -> Produce (4), SortCan is a CylinderShape3D -> Can (2).
+    # If this cycle ever breaks, TaskRoom.tscn was reordered.
+) + (0..17 | ForEach-Object {
+    $id = 1144 + $_
+    $shape = @(
+        @{ Word = "cube"; Kind = 0 }
+        @{ Word = "ball"; Kind = 4 }
+        @{ Word = "can";  Kind = 2 }
+    )[$_ % 3]
+    @{ Name = ("sortable {0:d3} ({1})" -f $_, $shape.Word); First = $id; Last = $id; Kind = $shape.Kind }
+})
 
 # The first id of each block, at its AUTHORED world pose. SearchRoom.tscn is instanced at x = +40
 # by Supermarket.tscn, so these are the scene's local numbers plus 40 on x. Tolerances are
@@ -158,6 +191,13 @@ $Landmarks = @(
     @{ Id = 1024; Name = "Stock/Box_000";          At = @(36.19, 0.565, -1.16) }
     @{ Id = 1072; Name = "Stock/Can_000";          At = @(36.31, 0.485, -3.26) }
     @{ Id = 1120; Name = "Stock/Produce_000";      At = @(44.85, 0.505, -1.40) }
+    # TASK-1's first sortable (INT-1). TaskRoom.tscn is instanced at x = +80 by Supermarket.tscn
+    # and Sort_000_Red is authored at local (-2.55, 0.695, 0.68), so world x is 77.45. ONE
+    # landmark for the whole crate rather than eighteen: the blocks above already assert every
+    # id's kind, and what a landmark adds is "the block did not SHIFT" -- which one id at the
+    # boundary answers, exactly as the seven above do for theirs. The sortables sit 0.22 m
+    # apart, so the 0.08 m bar separates a settle from a renumbering here too.
+    @{ Id = 1144; Name = "Sort_000_Red (TASK-1)";  At = @(77.45, 0.695, 0.68) }
 )
 
 # Cross-peer agreement. A client mirrors a Resting prop from the server's broadcast, so the two
@@ -170,7 +210,7 @@ $BotADurationSec = 26
 $BotBDurationSec = 16      # joins ~8 s in and stops with A
 $LateJoinDelaySec = 8
 
-Write-Host "=== SHELF-1: the authored-prop adoption proof (130 props, server + late joiner) ===" -ForegroundColor White
+Write-Host "=== SHELF-1: the authored-prop adoption proof (162 props, server + late joiner) ===" -ForegroundColor White
 
 $mutex = Enter-SuiteMutex $MutexTimeoutMinutes
 $procs = @()

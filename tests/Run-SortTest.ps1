@@ -27,14 +27,21 @@
     ROUND 1 IS A COLOUR ROUND (SortRule.For: odd -> colour), so bin 0 wants RED, bin 1 BLUE and
     bin 2 YELLOW. The script is five steps:
 
-      1004 (Sort_000_Red)    -> bin 0   RIGHT   count 1
-      1007 (Sort_003_Blue)   -> bin 2   WRONG   buzzes, count unchanged
-      1010 (Sort_006_Yellow) -> bin 2   RIGHT   count 2
-      1004 again             -> bin 0   ALREADY COUNTED -- must not count again
-      1013 (Sort_009_Red)    -> held    stays in the hider's hands for the burst
+      1144 (Sort_000_Red)    -> bin 0   RIGHT   count 1
+      1147 (Sort_003_Blue)   -> bin 2   WRONG   buzzes, count unchanged
+      1150 (Sort_006_Yellow) -> bin 2   RIGHT   count 2
+      1144 again             -> bin 0   ALREADY COUNTED -- must not count again
+      1153 (Sort_009_Red)    -> held    stays in the hider's hands for the burst
 
-    Ids are 1004..1021 because PropManager.AdoptAuthoredProps assigns by sorted NODE PATH and
-    "SearchRoom" sorts before "TaskRoom", so SearchRoom.tscn's four crates keep 1000-1003.
+    Ids are 1144..1161 because PropManager.AdoptAuthoredProps assigns by sorted NODE PATH and
+    "TaskRoom" sorts AFTER "HoldingRoom" and "SearchRoom", so the sortables take the END of the
+    block. RE-DERIVED AT INT-1 (2026-09-19) FROM Run-AuthoredPropTest's adoption log on the
+    merged tree, which printed `[props] adopted 162 authored prop(s) ... (ids 1000..1161)`. On
+    TASK-1's own base they were 1004..1021, because that base held only CARRY-1's four crates in
+    the search room -- no BTN-1 rack, no HOLD-1 practice corner, no SHELF-1 aisle props. An
+    authored id is a fact about the WHOLE world and a lane's number is only true on that lane's
+    base; SHELF-1's section in .claude/rules/test-suite.md is the rule and this is the third
+    suite to pay it.
 
     Asserted:
 
@@ -45,13 +52,13 @@
          would be comparing two different moments.
       2. THE CARD AGREES WITH IT. The round card's hiderGained is 2 on both peers.
       3. THE WRONG BIN BUZZED, ON EVERY PEER. Each of the three processes logged
-         `sort-bad prop=1007 bin=2`, and none logged `sort-good` for it. Asserted per peer
+         `sort-bad prop=1147 bin=2`, and none logged `sort-good` for it. Asserted per peer
          because TASK-1 puts nothing new on any wire: each peer DERIVES its own verdicts from
          replicated props, so "the server scored it and the clients heard nothing" is exactly
          the failure this has to be able to see.
-      4. ONE OBJECT, ONE COUNT. `sort-good prop=1004` appears exactly once per process across
-         the whole run, even though 1004 was delivered to bin 0 twice.
-      5. THE BURST TOOK WHAT WAS IN THE HAND. Prop 1013 is held by the hider in some sample
+      4. ONE OBJECT, ONE COUNT. `sort-good prop=1144` appears exactly once per process across
+         the whole run, even though 1144 was delivered to bin 0 twice.
+      5. THE BURST TOOK WHAT WAS IN THE HAND. Prop 1153 is held by the hider in some sample
          before the found tick and unheld in the last sample, and the server logged
          `burst force-drop: released 1 prop(s)`.
       6. NOTHING MOVED AFTER THE FOUND TICK. No sort-good line on any peer carries a total above
@@ -88,12 +95,12 @@ $DurationSec = $EndAtSec + 22
 
 # The five steps. Prop ids and bin slots only; the bins' coordinates come out of the bot's own
 # copy of the authored room (SortBin.Find), so this fixture cannot drift from the level.
-$SortScript = "1004:0,1007:2,1010:2,1004:0,1013:-1"
+$SortScript = "1144:0,1147:2,1150:2,1144:0,1153:-1"
 
-$RightA   = 1004   # Sort_000_Red    -> bin 0 (RED)
-$WrongOne = 1007   # Sort_003_Blue   -> bin 2 (YELLOW)
-$RightB   = 1010   # Sort_006_Yellow -> bin 2 (YELLOW)
-$HeldOne  = 1013   # Sort_009_Red    -> never put down
+$RightA   = 1144   # Sort_000_Red    -> bin 0 (RED)
+$WrongOne = 1147   # Sort_003_Blue   -> bin 2 (YELLOW)
+$RightB   = 1150   # Sort_006_Yellow -> bin 2 (YELLOW)
+$HeldOne  = 1153   # Sort_009_Red    -> never put down
 $ExpectedSorts = 2
 
 # HideSeekPhase ordinals, as they ride the wire.
@@ -279,7 +286,7 @@ foreach ($l in $logs) {
         Add-Failure "$($l.Name) SCORED prop $WrongOne -- a blue cube in the YELLOW bin on a colour round"
     }
 
-    # 4: one object, one count -- 1004 went into bin 0 twice.
+    # 4: one object, one count -- 1144 went into bin 0 twice.
     $dupes = @($good | Where-Object { $_.Prop -eq $RightA })
     $dupTotal += [Math]::Max($dupes.Count - 1, 0)
     if ($dupes.Count -ne 1) {
