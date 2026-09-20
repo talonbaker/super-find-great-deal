@@ -1,0 +1,77 @@
+[gd_scene load_steps=8 format=3 uid="uid://dealprod0sfgd"]
+
+; BTN-1 (2026-09-19) — ONE OF THE RACK'S THREE NEAR-MISSES: the produce item.
+;
+; PLACEHOLDER. Read DealBox.tscn's header for the contract SHELF-1 inherits.
+;
+; THE ONLY ONE OF THE THREE THAT IS A BALL, and that is not cosmetic: PropManager.AuthoredKindOf
+; reads the `CollisionShape3D`'s type to decide PropKind, so this one adopts as Ball and the other
+; two as Crate. Nothing about the round cares, but the carry POSE does, and a suite reading prop
+; kinds off the wire will see the difference.
+;
+; DAMPING, copied from Sphere.tscn and for its reason: a sphere with the engine defaults rolls
+; across a flat floor for a very long time. A hidden object that will not stay where the hider put
+; it is a hide the seeker did not have to work for — and, one lane over, a rest audit that never
+; latches.
+
+[ext_resource type="Script" path="res://scripts/game/sandbox/Carryable.cs" id="1_carryable"]
+[ext_resource type="Script" path="res://scripts/game/sandbox/feel/Interactable.cs" id="2_interactable"]
+
+[sub_resource type="SphereMesh" id="SphereMesh_deal"]
+radius = 0.1
+height = 0.2
+radial_segments = 20
+rings = 10
+
+[sub_resource type="SphereShape3D" id="SphereShape3D_deal"]
+radius = 0.1
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_band"]
+top_radius = 0.103
+bottom_radius = 0.103
+height = 0.04
+radial_segments = 20
+
+[sub_resource type="StandardMaterial3D" id="Mat_body"]
+resource_local_to_scene = true
+resource_name = "deal object (red)"
+albedo_color = Color(0.78, 0.13, 0.13, 1)
+roughness = 0.5
+metallic = 0.05
+emission_enabled = true
+emission = Color(0.78, 0.13, 0.13, 1)
+emission_energy_multiplier = 0.35
+
+[sub_resource type="StandardMaterial3D" id="Mat_band"]
+resource_local_to_scene = true
+resource_name = "great deal band (gold)"
+albedo_color = Color(0.93, 0.76, 0.22, 1)
+roughness = 0.3
+metallic = 0.55
+emission_enabled = true
+emission = Color(0.93, 0.76, 0.22, 1)
+emission_energy_multiplier = 0.5
+
+[node name="DealProduce" type="RigidBody3D"]
+mass = 0.6
+linear_damp = 2.0
+angular_damp = 2.0
+script = ExtResource("1_carryable")
+kind = 1
+tint = Color(0.78, 0.13, 0.13, 1)
+
+[node name="Visual" type="Node3D" parent="."]
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Visual"]
+mesh = SubResource("SphereMesh_deal")
+material_override = SubResource("Mat_body")
+
+[node name="Band" type="MeshInstance3D" parent="Visual"]
+mesh = SubResource("CylinderMesh_band")
+material_override = SubResource("Mat_band")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("SphereShape3D_deal")
+
+[node name="Interactable" type="Node" parent="."]
+script = ExtResource("2_interactable")

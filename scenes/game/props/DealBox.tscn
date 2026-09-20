@@ -1,0 +1,94 @@
+[gd_scene load_steps=8 format=3 uid="uid://dealbox0sfgd"]
+
+; BTN-1 (2026-09-19) — ONE OF THE RACK'S THREE NEAR-MISSES: the cereal box.
+;
+; PLACEHOLDER, AND THE FILENAME IS THE CONTRACT. SHELF-1 owns the real three
+; (DealCan/DealBox/DealProduce — a can, a cereal box, a produce item, each wearing a gold "great
+; deal" band) and replaces these three files IN PLACE. Nothing outside scenes/game/props/Deal*.tscn
+; names them: HoldingRoom.tscn instances them by path, PropManager adopts whatever it finds, and
+; the rack answers "is this one of mine" from its own children. So SHELF-1's landing is three file
+; overwrites and no code change anywhere.
+;
+; THE DESIGN CONSTRAINT THEY MUST KEEP (program §0, CLAUDE.md's own summary of the game): the
+; three are the SAME COLOUR and the SAME SIZE CLASS and differ only in SHAPE. That is the whole
+; game — the seeker looks at the two left on the shelf and has to tell a cylinder from a box from
+; a sphere among a room of identical red cubes. A placeholder set that differed in colour would
+; make the MVP look like it works and the real set make it stop.
+;
+; SIZE CLASS 0.2 M (the orchestrator's, 2026-09-19), against the search room's 0.44 m crates: the
+; hidden object is meant to be SMALLER than the clutter, so hiding it is a real act rather than a
+; matter of finding the one place a big box fits.
+;
+; STRUCTURE IS CARRYABLE'S, NOT A CHOICE. A `Visual/MeshInstance3D` plus a `CollisionShape3D`
+; named exactly that, both as direct children, is what makes Carryable._Ready bind the authored
+; mesh and material and BUILD NOTHING (see its "Authored-prefab detection" block). Get either name
+; wrong and it silently falls back to a code-built shape in the Tint colour, which looks like the
+; prop lost its material. The collider's name is load-bearing twice over: PropManager.AuthoredKindOf
+; reads `CollisionShape3D` to decide Crate vs Ball, because a nested instance's exported `kind`
+; reads back as its C# default on this Godot/Mono build.
+
+[ext_resource type="Script" path="res://scripts/game/sandbox/Carryable.cs" id="1_carryable"]
+[ext_resource type="Script" path="res://scripts/game/sandbox/feel/Interactable.cs" id="2_interactable"]
+
+[sub_resource type="BoxMesh" id="BoxMesh_deal"]
+size = Vector3(0.2, 0.26, 0.14)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_deal"]
+size = Vector3(0.2, 0.26, 0.14)
+
+; The band's mesh is deliberately a hair PROUD of the body on two axes (0.205/0.145 against
+; 0.2/0.14) so it never z-fights with the face it sits on. 1 mm is not a magic number; it is the
+; smallest offset that is unambiguous at this scale.
+[sub_resource type="BoxMesh" id="BoxMesh_band"]
+size = Vector3(0.205, 0.05, 0.145)
+
+; THE RED. One colour for all three (see the header). Emission is LOW on purpose: W7-3 measured a
+; prop at emission 2.5 blooming past its own silhouette until a cube read as a ball, and a
+; near-miss whose SHAPE is the entire mechanic cannot afford that. 0.35 keeps it legible in a
+; flat-lit room with headroom for Carryable's highlight pulse, which rests at this value.
+[sub_resource type="StandardMaterial3D" id="Mat_body"]
+resource_local_to_scene = true
+resource_name = "deal object (red)"
+albedo_color = Color(0.78, 0.13, 0.13, 1)
+roughness = 0.5
+metallic = 0.05
+emission_enabled = true
+emission = Color(0.78, 0.13, 0.13, 1)
+emission_energy_multiplier = 0.35
+
+; THE GOLD BAND — the "great deal" flash. Shared recipe across all three; SHELF-1 keeps it.
+[sub_resource type="StandardMaterial3D" id="Mat_band"]
+resource_local_to_scene = true
+resource_name = "great deal band (gold)"
+albedo_color = Color(0.93, 0.76, 0.22, 1)
+roughness = 0.3
+metallic = 0.55
+emission_enabled = true
+emission = Color(0.93, 0.76, 0.22, 1)
+emission_energy_multiplier = 0.5
+
+[node name="DealBox" type="RigidBody3D"]
+mass = 0.6
+script = ExtResource("1_carryable")
+kind = 0
+tint = Color(0.78, 0.13, 0.13, 1)
+
+[node name="Visual" type="Node3D" parent="."]
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Visual"]
+mesh = SubResource("BoxMesh_deal")
+material_override = SubResource("Mat_body")
+
+[node name="Band" type="MeshInstance3D" parent="Visual"]
+mesh = SubResource("BoxMesh_band")
+material_override = SubResource("Mat_band")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("BoxShape3D_deal")
+
+; CARRY-1's feel component. Every prop in this game carries BOTH NetworkedProp (its authority) and
+; Interactable (its feel); see Crate.tscn's own note for why both, and why nothing may be gated on
+; an exported field of this node.
+
+[node name="Interactable" type="Node" parent="."]
+script = ExtResource("2_interactable")

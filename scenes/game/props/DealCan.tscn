@@ -1,0 +1,77 @@
+[gd_scene load_steps=8 format=3 uid="uid://dealcan0sfgd"]
+
+; BTN-1 (2026-09-19) — ONE OF THE RACK'S THREE NEAR-MISSES: the can.
+;
+; PLACEHOLDER. Read DealBox.tscn's header for the contract SHELF-1 inherits (same colour, same
+; size class, shape apart; these three filenames are the only names anything knows).
+;
+; THE COLLIDER IS A BOX AROUND A CYLINDER, DELIBERATELY. Godot's CylinderShape3D is the one
+; primitive its 3D solver is known to be least happy with, and this prop's whole job is to be SET
+; DOWN and STAY there — REACH-1's rest audit fires on every settle and its correction path is
+; judged on the collider, so a shape that jitters at rest would turn a level fact into a physics
+; argument. A 0.11 x 0.2 x 0.11 box is within 1.6 cm of the can's silhouette everywhere, which is
+; well inside what a placeholder owes. SHELF-1 may change it the moment it has a real mesh; if it
+; does, the thing to watch is `[props] rest not good` lines in a server log.
+;
+; The mesh is still a cylinder, because the SHAPE is the mechanic: a seeker glancing at the shelf
+; has to be able to say "it was the round one".
+
+[ext_resource type="Script" path="res://scripts/game/sandbox/Carryable.cs" id="1_carryable"]
+[ext_resource type="Script" path="res://scripts/game/sandbox/feel/Interactable.cs" id="2_interactable"]
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_deal"]
+top_radius = 0.055
+bottom_radius = 0.055
+height = 0.2
+radial_segments = 20
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_deal"]
+size = Vector3(0.11, 0.2, 0.11)
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_band"]
+top_radius = 0.058
+bottom_radius = 0.058
+height = 0.05
+radial_segments = 20
+
+[sub_resource type="StandardMaterial3D" id="Mat_body"]
+resource_local_to_scene = true
+resource_name = "deal object (red)"
+albedo_color = Color(0.78, 0.13, 0.13, 1)
+roughness = 0.5
+metallic = 0.05
+emission_enabled = true
+emission = Color(0.78, 0.13, 0.13, 1)
+emission_energy_multiplier = 0.35
+
+[sub_resource type="StandardMaterial3D" id="Mat_band"]
+resource_local_to_scene = true
+resource_name = "great deal band (gold)"
+albedo_color = Color(0.93, 0.76, 0.22, 1)
+roughness = 0.3
+metallic = 0.55
+emission_enabled = true
+emission = Color(0.93, 0.76, 0.22, 1)
+emission_energy_multiplier = 0.5
+
+[node name="DealCan" type="RigidBody3D"]
+mass = 0.6
+script = ExtResource("1_carryable")
+kind = 0
+tint = Color(0.78, 0.13, 0.13, 1)
+
+[node name="Visual" type="Node3D" parent="."]
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Visual"]
+mesh = SubResource("CylinderMesh_deal")
+material_override = SubResource("Mat_body")
+
+[node name="Band" type="MeshInstance3D" parent="Visual"]
+mesh = SubResource("CylinderMesh_band")
+material_override = SubResource("Mat_band")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("BoxShape3D_deal")
+
+[node name="Interactable" type="Node" parent="."]
+script = ExtResource("2_interactable")
