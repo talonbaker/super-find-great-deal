@@ -730,9 +730,42 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
 
     // --- Behaviour ---------------------------------------------------------------------
 
+    /// <summary><b>PROBE-1's at-rest gate.</b> True while every per-frame visual quantity on this
+    /// prop has arrived and nothing can move it until an event does — see
+    /// <see cref="CarryIdle.IsSettled"/> for what that means and why it is re-read rather than
+    /// latched. Public so a probe can count how many props in a room are actually costing
+    /// nothing, which is the claim this fix makes and therefore the claim that has to be
+    /// measurable.</summary>
+    public bool IsVisuallySettled => Props.PropCostSwitches.CarryableIdleGate
+        && CarryIdle.IsSettled(_homeSet, Freeze, IsHeld, Highlighted,
+            _outlineMesh?.Visible ?? false, _thunkCooldown,
+            _visualScale, _visualScaleVel,
+            _material.EmissionEnergyMultiplier, _baseGlow);
+
     public override void _PhysicsProcess(double delta)
     {
         float dt = (float)delta;
+
+        // PROBE-1 (2026-09-20): NOTHING TO DO FOR A PROP NOTHING HAS TOUCHED.
+        //
+        // Everything below this line either chases something (a holder's anchor, a kill-plane, a
+        // pop spring, an emission lerp) or writes a value that is already correct. When all four
+        // of those have arrived and the body is frozen, the remaining work is four writes through
+        // the engine boundary — three of which reach the RenderingServer — repeated sixty times a
+        // second, per prop, on every peer, forever.
+        //
+        // MEASURED, not reasoned: see docs/agents/handoffs/2026-09-20-PROBE-1.md. The gate is
+        // what makes a room of two thousand items a question about draw calls rather than about
+        // interop.
+        //
+        // The early-out is BEFORE the ApproachSpeedMps read deliberately. That field is the speed
+        // a body carried INTO this step, and a frozen body's LinearVelocity is permanently zero —
+        // so re-reading it here for a resting prop is one interop call to learn a number that
+        // cannot have changed. It is zeroed on the edge into settled (below) so no stale value
+        // survives, which is the same guard NetworkedProp._PhysicsProcess already keeps on
+        // ObservedSpeedMps for the same reason.
+        if (IsVisuallySettled)
+            return;
 
         // Before the physics server integrates this step — see ApproachSpeedMps for why the
         // velocity read inside body_entered is the wrong number for a landing.
@@ -804,6 +837,24 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
             _outlineMesh.Visible = Highlighted && !IsHeld;
 
         _thunkCooldown -= delta;
+
+        // PROBE-1: THE EDGE INTO SETTLED, taken once so the gate above never freezes a residual.
+        //
+        // The pop spring and the emission lerp are both asymptotic — they converge on their
+        // target and never arrive at it — so the gate's epsilons are what decide when a prop is
+        // "done". Landing exactly on the target on the last tick that runs means the resting
+        // state a player sees is the authored one, not the authored one minus an epsilon, and it
+        // means a prop that goes idle and wakes again resumes from a clean value rather than
+        // accumulating a drift per episode. Three writes, once per rest episode, against sixty a
+        // second forever.
+        if (IsVisuallySettled)
+        {
+            _visualScale = Vector3.One;
+            _visualScaleVel = Vector3.Zero;
+            _visual.Scale = Vector3.One;
+            _material.EmissionEnergyMultiplier = _baseGlow;
+            ApproachSpeedMps = 0f;
+        }
     }
 
     /// <summary><b>How fast this body is observed to be moving on a peer that is not simulating
