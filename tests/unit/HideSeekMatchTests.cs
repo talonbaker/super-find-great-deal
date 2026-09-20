@@ -713,8 +713,14 @@ public class HideSeekMatchTests
         {
             RemainingSec = 161f,
         };
-        Assert.Equal("SEEKING · 2:41 · YOU HIDE · ROUND 2",
+        // TASK-1 (2026-09-19) appends the hider's sort readout to the phase line, so the HIDER's
+        // fall-through now carries it. The SEEKER's is untouched and is the one asserted against
+        // MATCH-1's original string -- what this test is about is that the match sentence does
+        // not fire here, and that is still exactly what both halves show.
+        Assert.Equal("SEEKING · 2:41 · YOU HIDE · ROUND 2 · SORTED 0 · BY SHAPE",
             HideSeekText.StripLine(seeking, Host, Name, t));
+        Assert.Equal("SEEKING · 2:41 · YOU SEEK · ROUND 2",
+            HideSeekText.StripLine(seeking, Joiner, Name, t));
 
         Assert.Equal("MATCH 1 · BEN WINS 16–13",
             HideSeekText.StripLine(ViewAt(HideSeekPhase.Tally, MatchWonCard(), Host, Joiner),

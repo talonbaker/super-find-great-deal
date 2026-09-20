@@ -312,9 +312,103 @@ public static class HideSeekText
         Func<int, string>? nameOf, in HideSeekTuning tuning)
     {
         string match = MatchLine(view, nameOf, tuning);
-        return match.Length > 0
-            ? match
-            : StripLine(view.Phase, view.RemainingSec, view.RoleTextFor(selfPeerId), view.Round);
+        if (match.Length > 0)
+            return match;
+
+        string line = StripLine(view.Phase, view.RemainingSec, view.RoleTextFor(selfPeerId),
+            view.Round);
+        string sort = SortLine(view, selfPeerId);
+        return sort.Length > 0 ? line + Sep + sort : line;
+    }
+
+    // ===========================================================================================
+    // TASK-1 - the sorting job's copy.
+    //
+    // Three functions: the hider's strip suffix, the word for the rule, and the word on a bin's
+    // plate. Engine-free and here rather than in SortBin/RoundStripWidget for the reason the
+    // class doc gives and MATCH-1 restates: the plate on the wall, the line on the strip and any
+    // later board have to agree about which rule is running, and a sentence that exists twice is
+    // a sentence that disagrees with itself the first time one copy is edited.
+    //
+    // THE RULE IS DERIVED, NEVER PASSED IN FROM A CALLER'S OWN GUESS. Every function below takes
+    // the round (or a view carrying it) and asks SortRule.For, so the strip cannot say BY COLOUR
+    // while a plate says CUBE.
+    // ===========================================================================================
+
+    /// <summary>
+    /// <b>What the hider's strip says about the job</b>: <c>SORTED 7 - BY COLOUR</c> (with the
+    /// strip's own separator), appended to the ordinary phase line. Empty for everybody else and
+    /// everywhen else.
+    ///
+    /// <para><b>Both halves, and the second one is the one that earns its place.</b> The count
+    /// alone would be a number with no unit — the whole mechanic is that the SAME room means two
+    /// different things on alternating rounds, so a hider glancing at their own strip needs to be
+    /// told which one is running now. It is on the strip rather than only on the bins because a
+    /// player who has walked to the wrong bin has already spent the time the mistake costs.</para>
+    ///
+    /// <list type="bullet">
+    /// <item><b>Only the hider.</b> The seeker is in another room hunting; a sort count on their
+    /// strip would be the one number this game deliberately does not give them (program section 2:
+    /// the seeker's progress is invisible to the hider, and the hider's to the seeker).</item>
+    /// <item><b>Only Seeking and Together.</b> Seeking is when the job is happening; Together is
+    /// the three seconds after the door where the frozen number is what the round was worth. In
+    /// Holding and Hiding there is no job yet, and during Tally the card says it better.</item>
+    /// <item><b>The COUNT is off the wire</b> (<c>view.SortsCompleted</c>) and the RULE is
+    /// derived from <c>view.Round</c>, so this line needs no field of its own on any
+    /// message.</item>
+    /// </list>
+    /// </summary>
+    public static string SortLine(in HideSeekView view, int selfPeerId)
+    {
+        if (view.Phase is not (HideSeekPhase.Seeking or HideSeekPhase.Together))
+            return string.Empty;
+        if (selfPeerId == 0 || selfPeerId != view.HiderPeerId)
+            return string.Empty;
+        return $"SORTED {Math.Max(view.SortsCompleted, 0)}" + Sep
+               + SortRuleLine(SortRule.For(view.Round));
+    }
+
+    /// <summary>The rule as a phrase for a sentence: <c>BY COLOUR</c> / <c>BY SHAPE</c>.</summary>
+    public static string SortRuleLine(SortBy rule) => "BY " + SortRuleWord(rule);
+
+    /// <summary>The rule as one word: <c>COLOUR</c> / <c>SHAPE</c>. Upper case because every
+    /// readout in this game is, and British spelling because the rest of this repo's copy is
+    /// (<c>Tint</c>, <c>Colour</c> in the design docs) - one spelling, chosen once.</summary>
+    public static string SortRuleWord(SortBy rule) =>
+        rule == SortBy.Colour ? "COLOUR" : "SHAPE";
+
+    /// <summary>
+    /// <b>The word on bin <paramref name="binSlot"/>'s plate</b> under <paramref name="rule"/>:
+    /// RED / BLUE / YELLOW on an odd round, CUBE / BALL / CAN on an even one.
+    ///
+    /// <para>Short and singular on purpose. The plate is read across a room at a walk, by
+    /// somebody who is already carrying something, and the plate is also TINTED to the colour
+    /// under a colour round and carries an icon of the shape under a shape round — so the word is
+    /// the redundant channel rather than the only one (<c>INTERACTION-BIBLE.md</c> §8.2), and a
+    /// player who cannot separate this red from this yellow has the word and a player who cannot
+    /// read at a glance has the tint.</para>
+    ///
+    /// <para>An out-of-range slot answers <c>"?"</c> rather than throwing: a fourth bin authored
+    /// by mistake should look obviously wrong on the wall, which is how a level author finds it,
+    /// and should not take a server down.</para>
+    /// </summary>
+    public static string BinPlateWord(SortBy rule, int binSlot)
+    {
+        if (binSlot < 0 || binSlot >= SortRule.BinCount)
+            return "?";
+        return rule == SortBy.Colour
+            ? binSlot switch
+            {
+                (int)SortColour.Red => "RED",
+                (int)SortColour.Blue => "BLUE",
+                _ => "YELLOW",
+            }
+            : binSlot switch
+            {
+                (int)SortShape.Cube => "CUBE",
+                (int)SortShape.Ball => "BALL",
+                _ => "CAN",
+            };
     }
 
     /// <summary>
