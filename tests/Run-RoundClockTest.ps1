@@ -88,7 +88,7 @@ $ErrorActionPreference = "Stop"
 # Confirm at 33 rather than at the packet's +6 is the whole reason the tick rows are reachable
 # at all -- see the DESCRIPTION.
 # ------------------------------------------------------------------------------------------
-$Script = "start@8,confirm@33,towers:3@40,found@45,end@50"
+$Script = "start@8,confirm@33,sorts:3@40,found@45,end@50"
 
 # A CEILING over the schedule above, not an assumption about when anything lands: the last beat
 # is the reset at 56 s after the first arrival, and a client takes a few seconds to boot before

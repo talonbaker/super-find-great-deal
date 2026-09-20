@@ -11,7 +11,7 @@ namespace MpFoundation.Game.Props;
 /// <para><b>Free placement is the default and the default is null.</b> With no validator
 /// registered the server accepts any transform that passes placement integrity, which is the
 /// R.E.P.O. verb the game is built on: you set the thing down exactly where you are holding it.
-/// TASK-1 registers one for the tower pads; BTN-1's drop-off bin can register one to refuse the
+/// TASK-1 registers one for the sorting bins; BTN-1's drop-off bin can register one to refuse the
 /// wrong prop with its own reason instead of a buzz nobody can explain.</para>
 ///
 /// <para><b>It may MOVE the placement, and that is why it returns a transform.</b> A snap pad's

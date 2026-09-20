@@ -183,7 +183,7 @@ public partial class RoundClock : Node3D
 
         string phaseText = HideSeekText.PhaseName(view.Phase);
         string timerText = HideSeekText.ClockLine(view.Phase, view.RemainingSec,
-            view.TowersCompleted, view.LastTally);
+            view.SortsCompleted, view.LastTally);
 
         if (phaseText != _lastPhaseText)
         {

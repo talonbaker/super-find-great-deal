@@ -27,7 +27,7 @@ public static class RoundFacts
     /// retrievable (the packet's "default true until REACH-1 supplies it"). OR-ing it would be
     /// wrong in both directions: a source answering false is a REFUSAL, and one answering null is
     /// not a yes.</item>
-    /// <item><b><see cref="IRoundFactSource.TowersCompleted"/> is the MAXIMUM.</b> It is absolute,
+    /// <item><b><see cref="IRoundFactSource.SortsCompleted"/> is the MAXIMUM.</b> It is absolute,
     /// so summing two sources that both know would double it, and taking the last would let a
     /// source that does not know zero it out.</item>
     /// </list>
@@ -37,7 +37,7 @@ public static class RoundFacts
     {
         bool start = false, rack = false, confirm = false, holds = false, bin = false, end = false;
         bool? retrievable = null;
-        int towers = 0;
+        int sorts = 0;
 
         if (sources is not null)
         {
@@ -52,7 +52,7 @@ public static class RoundFacts
                 bin |= source.TargetInDropOff;
                 end |= source.AnyPressedEnd;
                 retrievable ??= source.TargetRetrievable;
-                towers = Math.Max(towers, source.TowersCompleted);
+                sorts = Math.Max(sorts, source.SortsCompleted);
             }
         }
 
@@ -67,7 +67,7 @@ public static class RoundFacts
             HiderHoldsTarget = holds,
             TargetRetrievable = retrievable,
             TargetInDropOff = bin,
-            TowersCompleted = towers,
+            SortsCompleted = sorts,
             AnyPressedEnd = end,
         };
     }

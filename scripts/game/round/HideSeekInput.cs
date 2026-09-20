@@ -81,10 +81,10 @@ public readonly record struct HideSeekInput
     /// off it.</summary>
     public bool TargetInDropOff { get; init; }
 
-    /// <summary>Towers the hider has completed this round, <b>absolute, never an increment</b>
+    /// <summary>Sorts the hider has completed this round, <b>absolute, never an increment</b>
     /// (TASK-1). Absolute is what makes the message wire-ready and a re-sent tick harmless — the
     /// same reasoning the loop this replaces used for its carried-coin counts.</summary>
-    public int TowersCompleted { get; init; }
+    public int SortsCompleted { get; init; }
 
     /// <summary>Somebody pressed End this tick (BTN-1). Read only in
     /// <see cref="HideSeekPhase.Together"/>.</summary>

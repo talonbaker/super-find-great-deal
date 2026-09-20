@@ -150,10 +150,10 @@ public class RoundClockTests
     // =====================================================================================
 
     private static HideSeekView View(HideSeekPhase phase, float remaining = 0f, int round = 1,
-        int towers = 0, HideSeekTally? tally = null) =>
+        int sorts = 0, HideSeekTally? tally = null) =>
         new(phase, round, remaining, HiderPeerId: 11, SeekerPeerId: 22,
             Scores: ImmutableDictionary<int, int>.Empty, Refusal: HideSeekRefusal.None,
-            TowersCompleted: towers, FoundTick: HideSeekWire.NoFoundTick, LastTally: tally);
+            SortsCompleted: sorts, FoundTick: HideSeekWire.NoFoundTick, LastTally: tally);
 
     private static RoundCue Only(IReadOnlyList<RoundCue> cues)
     {

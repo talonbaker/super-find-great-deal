@@ -32,7 +32,7 @@
          passes "round 2 ended one" on its own, and so does one that never reset a score.
 
     HOW IT IS DRIVEN. --round-script (a dev flag, server-side, additive-only -- see
-    ScriptedRoundFactSource) feeds the facts BTN-1's buttons, CARRY-1's bin and TASK-1's towers
+    ScriptedRoundFactSource) feeds the facts BTN-1's buttons, CARRY-1's bin and TASK-1's sorting
     will feed later. The script's clock starts when the first player arrives rather than at server
     boot, so the schedule is not racing the clients' own launch -- the "derive a lifetime from the
     schedule it must outlive" rule from .claude/rules/test-suite.md, applied to the schedule
@@ -100,7 +100,7 @@ $VestibuleClearanceM = 2.0 * $ArrivalRadiusM
 #   4  a Start with empty hands -> refused, named, round does not begin
 #   8  Start properly            -> Hiding, hider to the search room
 #   14 Confirm                   -> Seeking, hider to the task room, seeker to the search room
-#   18 towers:3                  -> the hider's score for this round
+#   18 sorts:3                  -> the hider's score for this round
 #   22 the object is in the bin  -> Together, seeker to the vestibule
 #   28 End                       -> Tally, card for round 1, matchOver=FALSE, 6 s of tally
 #   +6 s                         -> the reset edge, everyone home, ROLES SWAP
@@ -112,7 +112,7 @@ $VestibuleClearanceM = 2.0 * $ArrivalRadiusM
 #                                   second round started with it still set walks Hiding -> Seeking
 #                                   -> Together in one tick and never tests anything.
 #   40 Start                     -> Hiding, round 2
-#   44 towers:1                  -> a DIFFERENT tower count, so the two cards cannot be confused
+#   44 sorts:1                  -> a DIFFERENT sort count, so the two cards cannot be confused
 #                                   for each other and the two totals cannot come out equal
 #   46 Confirm                   -> Seeking
 #   58 the object is in the bin  -> Together
@@ -130,8 +130,8 @@ $VestibuleClearanceM = 2.0 * $ArrivalRadiusM
 #   round 2: hider +1, seeker +168 (180 - 12)  -> B=173, A=171   (roles swapped)
 #   match 1: B WINS 173-171
 # Both totals stay under the wire's 255 byte clamp on purpose.
-$Script = ("noobject@3,start@4,object@6,start@8,confirm@14,towers:3@18,found@22,end@28," +
-           "lost@36,start@40,towers:1@44,confirm@46,found@58,end@63,start@78")
+$Script = ("noobject@3,start@4,object@6,start@8,confirm@14,sorts:3@18,found@22,end@28," +
+           "lost@36,start@40,sorts:1@44,confirm@46,found@58,end@63,start@78")
 
 # Bot lifetime: the schedule's last beat (78) plus a settle long enough to log a dozen samples of
 # round 3's Hiding with the scores already zeroed. A CEILING, not an assumption about when
@@ -505,7 +505,7 @@ try {
         }
     }
 
-    # The hider's score IS the frozen tower count the script set for THAT round, which is what
+    # The hider's score IS the frozen sort count the script set for THAT round, which is what
     # makes this a check on the round rather than on two peers agreeing about nothing. Two
     # different counts, so the two cards cannot be confused for each other.
     foreach ($want in @(@{ Round = 1; Towers = 3 }, @{ Round = 2; Towers = 1 })) {
@@ -513,7 +513,7 @@ try {
             if (-not $b.Cards.ContainsKey($want.Round)) { continue }
             $got = [int]$b.Cards[$want.Round].roundTally.hiderGained
             if ($got -ne $want.Towers) {
-                Add-Failure ("$($b.Name): round $($want.Round)'s card credits the hider $got tower(s); the " +
+                Add-Failure ("$($b.Name): round $($want.Round)'s card credits the hider $got sort(s); the " +
                              "script set $($want.Towers) before the find, so the freeze at the Found tick did not happen")
             }
         }

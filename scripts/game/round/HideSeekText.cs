@@ -335,10 +335,10 @@ public static class HideSeekText
     /// whole point of the clock existing, and reimplementing the format here is how they would
     /// come to disagree by a second.</item>
     /// <item><b>Together</b> — what the hider got done before the door. <b>The live
-    /// <c>TowersCompleted</c> off the wire</b>, which is the only count that is on the wire at
-    /// all; the frozen <c>TowersAtFound</c> is server bookkeeping. The word is SORTED because the
-    /// task room sorts objects into bins (Talon, 2026-09-19); the FIELD keeps its name until
-    /// TASK-1 renames it, and this line is copy, not a rename.</item>
+    /// <c>SortsCompleted</c> off the wire</b>, which is the only count that is on the wire at
+    /// all; the frozen <c>SortsAtFound</c> is server bookkeeping. The word is SORTED because the
+    /// task room sorts objects into bins (Talon, 2026-09-19), and since TASK-1 the FIELD says so
+    /// too — the copy came first and the rename caught up with it.</item>
     /// <item><b>Tally</b> — the card, as two numbers. <c>HID</c> is the hider's sorts and
     /// <c>SEEK</c> is the seeker's seconds; they are not comparable and the card does not pretend
     /// they are (proposal §3.3). A card that ended on a disconnect says so in words instead,
@@ -349,12 +349,12 @@ public static class HideSeekText
     /// shrinks the label to keep a long line inside the panel, so a wordy arm here does not
     /// overflow the clock — it makes the clock unreadable at eight metres, which is worse.</para>
     /// </summary>
-    public static string ClockLine(HideSeekPhase phase, float remainingSec, int towersCompleted,
+    public static string ClockLine(HideSeekPhase phase, float remainingSec, int sortsCompleted,
         HideSeekTally? tally) => phase switch
     {
         HideSeekPhase.Holding => string.Empty,
         HideSeekPhase.Hiding or HideSeekPhase.Seeking => TimerText(remainingSec),
-        HideSeekPhase.Together => $"{Math.Max(towersCompleted, 0)} SORTED",
+        HideSeekPhase.Together => $"{Math.Max(sortsCompleted, 0)} SORTED",
         HideSeekPhase.Tally => tally is not { } card
             ? string.Empty
             : card.EndedByDisconnect

@@ -68,7 +68,7 @@ if ($Pass -eq 1) {
     # exactly that: the task clock read ENDED_EARLY instead of a tally.
     $SeekerDuration = 56
 } else {
-    $Script = "start@8,confirm@14,towers:3@20,found@30,end@35"
+    $Script = "start@8,confirm@14,sorts:3@20,found@30,end@35"
     $HiderGoto = "80,0"      # the middle of the task room
     # Measured: the tally card is on the wall from about 33 s to 38 s of this client's own life
     # (Tally is 6 s). The first run's marks started at 40 and photographed the holding room of

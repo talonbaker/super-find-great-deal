@@ -264,14 +264,14 @@ public class HideSeekLoopTests
     [Fact]
     public void AHideStillBrokenAfterTheGrace_GoesToTallyWithTheHiderScoringNothing()
     {
-        HideSeekInput unreachable = Idle with { TargetRetrievable = false, TowersCompleted = 4 };
+        HideSeekInput unreachable = Idle with { TargetRetrievable = false, SortsCompleted = 4 };
         HideSeekState s = StartedRound();
         for (int i = 0; i < 60 * 60 && s.Phase == HideSeekPhase.Hiding; i++)
             s = Tick(s, unreachable);
 
         Assert.Equal(HideSeekPhase.Tally, s.Phase);
         HideSeekTally card = Card(s);
-        Assert.Equal(0, card.HiderGained);   // the hide failed; the towers are not a consolation
+        Assert.Equal(0, card.HiderGained);   // the hide failed; the sorts are not a consolation
         Assert.Equal(0, card.SeekerGained);  // and the seeker was never asked to find it
         Assert.Equal(HideSeekRefusal.NobodyCouldReachThat, s.Refusal);
         Assert.Equal(0, s.ScoreOf(Host));
@@ -299,46 +299,46 @@ public class HideSeekLoopTests
     // --- Seeking -> Together, and the seek timeout ------------------------------------------------
 
     [Fact]
-    public void TheFind_FreezesTheTowersAndTheClock_AndStampsTheFoundTick()
+    public void TheFind_FreezesTheSortsAndTheClock_AndStampsTheFoundTick()
     {
         HideSeekState s = StartedRound();
         s = Tick(s, Idle with { HiderPressedConfirm = true });
 
         // 20 s of seeking with the hider stacking.
-        HideSeekInput stacking = Idle with { TowersCompleted = 3 };
+        HideSeekInput stacking = Idle with { SortsCompleted = 3 };
         for (int i = 0; i < 60 * 20; i++)
             s = Tick(s, stacking);
 
         s = Tick(s, stacking with { TargetInDropOff = true });
 
         Assert.Equal(HideSeekPhase.Together, s.Phase);
-        Assert.Equal(3, s.TowersAtFound);
+        Assert.Equal(3, s.SortsAtFound);
         Assert.NotNull(s.FoundTick);
         Assert.InRange(s.RemainingAtFoundSec, 159, 160);
     }
 
-    /// <summary>A tower finished on the exact tick the object lands in the bin IS counted — the
+    /// <summary>A sort finished on the exact tick the object lands in the bin IS counted — the
     /// fact is folded before the transition is evaluated. This is the fold-first ordering the loop
     /// inherited, stated as a test rather than as a comment.</summary>
     [Fact]
-    public void ATowerFinishedOnTheFindTick_IsCounted()
+    public void ASortFinishedOnTheFindTick_IsCounted()
     {
         HideSeekState s = StartedRound();
         s = Tick(s, Idle with { HiderPressedConfirm = true });
         for (int i = 0; i < 60; i++)
-            s = Tick(s, Idle with { TowersCompleted = 2 });
+            s = Tick(s, Idle with { SortsCompleted = 2 });
 
-        s = Tick(s, Idle with { TowersCompleted = 3, TargetInDropOff = true });
-        Assert.Equal(3, s.TowersAtFound);
+        s = Tick(s, Idle with { SortsCompleted = 3, TargetInDropOff = true });
+        Assert.Equal(3, s.SortsAtFound);
     }
 
     [Fact]
-    public void TheSeekTimeout_GoesStraightToTally_HiderKeepsTheTowers_SeekerScoresNothing()
+    public void TheSeekTimeout_GoesStraightToTally_HiderKeepsTheSorts_SeekerScoresNothing()
     {
         HideSeekState s = StartedRound();
         s = Tick(s, Idle with { HiderPressedConfirm = true });
 
-        HideSeekInput stacking = Idle with { TowersCompleted = 5 };
+        HideSeekInput stacking = Idle with { SortsCompleted = 5 };
         s = RunUntilPhaseLeaves(s, stacking);
 
         Assert.Equal(HideSeekPhase.Tally, s.Phase);
@@ -373,14 +373,14 @@ public class HideSeekLoopTests
         HideSeekState s = StartedRound();
         s = Tick(s, Idle with { HiderPressedConfirm = true });
         for (int i = 0; i < 60 * 10; i++)
-            s = Tick(s, Idle with { TowersCompleted = 2 });
-        s = Tick(s, Idle with { TowersCompleted = 2, TargetInDropOff = true });
+            s = Tick(s, Idle with { SortsCompleted = 2 });
+        s = Tick(s, Idle with { SortsCompleted = 2, TargetInDropOff = true });
         s = Tick(s, Idle with { TargetInDropOff = true, AnyPressedEnd = true });
 
         HideSeekTally first = Card(s);
         // Facts keep arriving during Tally; the card must not move.
         for (int i = 0; i < 60 * 3; i++)
-            s = Tick(s, Idle with { TowersCompleted = 99 });
+            s = Tick(s, Idle with { SortsCompleted = 99 });
         Assert.Equal(first, Card(s));
     }
 
@@ -426,11 +426,11 @@ public class HideSeekLoopTests
     {
         HideSeekState s = StartedRound();
 
-        // Round 1: host hides, 4 towers, found.
+        // Round 1: host hides, 4 sorts, found.
         s = Tick(s, Idle with { HiderPressedConfirm = true });
         for (int i = 0; i < 60 * 5; i++)
-            s = Tick(s, Idle with { TowersCompleted = 4 });
-        s = Tick(s, Idle with { TowersCompleted = 4, TargetInDropOff = true });
+            s = Tick(s, Idle with { SortsCompleted = 4 });
+        s = Tick(s, Idle with { SortsCompleted = 4, TargetInDropOff = true });
         int seekerGain1 = s.RemainingAtFoundSec;
         s = Tick(s, Idle with { TargetInDropOff = true, AnyPressedEnd = true });
         s = RunUntilPhaseLeaves(s, Idle);   // back to Holding, roles swapped
@@ -438,15 +438,15 @@ public class HideSeekLoopTests
         Assert.Equal(4, s.ScoreOf(Host));
         Assert.Equal(seekerGain1, s.ScoreOf(Joiner));
 
-        // Round 2: the joiner hides now, 2 towers, seek times out.
+        // Round 2: the joiner hides now, 2 sorts, seek times out.
         s = Tick(s, Idle with { HostPressedStart = true, HiderHeldRackProp = true });
         Assert.Equal(HideSeekPhase.Hiding, s.Phase);
         s = Tick(s, Idle with { HiderPressedConfirm = true });
-        s = RunUntilPhaseLeaves(s, Idle with { TowersCompleted = 2 });
+        s = RunUntilPhaseLeaves(s, Idle with { SortsCompleted = 2 });
 
         Assert.Equal(HideSeekPhase.Tally, s.Phase);
         Assert.Equal(4, s.ScoreOf(Host));                    // the host sought and timed out
-        Assert.Equal(seekerGain1 + 2, s.ScoreOf(Joiner));    // the joiner hid and kept 2 towers
+        Assert.Equal(seekerGain1 + 2, s.ScoreOf(Joiner));    // the joiner hid and kept 2 sorts
     }
 
     // --- a role holder leaving mid-round --------------------------------------------------------
@@ -561,7 +561,7 @@ public class HideSeekLoopTests
     {
         HideSeekState s = StartedRound();
         s = Tick(s, Idle with { HiderPressedConfirm = true });
-        s = Tick(s, Idle with { TowersCompleted = 3, TargetInDropOff = true });
+        s = Tick(s, Idle with { SortsCompleted = 3, TargetInDropOff = true });
         s = Tick(s, Idle with { TargetInDropOff = true, AnyPressedEnd = true });
 
         HideSeekWire wire = HideSeekWire.Encode(s, new[] { Host, Joiner });
@@ -697,13 +697,13 @@ public class HideSeekLoopTests
     {
         HideSeekState s = StartedRound();
         s = Tick(s, Idle with { HiderPressedConfirm = true });
-        s = Tick(s, Idle with { TowersCompleted = 7, TargetInDropOff = true });
+        s = Tick(s, Idle with { SortsCompleted = 7, TargetInDropOff = true });
         s = Tick(s, Idle with { TargetInDropOff = true, AnyPressedEnd = true });
 
         HideSeekWire wire = HideSeekWire.Encode(s, new[] { Host, Joiner });
         var p = wire.Pack();
         HideSeekWire back = HideSeekWire.Unpack(p.Phase, p.Round, p.RemainingTenths, p.Hider,
-            p.Seeker, p.ScorePeers, p.ScoreValues, p.Refusal, p.Towers, p.FoundTick,
+            p.Seeker, p.ScorePeers, p.ScoreValues, p.Refusal, p.Sorts, p.FoundTick,
             p.TallyRound, p.TallyHider, p.TallyHiderGain, p.TallySeeker, p.TallySeekerGain,
             p.TallyByDisconnect,
             // MATCH-1's five. They are passed EXPLICITLY here rather than left to the optional
@@ -726,7 +726,7 @@ public class HideSeekLoopTests
         var p = wire.Pack();
         Assert.Equal(HideSeekWire.NoTallyRound, p.TallyRound);
         HideSeekWire back = HideSeekWire.Unpack(p.Phase, p.Round, p.RemainingTenths, p.Hider,
-            p.Seeker, p.ScorePeers, p.ScoreValues, p.Refusal, p.Towers, p.FoundTick,
+            p.Seeker, p.ScorePeers, p.ScoreValues, p.Refusal, p.Sorts, p.FoundTick,
             p.TallyRound, p.TallyHider, p.TallyHiderGain, p.TallySeeker, p.TallySeekerGain,
             p.TallyByDisconnect);
         Assert.Null(back.Tally);

@@ -463,7 +463,7 @@ public partial class HideSeekDriver : Node
 
         var p = wire.Pack();
         Rpc(MethodName.ApplyRound, p.Phase, p.Round, p.RemainingTenths, p.Hider, p.Seeker,
-            p.ScorePeers, p.ScoreValues, p.Refusal, p.Towers, p.FoundTick, p.TallyRound,
+            p.ScorePeers, p.ScoreValues, p.Refusal, p.Sorts, p.FoundTick, p.TallyRound,
             p.TallyHider, p.TallyHiderGain, p.TallySeeker, p.TallySeekerGain, p.TallyByDisconnect,
             p.TallyMatchOver, p.TallyMatchIndex, p.TallyWinner, p.TallyHiderTotal,
             p.TallySeekerTotal,
@@ -483,7 +483,7 @@ public partial class HideSeekDriver : Node
             return;
         var p = HideSeekWire.Encode(_state, _roster).Pack();
         RpcId(peerId, MethodName.ApplyRound, p.Phase, p.Round, p.RemainingTenths, p.Hider,
-            p.Seeker, p.ScorePeers, p.ScoreValues, p.Refusal, p.Towers, p.FoundTick, p.TallyRound,
+            p.Seeker, p.ScorePeers, p.ScoreValues, p.Refusal, p.Sorts, p.FoundTick, p.TallyRound,
             p.TallyHider, p.TallyHiderGain, p.TallySeeker, p.TallySeekerGain, p.TallyByDisconnect,
             p.TallyMatchOver, p.TallyMatchIndex, p.TallyWinner, p.TallyHiderTotal,
             p.TallySeekerTotal,
@@ -497,7 +497,7 @@ public partial class HideSeekDriver : Node
         TransferMode = MultiplayerPeer.TransferModeEnum.Reliable,
         TransferChannel = NetProfile.RoundChannel, CallLocal = true)]
     private void ApplyRound(byte phase, int round, int remainingTenths, int hider, int seeker,
-        int[] scorePeers, int[] scoreValues, byte refusal, int towers, int foundTick,
+        int[] scorePeers, int[] scoreValues, byte refusal, int sorts, int foundTick,
         int tallyRound, int tallyHider, int tallyHiderGain, int tallySeeker, int tallySeekerGain,
         bool tallyByDisconnect, bool tallyMatchOver, int tallyMatchIndex, int tallyWinner,
         int tallyHiderTotal, int tallySeekerTotal, uint seq)
@@ -505,7 +505,7 @@ public partial class HideSeekDriver : Node
         _ = seq;   // reliable + ordered: no staleness guard is needed (RunDriver's note).
 
         HideSeekWire wire = HideSeekWire.Unpack(phase, round, remainingTenths, hider, seeker,
-            scorePeers, scoreValues, refusal, towers, foundTick, tallyRound, tallyHider,
+            scorePeers, scoreValues, refusal, sorts, foundTick, tallyRound, tallyHider,
             tallyHiderGain, tallySeeker, tallySeekerGain, tallyByDisconnect,
             tallyMatchOver, tallyMatchIndex, tallyWinner, tallyHiderTotal, tallySeekerTotal);
 
