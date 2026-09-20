@@ -63,7 +63,20 @@ public sealed partial class ReachPlantSelfTest : Node
     /// <summary>The prop manager. Set by <c>Gameplay</c> before this node is added.</summary>
     public PropManager Props { get; set; } = null!;
 
-    private enum Stage { Warmup, Statics, Faller, ConfirmOnAMover, Done }
+    private enum Stage { Warmup, Statics, Faller, ConfirmOnAMover, DepenetrateTolerance, Done }
+
+    /// <summary>REVIEW-1 I5. The tolerance the depenetration case hands
+    /// <see cref="PlacementIntegrity.TryDepenetrate"/>, metres. Chosen ABOVE the plinth overlap
+    /// <see cref="StaticCases"/> measures at 0.125 m and far above
+    /// <see cref="PlacementIntegrity.DefaultOverlapToleranceM"/> (0.02 m), so the two answers are
+    /// unmistakably different: a loop that honours its caller finds nothing to push and moves
+    /// 0.000 m, and a loop that re-tests against the hard-coded default pushes the whole
+    /// 0.125 m.</summary>
+    private const float ToleranceCaseM = 0.20f;
+
+    /// <summary>How far the prop may be moved by a <see cref="ToleranceCaseM"/>-tolerance
+    /// depenetration before the loop is judging by somebody else's bar, metres.</summary>
+    private const float ToleranceCaseMaxMoveM = 0.001f;
 
     /// <summary>The prop the Confirm-time case shoves. It is 3 m up on a ledge, so an upward
     /// nudge buys a long, unambiguous flight and the assertion never has to race a settle.
@@ -171,6 +184,11 @@ public sealed partial class ReachPlantSelfTest : Node
 
             case Stage.ConfirmOnAMover:
                 TickConfirmOnAMover();
+                break;
+
+            case Stage.DepenetrateTolerance:
+                RunDepenetrateTolerance();
+                Finish();
                 break;
         }
     }
@@ -381,7 +399,82 @@ public sealed partial class ReachPlantSelfTest : Node
         foreach (string p in problems)
             Fail($"{MoverNode} (Confirm while it is still falling): {p}");
 
-        Finish();
+        _stage = Stage.DepenetrateTolerance;
+    }
+
+    // --- the one where layer 1 and layer 2 can drift apart ------------------------------------
+
+    /// <summary>
+    /// <b>REVIEW-1 I5: <see cref="PlacementIntegrity.TryDepenetrate"/> must judge its corrections
+    /// by the tolerance it was GIVEN.</b>
+    ///
+    /// <para><c>Check</c>'s own parameter doc says <c>overlapToleranceM</c> exists "so layer 1 and
+    /// layer 2 can never drift to two different numbers by accident", and
+    /// <c>RestAudit.Correct</c> duly hands the caller's value down. The depenetration loop then
+    /// threw it away: it compared the measured depth against
+    /// <see cref="PlacementIntegrity.DefaultOverlapToleranceM"/> and re-tested each pushed
+    /// candidate with a bare <c>Check(propBody, candidate)</c>. Today the two numbers are aliased
+    /// (<c>PropManager.PlaceOverlapToleranceM</c> IS the default), so nothing is visibly wrong —
+    /// which is exactly what makes it a trap: the day anyone moves one, the loop starts reporting
+    /// <c>Depenetrated</c> for a pose the audit that called it then refuses, or refuses a pose the
+    /// audit would have accepted and sends a hidden object back to its last-good transform for no
+    /// reason.</para>
+    ///
+    /// <para><b>The case makes the two numbers differ on purpose</b>, which is the only way to see
+    /// it at all: <c>Prop_8_Shallow</c> sits 0.12 m into a plinth, and at a tolerance of
+    /// <see cref="ToleranceCaseM"/> there is nothing to correct. A loop that honours its caller
+    /// moves it 0.000 m; the shipped-default loop pushes it the full 0.125 m the case above
+    /// measures.</para>
+    /// </summary>
+    private void RunDepenetrateTolerance()
+    {
+        NetworkedProp? shallow = FindProp("Prop_8_Shallow");
+        if (shallow is null)
+        {
+            Fail("Prop_8_Shallow is not in the planted room — the depenetration-tolerance case "
+                 + "cannot run");
+            _verdicts.Add($"{Prefix} VERDICT Prop_8_Shallow (depenetration honours the caller's "
+                          + "tolerance) MISSING -> FAIL");
+            return;
+        }
+
+        // Where it sits NOW: the statics pass already depenetrated it, so re-running at the
+        // default tolerance from here finds nothing. The overlap this case needs is the authored
+        // one, which RestAudit recorded as the audit's `From` pose.
+        Transform3D authored = Props.LastAuditFor(shallow.PropId) is { } a
+            ? a.From
+            : shallow.Body.GlobalTransform;
+
+        bool generous = PlacementIntegrity.TryDepenetrate(shallow.Body, authored,
+            PropManager.DepenetrateMaxM, ToleranceCaseM,
+            out Transform3D _, out float generousMoved, out int generousQueries);
+        bool strict = PlacementIntegrity.TryDepenetrate(shallow.Body, authored,
+            PropManager.DepenetrateMaxM, PlacementIntegrity.DefaultOverlapToleranceM,
+            out Transform3D _, out float strictMoved, out int strictQueries);
+        _totalQueries += generousQueries + strictQueries;
+
+        var problems = new List<string>();
+        if (generousMoved > ToleranceCaseMaxMoveM)
+            problems.Add($"a {ToleranceCaseM:0.000} m tolerance still pushed it "
+                         + $"{generousMoved:0.000} m — the loop is judging by "
+                         + $"DefaultOverlapToleranceM ({PlacementIntegrity.DefaultOverlapToleranceM:0.000} m) "
+                         + "rather than by the value it was handed");
+        // The positive control, and it is not optional: a TryDepenetrate that had simply stopped
+        // correcting anything would satisfy the assertion above perfectly.
+        if (!strict || strictMoved <= ToleranceCaseMaxMoveM)
+            problems.Add($"at the shipped {PlacementIntegrity.DefaultOverlapToleranceM:0.000} m "
+                         + $"tolerance it returned {strict} after {strictMoved:0.000} m — the "
+                         + "control says this fixture no longer depenetrates at all, so the case "
+                         + "above proves nothing");
+
+        string verdict = problems.Count == 0 ? "PASS" : "FAIL";
+        _verdicts.Add($"{Prefix} VERDICT Prop_8_Shallow (depenetration honours the caller's "
+                      + $"tolerance) prop={shallow.PropId} "
+                      + $"at{ToleranceCaseM:0.00}m={generous}/{generousMoved:0.000}m "
+                      + $"at{PlacementIntegrity.DefaultOverlapToleranceM:0.00}m={strict}/{strictMoved:0.000}m "
+                      + $"-> {verdict}");
+        foreach (string p in problems)
+            Fail($"Prop_8_Shallow (depenetration honours the caller's tolerance): {p}");
     }
 
     // --- plumbing -----------------------------------------------------------------------------
@@ -418,8 +511,8 @@ public sealed partial class ReachPlantSelfTest : Node
         GD.Print($"{Prefix} audits={Props.RestAuditCount} corrections={Props.RestCorrectionCount} "
                  + $"stuck={Props.StuckPropCount} integrity-queries={Props.IntegrityQueryCount} "
                  + $"reach-queries={_totalQueries - Props.IntegrityQueryCount}");
-        // +2: the faller, and REVIEW-1's Confirm-on-a-mover.
-        GD.Print($"{SummaryPrefix} cases={StaticCases.Length + 2} failures={_failures.Count} "
+        // +3: the faller, and REVIEW-1's Confirm-on-a-mover and depenetration-tolerance cases.
+        GD.Print($"{SummaryPrefix} cases={StaticCases.Length + 3} failures={_failures.Count} "
                  + $"result={(_failures.Count == 0 ? "PASS" : "FAIL")}");
         GetTree().Quit(_failures.Count == 0 ? 0 : 1);
     }

@@ -163,7 +163,9 @@ public static class RestAudit
         PlacementIntegrity.Verdict verdict, float toleranceM, float maxDepenetrateM, int queries)
     {
         // 1. Push it out, if a push of the allowed size can do it.
-        if (PlacementIntegrity.TryDepenetrate(prop.Body, restAt, maxDepenetrateM,
+        // toleranceM, not the default: layer 1 and layer 2 must judge by one number, and this is
+        // the call site Check's own parameter doc names (REVIEW-1 I5).
+        if (PlacementIntegrity.TryDepenetrate(prop.Body, restAt, maxDepenetrateM, toleranceM,
                 out Transform3D pushed, out float movedM, out int pushQueries))
         {
             queries += pushQueries;
