@@ -344,10 +344,13 @@ emission_energy_multiplier = 0.12
         foreach (RoomCollider c in stock.Colliders)
         {
             string key = $"{F(c.SizeX)},{F(c.SizeY)},{F(c.SizeZ)}";
+            // The comment goes ABOVE the header, which is where every hand-authored .tscn in this
+            // repo puts one. A ";" line sitting between a node's properties and the next header
+            // parses, but it reads as a property nobody recognises.
+            nodes.Append($"; {c.Why}\n");
             nodes.Append($"[node name=\"Run_{n:D3}\" type=\"CollisionShape3D\" parent=\"Collision\"]\n");
             nodes.Append($"transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, {F(c.X)}, {F(c.Y)}, {F(c.Z)})\n");
-            nodes.Append($"shape = SubResource(\"{shapeIds[key]}\")\n");
-            nodes.Append($"; {c.Why}\n\n");
+            nodes.Append($"shape = SubResource(\"{shapeIds[key]}\")\n\n");
             n++;
         }
 
