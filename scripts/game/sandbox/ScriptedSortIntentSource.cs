@@ -52,8 +52,12 @@ public sealed class ScriptedSortIntentSource : IIntentSource
     /// How close the body gets to an object in the crate before it presses grab, metres,
     /// measured horizontally.
     ///
-    /// <para><b>1.8 m, not <see cref="ScriptedCarryIntentSource"/>'s 1.2 m, and the difference
-    /// was measured rather than chosen.</b> The sortables sit on a 1.4 m-wide plinth, so a body
+    /// <para><b>1.8 m, and it was measured rather than chosen.</b> It was copied here from
+    /// <see cref="ScriptedCarryIntentSource"/> as 1.2 m and raised on the evidence below; that
+    /// source kept its 1.2 and went on losing one driver in two runs of five to the identical
+    /// wall, until REVIEW-1 (2026-09-20) gave it a <c>GrabStandM</c> of its own — the same number
+    /// by the same derivation, separate from the WAYPOINT tolerance that has to stay at 1.2.
+    /// The sortables sit on a 1.4 m-wide plinth, so a body
     /// walking at one on the far column of the grid is stopped by the crate itself with the
     /// object still 1.40 m away. On the first run of <c>tests/Run-SortTest.ps1</c> the bot
     /// delivered its first two objects, then walked into the crate and stood at (78.85, 1.01)

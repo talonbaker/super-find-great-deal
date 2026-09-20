@@ -1,6 +1,8 @@
 using System.Collections.Generic;
 using Godot;
 using MpFoundation.Game.Props;
+using MpFoundation.Game.Round;
+using MpFoundation.Net;
 
 namespace MpFoundation.Game.World;
 
@@ -26,6 +28,13 @@ namespace MpFoundation.Game.World;
 /// CLEARS. Without it the scene proves the fallback branch three times and the correction branch
 /// never — and the correction is the branch that runs in a real session, where a crate 4 cm into
 /// a shelf is common and a crate buried in a wall is not.</para>
+///
+/// <para><b>Eight, since REVIEW-1 (2026-09-20).</b> The last one is the Confirm-time audit
+/// against a target that is still in the air — the one case where the audit could MOVE the game
+/// rather than measure it. It goes through the shipped
+/// <see cref="ReachabilityFactSource.AuditBeforeConfirm"/>, not through
+/// <see cref="PropManager.ServerAuditRest"/> directly, because the defect was in which of those
+/// two the press reaches.</para>
 /// </summary>
 public sealed partial class ReachPlantSelfTest : Node
 {
@@ -54,7 +63,40 @@ public sealed partial class ReachPlantSelfTest : Node
     /// <summary>The prop manager. Set by <c>Gameplay</c> before this node is added.</summary>
     public PropManager Props { get; set; } = null!;
 
-    private enum Stage { Warmup, Statics, Faller, Done }
+    private enum Stage { Warmup, Statics, Faller, ConfirmOnAMover, DepenetrateTolerance, Done }
+
+    /// <summary>REVIEW-1 I5. The tolerance the depenetration case hands
+    /// <see cref="PlacementIntegrity.TryDepenetrate"/>, metres. Chosen ABOVE the plinth overlap
+    /// <see cref="StaticCases"/> measures at 0.125 m and far above
+    /// <see cref="PlacementIntegrity.DefaultOverlapToleranceM"/> (0.02 m), so the two answers are
+    /// unmistakably different: a loop that honours its caller finds nothing to push and moves
+    /// 0.000 m, and a loop that re-tests against the hard-coded default pushes the whole
+    /// 0.125 m.</summary>
+    private const float ToleranceCaseM = 0.20f;
+
+    /// <summary>How far the prop may be moved by a <see cref="ToleranceCaseM"/>-tolerance
+    /// depenetration before the loop is judging by somebody else's bar, metres.</summary>
+    private const float ToleranceCaseMaxMoveM = 0.001f;
+
+    /// <summary>The prop the Confirm-time case shoves. It is 3 m up on a ledge, so an upward
+    /// nudge buys a long, unambiguous flight and the assertion never has to race a settle.
+    /// Audited already by <see cref="StaticCases"/>, which is what makes its mode Resting going
+    /// in — the precondition the case is about.</summary>
+    private const string MoverNode = "Prop_2_HighLedge";
+
+    /// <summary>Physics frames between the shove and the Confirm press. Two, so the body is
+    /// genuinely in motion rather than merely un-frozen when the audit runs.</summary>
+    private const int MoverSettleFrames = 2;
+
+    /// <summary>Physics frames after the press before the "it is still falling" check. At 60 Hz
+    /// and ~4 m/s a tenth of a second is tens of centimetres, far outside
+    /// <see cref="MoverStillMovingM"/>.</summary>
+    private const int MoverWatchFrames = 6;
+
+    /// <summary>How far the shoved prop must have travelled in <see cref="MoverWatchFrames"/>
+    /// after the press for the press to have left physics alone, metres. A frozen body moves
+    /// exactly 0.000.</summary>
+    private const float MoverStillMovingM = 0.05f;
 
     /// <summary>One planted case: the node to look up, what layer 2 must say, and what layer 3
     /// must say. Written as a table rather than as seven methods because the table IS the
@@ -106,6 +148,14 @@ public sealed partial class ReachPlantSelfTest : Node
     private int _fallerPropId = -1;
     private int _totalQueries;
 
+    private int _moverFrames;
+    private int _moverPropId = -1;
+    private bool _moverShoved;
+    private bool _moverPressed;
+    private Vector3 _moverAtPress;
+    private PropMode? _moverModeAtPress;
+    private bool _moverFrozenAtPress;
+
     public override void _Ready()
     {
         GD.Print($"{Prefix} planted room: §5b's six cases plus the depenetration branch");
@@ -130,6 +180,15 @@ public sealed partial class ReachPlantSelfTest : Node
 
             case Stage.Faller:
                 TickFaller((float)delta);
+                break;
+
+            case Stage.ConfirmOnAMover:
+                TickConfirmOnAMover();
+                break;
+
+            case Stage.DepenetrateTolerance:
+                RunDepenetrateTolerance();
+                Finish();
                 break;
         }
     }
@@ -190,7 +249,7 @@ public sealed partial class ReachPlantSelfTest : Node
         {
             Fail($"{FallerNode} is not in the planted room — the pit case cannot run");
             _verdicts.Add($"{Prefix} VERDICT {FallerNode} (pushed through the floor) MISSING -> FAIL");
-            Finish();
+            _stage = Stage.ConfirmOnAMover;
             return;
         }
 
@@ -244,7 +303,178 @@ public sealed partial class ReachPlantSelfTest : Node
         foreach (string p in problems)
             Fail($"{FallerNode} (pushed through the floor): {p}");
 
-        Finish();
+        _stage = Stage.ConfirmOnAMover;
+    }
+
+    // --- the one the Confirm press can MOVE rather than measure --------------------------------
+
+    /// <summary>
+    /// <b>REVIEW-1 C2: a Confirm press must not force-settle a target that is still in motion.</b>
+    ///
+    /// <para><c>ReachabilityFactSource.AuditBeforeConfirm</c> used to call
+    /// <see cref="PropManager.ServerAuditRest"/> unconditionally, and that method guards only
+    /// <see cref="PropMode.Held"/> — it cannot guard on Resting, because the settle latch calls
+    /// it on a prop that is still Loose. So a LOOSE target reached
+    /// <c>NetworkedProp.SettleToRest</c>, which sets <c>Body.Freeze = true</c>, zeroes both
+    /// velocities and pins the transform; a prop a metre up passes layer 2's bounds and overlap
+    /// tests, so the audit returned Good and the object was latched in mid-air. The hider drops
+    /// or throws the target at the Confirm plate, presses inside the ~0.3 s settle window, and
+    /// the seeker is sent to find a can hanging off the floor.</para>
+    ///
+    /// <para><b>It goes through the shipped press path</b>, not through <c>ServerAuditRest</c>:
+    /// the defect was in WHICH of those two a press reaches, so a case that called the audit
+    /// directly would prove nothing about the fix. Three assertions, and the third is the one
+    /// that cannot be satisfied by accident — the prop must still be TRAVELLING afterwards.</para>
+    /// </summary>
+    private void TickConfirmOnAMover()
+    {
+        NetworkedProp? mover = FindProp(MoverNode);
+        if (mover is null)
+        {
+            Fail($"{MoverNode} is not in the planted room — the Confirm-on-a-mover case cannot run");
+            _verdicts.Add($"{Prefix} VERDICT {MoverNode} (Confirm while it is still falling) MISSING -> FAIL");
+            Finish();
+            return;
+        }
+
+        if (!_moverShoved)
+        {
+            _moverPropId = mover.PropId;
+            PropMode? before = Props.ModeOf(_moverPropId);
+            if (before != PropMode.Resting)
+                Fail($"{MoverNode} was {(before?.ToString() ?? "unknown")} before the shove, not "
+                     + "Resting — the case's own precondition is broken, so whatever it measures "
+                     + "afterwards is about a different world");
+            Props.ServerNudgeLoose(_moverPropId, new Vector3(0f, 4.5f, 0f));
+            GD.Print($"{Prefix} {MoverNode} (prop {_moverPropId}) shoved upward; the Confirm press "
+                     + $"lands in {MoverSettleFrames} frame(s), while it is still in the air");
+            _moverShoved = true;
+            _moverFrames = 0;
+            return;
+        }
+
+        _moverFrames++;
+
+        if (!_moverPressed)
+        {
+            if (_moverFrames < MoverSettleFrames)
+                return;
+
+            // The shipped Confirm-time seam, wired exactly as Gameplay wires it: the source
+            // holds the prop manager and reads the phase through a closure.
+            var reach = new ReachabilityFactSource(Props, () => HideSeekPhase.Hiding)
+            {
+                TargetPropId = _moverPropId,
+            };
+            reach.AuditBeforeConfirm();
+
+            _moverModeAtPress = Props.ModeOf(_moverPropId);
+            _moverFrozenAtPress = mover.Body.Freeze;
+            _moverAtPress = mover.Body.GlobalPosition;
+            _moverPressed = true;
+            _moverFrames = 0;
+            return;
+        }
+
+        if (_moverFrames < MoverWatchFrames)
+            return;
+
+        float travelled = mover.Body.GlobalPosition.DistanceTo(_moverAtPress);
+        var problems = new List<string>();
+        if (_moverModeAtPress != PropMode.Loose)
+            problems.Add($"the registry said {_moverModeAtPress?.ToString() ?? "unknown"} straight "
+                         + "after the press, expected Loose — the press latched a moving prop to rest");
+        if (_moverFrozenAtPress)
+            problems.Add("Body.Freeze was true straight after the press — SettleToRest ran on a "
+                         + "prop that was still in the air");
+        if (travelled <= MoverStillMovingM)
+            problems.Add($"it travelled {travelled:0.000} m in {MoverWatchFrames} frames after the "
+                         + $"press (bar {MoverStillMovingM:0.000} m) — physics stopped owning it");
+
+        string verdict = problems.Count == 0 ? "PASS" : "FAIL";
+        _verdicts.Add($"{Prefix} VERDICT {MoverNode} (Confirm while it is still falling) "
+                      + $"prop={_moverPropId} modeAfterPress={_moverModeAtPress?.ToString() ?? "unknown"} "
+                      + $"frozenAfterPress={_moverFrozenAtPress} "
+                      + $"travelledAfter={travelled:0.000}m -> {verdict}");
+        foreach (string p in problems)
+            Fail($"{MoverNode} (Confirm while it is still falling): {p}");
+
+        _stage = Stage.DepenetrateTolerance;
+    }
+
+    // --- the one where layer 1 and layer 2 can drift apart ------------------------------------
+
+    /// <summary>
+    /// <b>REVIEW-1 I5: <see cref="PlacementIntegrity.TryDepenetrate"/> must judge its corrections
+    /// by the tolerance it was GIVEN.</b>
+    ///
+    /// <para><c>Check</c>'s own parameter doc says <c>overlapToleranceM</c> exists "so layer 1 and
+    /// layer 2 can never drift to two different numbers by accident", and
+    /// <c>RestAudit.Correct</c> duly hands the caller's value down. The depenetration loop then
+    /// threw it away: it compared the measured depth against
+    /// <see cref="PlacementIntegrity.DefaultOverlapToleranceM"/> and re-tested each pushed
+    /// candidate with a bare <c>Check(propBody, candidate)</c>. Today the two numbers are aliased
+    /// (<c>PropManager.PlaceOverlapToleranceM</c> IS the default), so nothing is visibly wrong —
+    /// which is exactly what makes it a trap: the day anyone moves one, the loop starts reporting
+    /// <c>Depenetrated</c> for a pose the audit that called it then refuses, or refuses a pose the
+    /// audit would have accepted and sends a hidden object back to its last-good transform for no
+    /// reason.</para>
+    ///
+    /// <para><b>The case makes the two numbers differ on purpose</b>, which is the only way to see
+    /// it at all: <c>Prop_8_Shallow</c> sits 0.12 m into a plinth, and at a tolerance of
+    /// <see cref="ToleranceCaseM"/> there is nothing to correct. A loop that honours its caller
+    /// moves it 0.000 m; the shipped-default loop pushes it the full 0.125 m the case above
+    /// measures.</para>
+    /// </summary>
+    private void RunDepenetrateTolerance()
+    {
+        NetworkedProp? shallow = FindProp("Prop_8_Shallow");
+        if (shallow is null)
+        {
+            Fail("Prop_8_Shallow is not in the planted room — the depenetration-tolerance case "
+                 + "cannot run");
+            _verdicts.Add($"{Prefix} VERDICT Prop_8_Shallow (depenetration honours the caller's "
+                          + "tolerance) MISSING -> FAIL");
+            return;
+        }
+
+        // Where it sits NOW: the statics pass already depenetrated it, so re-running at the
+        // default tolerance from here finds nothing. The overlap this case needs is the authored
+        // one, which RestAudit recorded as the audit's `From` pose.
+        Transform3D authored = Props.LastAuditFor(shallow.PropId) is { } a
+            ? a.From
+            : shallow.Body.GlobalTransform;
+
+        bool generous = PlacementIntegrity.TryDepenetrate(shallow.Body, authored,
+            PropManager.DepenetrateMaxM, ToleranceCaseM,
+            out Transform3D _, out float generousMoved, out int generousQueries);
+        bool strict = PlacementIntegrity.TryDepenetrate(shallow.Body, authored,
+            PropManager.DepenetrateMaxM, PlacementIntegrity.DefaultOverlapToleranceM,
+            out Transform3D _, out float strictMoved, out int strictQueries);
+        _totalQueries += generousQueries + strictQueries;
+
+        var problems = new List<string>();
+        if (generousMoved > ToleranceCaseMaxMoveM)
+            problems.Add($"a {ToleranceCaseM:0.000} m tolerance still pushed it "
+                         + $"{generousMoved:0.000} m — the loop is judging by "
+                         + $"DefaultOverlapToleranceM ({PlacementIntegrity.DefaultOverlapToleranceM:0.000} m) "
+                         + "rather than by the value it was handed");
+        // The positive control, and it is not optional: a TryDepenetrate that had simply stopped
+        // correcting anything would satisfy the assertion above perfectly.
+        if (!strict || strictMoved <= ToleranceCaseMaxMoveM)
+            problems.Add($"at the shipped {PlacementIntegrity.DefaultOverlapToleranceM:0.000} m "
+                         + $"tolerance it returned {strict} after {strictMoved:0.000} m — the "
+                         + "control says this fixture no longer depenetrates at all, so the case "
+                         + "above proves nothing");
+
+        string verdict = problems.Count == 0 ? "PASS" : "FAIL";
+        _verdicts.Add($"{Prefix} VERDICT Prop_8_Shallow (depenetration honours the caller's "
+                      + $"tolerance) prop={shallow.PropId} "
+                      + $"at{ToleranceCaseM:0.00}m={generous}/{generousMoved:0.000}m "
+                      + $"at{PlacementIntegrity.DefaultOverlapToleranceM:0.00}m={strict}/{strictMoved:0.000}m "
+                      + $"-> {verdict}");
+        foreach (string p in problems)
+            Fail($"Prop_8_Shallow (depenetration honours the caller's tolerance): {p}");
     }
 
     // --- plumbing -----------------------------------------------------------------------------
@@ -281,7 +511,8 @@ public sealed partial class ReachPlantSelfTest : Node
         GD.Print($"{Prefix} audits={Props.RestAuditCount} corrections={Props.RestCorrectionCount} "
                  + $"stuck={Props.StuckPropCount} integrity-queries={Props.IntegrityQueryCount} "
                  + $"reach-queries={_totalQueries - Props.IntegrityQueryCount}");
-        GD.Print($"{SummaryPrefix} cases={StaticCases.Length + 1} failures={_failures.Count} "
+        // +3: the faller, and REVIEW-1's Confirm-on-a-mover and depenetration-tolerance cases.
+        GD.Print($"{SummaryPrefix} cases={StaticCases.Length + 3} failures={_failures.Count} "
                  + $"result={(_failures.Count == 0 ? "PASS" : "FAIL")}");
         GetTree().Quit(_failures.Count == 0 ? 0 : 1);
     }

@@ -358,13 +358,26 @@ public static class NetProfile
     /// peer hears a can come off a shelf and not only the host.
     ///
     /// <para><b>Its own channel, and NOT <see cref="PropChannel"/>, although that is the obvious
-    /// neighbour.</b> Channel 4 carries two things already: the reliable ordered
-    /// <c>ApplyPropState</c> stream (grab, release, settle — the messages a player's hand
-    /// depends on) and the 30 Hz unreliable loose-transform stream. A burst of forty impacts
-    /// cannot be allowed to sit in front of a grab, which is the whole reason the packet says to
-    /// keep this out of the state RPC's lane; and sharing the unreliable loose stream would mean
-    /// an impact competing for delivery with the very transform updates that describe the
-    /// collapse it belongs to.</para>
+    /// neighbour.</b> Channel 4 carries the 30 Hz unreliable loose-transform stream
+    /// (<c>PropManager.StreamLoose</c>), and sharing it would mean an impact competing for
+    /// delivery with the very transform updates that describe the collapse it belongs to. The
+    /// reliable ordered <c>ApplyPropState</c> stream — grab, release, settle, the messages a
+    /// player's hand depends on — is on the DEFAULT channel 0, along with <c>RequestGrab</c>,
+    /// <c>RequestDrop</c>, <c>RequestPlace</c>, <c>RequestThrow</c>, the two denial RPCs and the
+    /// <c>MultiplayerSpawner</c>'s own replication. A burst of forty impacts cannot be allowed to
+    /// sit in front of a grab on either lane, which is the whole reason the packet says to keep
+    /// this out of both.</para>
+    ///
+    /// <para><b>Corrected by REVIEW-1 (2026-09-20).</b> This paragraph used to assert that
+    /// channel 4 carried <c>ApplyPropState</c> as well. Only the loose stream sets
+    /// <c>TransferChannel = NetCodec.PropChannel</c> (<c>PropManager.cs</c>, the
+    /// <c>StreamLoose</c> declaration); <c>ApplyPropState</c> declares no channel at all. The
+    /// CONCLUSION the false premise supported — give impacts a lane of their own — is unaffected
+    /// and stands; what would have gone wrong is the next reader believing the state stream was
+    /// already off channel 0. <b>Moving it is a wire change and belongs with a protocol note</b>,
+    /// so it was deliberately not slipped into a fix commit; the reset edge broadcasting one
+    /// reliable <c>ApplyPropState</c> per adopted prop (162 on this tree) onto channel 0 in one
+    /// tick is the cost of leaving it there, and it is measured nowhere yet.</para>
     ///
     /// <para><b>Unreliable, deliberately, and this is the direction a cosmetic one-shot must
     /// fail in.</b> Reliable-on-its-own-channel would also keep clear of the grab, but it would

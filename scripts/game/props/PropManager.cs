@@ -257,6 +257,15 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
     /// (<see cref="RestAudit.Reason.None"/> / <see cref="RestAudit.Outcome.Good"/> with zero
     /// queries) — "there was nothing to audit" rather than "the audit passed".</para>
     /// </summary>
+    /// <summary>What the registry says this prop is doing, or <c>null</c> for an id it does not
+    /// know. Read-only, and the whole reason it is public: REACH-1's Confirm-time precondition
+    /// has to be able to tell a target that is AT REST from one that is still in the air, and
+    /// <see cref="ServerAuditRest"/> cannot answer that for it — the settle latch calls that
+    /// method on a prop that is still <see cref="PropMode.Loose"/>, which is exactly the tick it
+    /// is latching (REVIEW-1 C2, 2026-09-20).</summary>
+    public PropMode? ModeOf(int propId) =>
+        _registry.TryGet(propId, out PropState s) ? s.Mode : null;
+
     public RestAudit.Result ServerAuditRest(int propId)
     {
         if (!_isServer)
@@ -1410,7 +1419,15 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
     /// exists.</b> A consumed or despawned prop's release arrives as a Resting transition that may
     /// land after the node has gone (spawner despawns and RPCs are not ordered relative to each
     /// other), and that transition must still empty the hand — otherwise <see cref="FindHeldBy"/>
-    /// would keep answering with an id whose node has been freed.</summary>
+    /// would keep answering with an id whose node has been freed.
+    ///
+    /// <para><b>No <c>TransferChannel</c>, so this rides Godot's default channel 0</b> — stated
+    /// because a paragraph in <c>NetProfile.PropImpactChannel</c> used to claim it was on
+    /// channel 4 (REVIEW-1 I4, 2026-09-20). Channel 0 also carries <see cref="RequestGrab"/>,
+    /// <see cref="RequestDrop"/>, <see cref="RequestPlace"/>, <see cref="RequestThrow"/>, the two
+    /// denial RPCs and the <c>MultiplayerSpawner</c>'s replication, and the reset edge puts one
+    /// of these per adopted prop onto it in a single tick. Moving it is a WIRE CHANGE and wants a
+    /// protocol note of its own, not a line slipped into a fix commit.</para></summary>
     [Rpc(MultiplayerApi.RpcMode.Authority, TransferMode = MultiplayerPeer.TransferModeEnum.Reliable, CallLocal = true)]
     private void ApplyPropState(int propId, int mode, int holderPeerId, Transform3D transform,
         int release)
