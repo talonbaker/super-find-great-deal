@@ -1046,11 +1046,101 @@ constant is shared by `Run-PlaceTest`, `Run-CarryNetTest`, `Run-MaterialSfxTest`
 of them assert on a distance. That is a change that wants its own packet and its own four-suite
 re-run, not a one-line edit at a wave's final gate. **Handed to the orchestrator.**
 
+### REVIEW-1 (2026-09-20): the wedge is real, the PROPOSED FIX was wrong, and the bar is the CLIENT's
+
+**INT-1's diagnosis above is confirmed. Its prescription — "raise `ArriveRadius` the same way
+TASK-1 did, to 1.8 m derived from the server's 2.25 m reach" — is RULED OUT BY MEASUREMENT**, the
+same way INT-1 ruled out SHELF-1's spawn race. Raised to 1.8 m, two OTHER suites in the group of
+four went red on the first sweep:
+
+| Suite | What it printed | What actually happened |
+|---|---|---|
+| `Run-CarryNetTest` phase 2 | `STAGING: DropC did not disconnect while holding -- it never held the ball at all` | the bot stood **1.482 m horizontally / 1.564 m in 3D** from a ball at y = 0.5 for 28 s with `heldPropId = -1`, and **the server logged nothing at all** |
+| `Run-PlaceTest` | `bot D: prop 1016 holder=0 in the final sample` | D pressed 0.6 m further out, its NAMED prop fell outside the client's pickup radius, nearest-carryable ran instead, and it came away holding **1027 — a shelf product** (`place refused peer=… prop=1027 OutsideRoomBounds`) |
+
+**There are TWO bars between a scripted press and a held prop, and the SMALLER one binds.**
+
+```
+SandboxAvatar.FindNearestCarryable   PickupRadius            1.5 m, 3D, from the avatar's ORIGIN
+PropManager.RequestGrab              GrabRange               2.25 m, 3D  (= PickupRadius + 0.75)
+```
+
+`FindNearestCarryable` is the CLIENT's, it runs first, and `ScriptedGrabPropId` honours a named
+prop **only inside that same 1.5 m** — its own doc says it "narrows the choice, never widens the
+reach". Outside 1.5 m the press composes **no request**, so:
+
+- **the 2.25 m server reach is unreachable by a press the client declined to send**, and
+- **"no `grab denied` line" does not only mean "a press that was never made" any more.** It also
+  means "a press that was made and found nothing". TASK-1 §3.3's sentence still holds; this is a
+  second way to produce the same silence, and the discriminator between them is the bot's own
+  closest approach against **1.5 m in 3D**, not against any arrive radius.
+
+**So `ScriptedCarryIntentSource.ArriveRadius` stays at 1.2 m and it is now DERIVED**: a prop rests
+0.2–0.5 m above the avatar's origin, so the client's 1.5 m in 3D is 1.41–1.48 m horizontally, and
+1.2 m leaves 0.2 m of slack for the settle and a frame of prediction error. `ScriptedSortIntentSource`'s
+1.8 m is safe only because its sortables sit on a 1.4 m plinth that stops the bot well inside it;
+the horizontal number overstates the 3D one it is really spending.
+
+**The wedge is fixed at the PRESS instead.** 1.49 m in 3D is *inside* the client's 1.5 m radius —
+the wedged bot could have grabbed, it simply never asked, because the arrive branch it asks from
+is gated on a 1.2 m horizontal walk it can no longer complete. `ScriptedCarryIntentSource` now
+presses **while still walking**, on the `--carry-grab-retry` cadence, as soon as the 3D distance
+is inside `SandboxAvatar.PickupRadius` — the client's own question, referenced rather than copied.
+The walk is untouched, so no bot's resting position moves, which is what makes it safe for the
+four suites that measure distances against the arrive radius.
+
+**Before / after, the four suites that share the constant** (standalone, `-SkipBuild`, one lane on
+the machine, nothing else running):
+
+| Suite | Before | After |
+|---|---|---|
+| `Run-CarryDriftTest` | mean **0.997** m, peak **1.067** m, growth 0.000 m, n = 83 | mean **0.997** m, peak **1.071** m, growth 0.000 m, n = 83 |
+| `Run-CarryNetTest` | worst hold 1.01 m own / 1.07 m witness; teleport worst 1.00 m over 104 samples | worst hold **1.01** m own / **1.09** m witness |
+| `Run-PlaceTest` | placed **0.008 m / 0.00 deg**; spring-vs-anchor mean 0.047 m, peak 0.759 m, n = 280 | placed **0.008 m / 0.00 deg**; spring-vs-anchor mean **0.048** m, peak **1.099** m, n = 281 |
+| `Run-MaterialSfxTest` | PASS | PASS |
+
+**The one number that moved is `Run-PlaceTest`'s spring-vs-anchor PEAK, 0.759 → 1.099 m**, and it
+is expected rather than incidental: a bot that grabs while still walking picks the prop up in
+motion, so the spring's transient lag is sampled at speed instead of from a standing start. The
+mean (0.047 → 0.048 m) and the placed pose (0.008 m / 0.00 deg) are unmoved, which is what says
+the change is in when the grab happens and not in what the spring does.
+
+### `Sfx: material voices` after the press fix — 4 PASS / 2 FAIL over six runs, and NEITHER red is the wedge
+
+Tally on the fixed tree, standalone, machine otherwise idle: runs 1 and 3 FAIL, **runs 4, 5 and 6
+PASS 3/3 consecutively**. The wedge signature — a driver motionless with `heldPropId = -1` at a
+closest approach of 1.49 m — **did not occur once in six runs.** The two reds are different
+animals and are worth separating here so the next reader does not re-diagnose them as this one:
+
+- **Confirmed a third time in REVIEW-1's own marathon** (2026-09-20, 43 suites, 42 PASS / 1 FAIL,
+  this suite the only red): `cardboard: prop 2 never made a sound at all`. `SfxBoxBot` was pinned
+  to marker 2 `(38.50, 1.10, 2.10)` with `moved=True` on the server, its first sample is its
+  pre-pin body at `(44.40, 0.65, 0.10)`, and it ended at `(46.16, 0.06, -4.06)` — the far corner,
+  **closest approach 3.144 m in 3D**, `heldPropId = -1` throughout. **3/3 PASS standalone**
+  immediately afterwards on the same tree, all three drivers firing every run. Same shape as run 3
+  below, in the other corner: a bot whose reconciled body starts one walkway over steers into a
+  bay and slides. **Three metres is not a radius anybody can set.**
+- **Run 3 is SHELF-1's four-corridor room, not an arrive radius.** `SfxProduceBot` spawned pinned
+  at `(41.50, 2.30, -2.10)` and its next sample is `(46.16, 0.06, 4.06)` — it slid along the bay
+  it was walking into, ended in the far `+X +Z` corner, and stayed there for the remaining 24 s.
+  **Closest approach to its prop: 4.01 m in 3D / 3.50 m horizontally**, never once inside any
+  radius anybody could set. `--carry-walk-to` is one point walked in a STRAIGHT LINE and this room
+  has no cross-aisle except at its ends (HOLD-1's entry above). That is the level change SHELF-1
+  deferred to Talon's ride and it is still his call.
+- **Run 1 is not a staging failure at all.** All three drivers picked up (`TinPick x1`,
+  `CardPick x1`, `ProducePick x1`) and the host heard seven impacts; the witness heard three, all
+  `CardThud`, and the suite reported *"THE OTHER PLAYER IS DEAF to tin / to produce"*. Nothing
+  about the walk. Unexplained here and NOT chased — `OneShotSteals` was 27.3 % on that run — but
+  recorded so that a future reader with the same two lines knows it has been seen once on a tree
+  where the drivers demonstrably reached their props.
+
 ### How to read a red here
 
 - **`prop N never fired <Pick> on PickedUp` / `never made a sound at all`** with **no
   `grab denied` on the server** and the bot's own trace showing it motionless outside 1.2 m:
-  this staging flake. Not the wire, not the profile, not the mix.
+  this staging flake. Not the wire, not the profile, not the mix. **Since REVIEW-1, read the
+  closest approach against 1.5 m in 3D**: inside it and motionless is a press that found nothing
+  (fixed); several metres out is the four-corridor mis-walk, which no constant can reach.
 - **The bot reached its prop and still played nothing**, or **played the wrong material**: the
   real thing. Assertion 4 (`-PlantCrossedProfile`) is what defends the second.
 - **Check the bot's JSONL before anything else.** Its `heldPropId` and its closest approach
@@ -1158,8 +1248,9 @@ stands, which is the list to read before picking the next one:
 wave-2 lanes were merged and their five separate part-tables could finally be resolved into one).
 Every number below is a REGISTERED suite's bind port on the merged tree, audited by grepping
 every `$Port` in `tests/` after the last merge: **all distinct.** Read this table before picking
-the next one, and take **7910** (INT-1, 2026-09-19 — the table below is the WHOLE wave, all
-three merges in, and it is the only copy).
+the next one, and take **7911** (REVIEW-1, 2026-09-20 — INT-1's own walk took 7910 while this
+sentence still said 7910 was free; the table below is the WHOLE wave, all three merges in, plus
+that walk, and it is the only copy).
 
 > **Updated by SHELF-1, 2026-09-19.** 7905-7908 are now spoken for; the next free number is
 > **7909**. The four were HANDED OUT BY THE ORCHESTRATOR, which is this section's own lesson
@@ -1184,6 +1275,7 @@ three merges in, and it is the only copy).
 | **7907** | **`Run-SortTest.ps1`** (and `Capture-SortRoom.ps1`, unregistered) | **TASK-1** |
 | **7908** | **`Run-AuthoredPropTest.ps1`** | **SHELF-1** |
 | **7909** | **`Run-HoldingBoardTest.ps1`** (and `Capture-HoldingBoard.ps1`, unregistered) | **HOLD-1** |
+| **7910** | **`Walk-DefinitionOfDone.ps1`** (the §8 walk, unregistered and manual) | **INT-1** |
 
 Everything below 7893 is the pre-fork ladder and is unchanged: 7777, 7778, 7788, 7799, 7807,
 7809/7810, 7815, 7816, 7817, 7818, 7821, 7822, 7830, 7831, 7834.
@@ -1196,6 +1288,17 @@ Everything below 7893 is the pre-fork ladder and is unchanged: 7777, 7778, 7788,
 > BTN-1's branch listed 7905 as SFX-2's; INT-0B's row (the unregistered match-end clock probe)
 > is the one on the merged tree and is what the table says. **HOLD-1 claims 7909** for
 > `Run-HoldingBoardTest.ps1`; the next free number is **7910**.
+
+> **Updated by REVIEW-1, 2026-09-20.** **7910 is TAKEN** — `tests/Walk-DefinitionOfDone.ps1`
+> binds it, and it landed at `bd69498` in the same delta that left all three "next free" lines
+> above and below saying 7910 was free. **The next free number is 7911.** The only record that it
+> had moved was one summary row in `docs/agents/handoffs/2026-09-19-INT-1.md`, and *a handoff is
+> not the ladder* — the next lane reads this table, sees a free number, claims it, and two suites
+> bind the same UDP port. That is the failure this repo has now paid for twice (three lanes on
+> 7896, two on 7899), and the table's own text calls itself "the WHOLE wave, all in one place",
+> which is only true while somebody keeps adding the rows. **An unregistered harness takes a row
+> like anything else**: it is never in `Run-AllTests.ps1`, so it can never collide with a
+> marathon, but it can collide with the next lane that grepped this table.
 
 > **Audited on the fully merged tree, INT-1, 2026-09-19.** One grep of every `$Port` in `tests/`
 > after the last of the three merges: **every REGISTERED suite's port is distinct.** Four numbers
@@ -1441,8 +1544,9 @@ section above has the row; **the next free number is 7908.**
 > header forbids deleting another agent's entry). **7908 was not free** — SHELF-1 took it for
 > `Run-AuthoredPropTest.ps1` on a branch TASK-1 could not see, and HOLD-1 then took 7909. This
 > is the SAME defect the entry itself is about, one wave later and from the other side: TASK-1
-> read the ladder correctly and the ladder was a snapshot. **The next free number is 7910**, and
-> the one table in the REACH-1 section is the only place that sentence should ever be written.
+> read the ladder correctly and the ladder was a snapshot. **The next free number is 7911**
+> (7910 is INT-1's `Walk-DefinitionOfDone.ps1`; corrected by REVIEW-1, 2026-09-20), and the one
+> table in the REACH-1 section is the only place that sentence should ever be written.
 
 Baseline, machine busy throughout (BTN-1's suite held the machine-wide mutex for ~11 minutes
 immediately before the first run and its Godot processes were alive during all four):
@@ -1726,7 +1830,8 @@ entry above makes a 3/3 clear a stronger flake verdict than an idle-machine pass
 
 `tests/Run-HoldingBoardTest.ps1` claims **udp/7909** and is registered last in
 `tests/Run-AllTests.ps1`; `tests/Capture-HoldingBoard.ps1` is unregistered and manual on the same
-number. **The next free port is 7910.** The one ladder table is in the REACH-1 section above.
+number. **The next free port is 7911** (7910 went to INT-1's `Walk-DefinitionOfDone.ps1`;
+corrected by REVIEW-1, 2026-09-20). The one ladder table is in the REACH-1 section above.
 
 ### An `[Export]` is not a level-authoring surface in this project, in EITHER shape
 

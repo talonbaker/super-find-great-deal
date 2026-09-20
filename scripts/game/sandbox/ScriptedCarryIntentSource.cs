@@ -36,7 +36,77 @@ namespace MpFoundation.Game.Sandbox;
 /// </summary>
 public sealed class ScriptedCarryIntentSource : IIntentSource
 {
+    /// <summary>
+    /// How close the body gets to its target before it stops walking and presses, metres,
+    /// measured HORIZONTALLY.
+    ///
+    /// <para><b>1.2 m, and it is derived — from the CLIENT's own pickup radius, not from the
+    /// server's grab range</b> (REVIEW-1, 2026-09-20, measured). Two bars stand between a
+    /// scripted press and a held prop, and the smaller one binds:
+    /// <list type="bullet">
+    /// <item><c>SandboxAvatar.FindNearestCarryable</c> only ever offers a prop within
+    /// <see cref="SandboxAvatar.PickupRadius"/> — <b>1.5 m, in 3D, from the avatar's origin</b> —
+    /// and <c>ScriptedGrabPropId</c> honours a named prop only inside that same radius, because
+    /// it "narrows the choice, never widens the reach". Outside it the press finds nothing and
+    /// <b>no request is sent at all</b>.</item>
+    /// <item><c>PropManager.GrabRange</c> (2.25 m) is the SERVER's acceptance bar, and it is
+    /// never reached by a press the client refused to compose.</item>
+    /// </list>
+    /// A prop rests 0.2–0.5 m above the avatar's origin, so 1.5 m in 3D is 1.41–1.48 m
+    /// horizontally; 1.2 m leaves 0.2 m of slack for the settle and for a frame of prediction
+    /// error.</para>
+    ///
+    /// <para><b>INT-1's proposed 1.8 m is RULED OUT by measurement, not by argument</b>, the same
+    /// way INT-1 ruled out SHELF-1's spawn race. Raised to 1.8 m (TASK-1's number, derived from
+    /// the 2.25 m server reach), two suites went red in one sweep:
+    /// <c>Run-CarryNetTest</c> phase 2 — <i>"DropC did not disconnect while holding -- it never
+    /// held the ball at all"</i>, the bot standing 1.482 m horizontally / 1.564 m in 3D from a
+    /// ball at y = 0.5 with <b>no `grab denied` line on the server</b>, because the press found no
+    /// candidate and sent nothing; and <c>Run-PlaceTest</c> — bot D pressed 0.6 m further out,
+    /// its named prop was outside <c>PickupRadius</c> so the naming fell through to
+    /// nearest-carryable, and it came away holding <b>1027</b>, a shelf product, which the server
+    /// then refused to place <c>OutsideRoomBounds</c> while the suite watched prop 1016 sit on the
+    /// floor. That is SHELF-1's dressed-aisle lesson (<c>Run-PlaceTest.ps1</c>'s own header)
+    /// arriving through the arrive radius.</para>
+    ///
+    /// <para><b>So the three arrive radii in the tree are reconciled by JOB, not by value.</b>
+    /// This one and <c>ScriptedGotoIntentSource.ArriveRadius</c> (1.5 m) are waypoint tolerances
+    /// on a walk; <c>ScriptedSortIntentSource.FetchStandM</c> (1.8 m) is a stand distance for a
+    /// bot that is blocked by a 1.4 m plinth and never gets closer, where the horizontal number
+    /// overstates the 3D one it is really spending. Each now carries its own derivation at the
+    /// constant.</para>
+    /// </summary>
     private const float ArriveRadius = 1.2f;
+
+    /// <summary>
+    /// <b>The distance at which this brain may press while it is still walking</b>, metres, in
+    /// 3D — <see cref="SandboxAvatar.PickupRadius"/> itself, referenced rather than copied, so
+    /// the brain's "could I grab this?" is literally the client's own question.
+    ///
+    /// <para><b>What it is for</b> (REVIEW-1, 2026-09-20). A bot walks AT its prop and a
+    /// <c>CharacterBody3D</c> does not push a <c>RigidBody3D</c> (SHELF-1 §6.2), so it can WEDGE
+    /// between the prop and the adjacent shelf bay and stop for good. INT-1 measured
+    /// <c>Run-MaterialSfxTest</c> losing exactly one driver in 2 runs of 5, always at a closest
+    /// approach of <b>1.49 m in 3D — to the centimetre, a geometric constant rather than a
+    /// race</b>: 1.45 m horizontally, outside <see cref="ArriveRadius"/>, so the arrive branch
+    /// below is never entered, the press is never made, and the server logs no refusal at all
+    /// because a press that is never made is never refused (TASK-1 §3.3). The suite then reports
+    /// that a prop "never made a sound", which is an assertion about AUDIO describing a bot that
+    /// never reached its object.</para>
+    ///
+    /// <para><b>1.49 m is INSIDE the client's 1.5 m pickup radius</b>, which is the whole point:
+    /// the wedged bot could grab, it simply never asked. So the press is gated on the reach that
+    /// decides whether a request can exist at all, and the WALK is left alone — no bot's resting
+    /// position moves, which is what makes this safe for the four suites that measure distances
+    /// against <see cref="ArriveRadius"/>.</para>
+    ///
+    /// <para><b>Only for bots that opted into the retry cadence</b> (<c>--carry-grab-retry</c>).
+    /// A one-shot press is LATCHED and decides on a predicted position; firing it early, from
+    /// further out, would spend the single press this file's own doc says is expensive to get
+    /// wrong. Every suite that wants robustness here already passes the flag.</para>
+    /// </summary>
+    private const float GrabReachM = SandboxAvatar.PickupRadius;
+
     private const float StopMoveEpsilon = 0.05f;
 
     /// <summary>How long after the throw fires before the regrab chase begins — lets the
@@ -153,6 +223,10 @@ public sealed class ScriptedCarryIntentSource : IIntentSource
             // the tick where the prop is held by someone else, despawned, or not yet replicated.
             Vector3 approach = _liveTarget?.Invoke() ?? _target;
             Vector3 toTarget = approach - _self.Position;
+            // The CLIENT's own measure, in 3D from the avatar's origin, kept before the flatten:
+            // SandboxAvatar.FindNearestCarryable and ScriptedGrabPropId both judge by this, and a
+            // press outside it composes no request at all. See GrabReachM.
+            float reach = toTarget.Length();
             toTarget.Y = 0;
             float dist = toTarget.Length();
             if (dist <= ArriveRadius && _clock >= _earliestGrabSec)
@@ -187,8 +261,21 @@ public sealed class ScriptedCarryIntentSource : IIntentSource
                 // server's body catch up with the prediction) and press again shortly.
                 return MoveIntent.None;
             }
+            // STILL WALKING, and pressing anyway once the client could actually select the prop
+            // (REVIEW-1, 2026-09-20). This is the wedge case: a bot stopped by its own target
+            // 1.45 m out is outside ArriveRadius for good, so without this the arrive branch
+            // above is never entered and no request is ever composed. The WALK is untouched --
+            // the press rides along with the movement intent rather than replacing it, so no
+            // bot's resting position moves. Retry-cadence bots only: a one-shot press is latched
+            // and must not be spent from further out than it was budgeted for.
             Vector3 dir = dist > StopMoveEpsilon ? toTarget.Normalized() : Vector3.Zero;
-            return new MoveIntent { MoveDir = dir, Interact = false };
+            bool pressOnApproach = _grabRetrySec >= 0
+                                   && _clock >= _earliestGrabSec
+                                   && reach <= GrabReachM
+                                   && _clock >= _lastGrabAttemptSec + _grabRetrySec;
+            if (pressOnApproach)
+                _lastGrabAttemptSec = _clock;
+            return new MoveIntent { MoveDir = dir, Interact = pressOnApproach };
         }
 
         if (!_throwSent && _throwSec >= 0 && _clock >= _grabSentAtSec + _throwSec)

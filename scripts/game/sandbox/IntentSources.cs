@@ -336,6 +336,17 @@ public sealed class DeterministicWalkIntentSource : IIntentSource
 /// </summary>
 public sealed class ScriptedGotoIntentSource : IIntentSource
 {
+    /// <summary>How close the body must be to its goal COORDINATE before the arrival latches,
+    /// metres. A waypoint tolerance on a one-way decision, and the third of the tree's three
+    /// arrive radii — reconciled rather than unified by REVIEW-1 (2026-09-20), because the three
+    /// measure different things and one number could not be right for all of them:
+    /// <see cref="ScriptedCarryIntentSource"/>'s <c>GrabStandM</c> (1.8 m) is derived from the
+    /// server's 2.25 m GRAB reach, its <c>WaypointRadius</c> (1.2 m) is bounded ABOVE by the
+    /// 1.65 m PLACE reach measured from the hand, and this one is neither: it gates a latch whose
+    /// callback may relocate the body, so what it wants is to be comfortably larger than one
+    /// reconciliation's prediction error and no larger than the smallest feature a goto is ever
+    /// aimed at. 1.5 m has held since W6-3 and nothing in the tree measures a distance against
+    /// it.</summary>
     private const float ArriveRadius = 1.5f;
 
     /// <summary>Below this horizontal ground speed (m/s), a bot that is still ASKING to move is

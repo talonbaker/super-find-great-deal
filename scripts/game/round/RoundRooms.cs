@@ -36,8 +36,16 @@ public static class RoundRooms
     /// whole roster there on the reset edge, and that is also where every peer spawns.</item>
     /// <item><b>Hiding</b> — hider in the search room, seeker shut in the holding room.</item>
     /// <item><b>Seeking</b> — hider in the task room, seeker in the search room.</item>
-    /// <item><b>Together</b> — hider in the task room, seeker in the vestibule behind the burst
-    /// door.</item>
+    /// <item><b>Together</b> — <b>both of them in the task room</b>. The seeker is teleported to
+    /// the vestibule for the burst, but <see cref="SupermarketWorld.Vestibule"/> is "a
+    /// destination, not a room: it is inside the task room's section scene"
+    /// (<c>SupermarketWorld.cs</c>) — so answering it here made the room KEY finer-grained than
+    /// the acoustic space it describes, and put two players standing two metres apart on the PA
+    /// bus for the whole beat (REVIEW-1 I1, 2026-09-20). Together has no timer and ends only on
+    /// an End press, so that was every round's social payoff heard through an overdrive, a
+    /// 2.2 kHz lowpass and a boxy reverb with no falloff. The teleport is unaffected:
+    /// <c>HideSeekDriver.OnServerPhaseChanged</c> reads <c>SpawnPointsFor(Vestibule)</c> directly
+    /// and never asks this function anything.</item>
     /// <item><b>Tally</b> — <see cref="Unknown"/> for both role holders, and that is deliberate
     /// rather than unfinished. Nobody is moved at the Tally commit, so where the two of them are
     /// depends on which transition arrived there: Together (task / vestibule), a Seeking timeout
@@ -72,7 +80,9 @@ public static class RoundRooms
             HideSeekPhase.Holding => SupermarketWorld.HoldingRoom,
             HideSeekPhase.Hiding => isHider ? SupermarketWorld.SearchRoom : SupermarketWorld.HoldingRoom,
             HideSeekPhase.Seeking => isHider ? SupermarketWorld.TaskRoom : SupermarketWorld.SearchRoom,
-            HideSeekPhase.Together => isHider ? SupermarketWorld.TaskRoom : SupermarketWorld.Vestibule,
+            // Both: the door has burst and the vestibule is inside the task room. See the list
+            // above — Vestibule stays a teleport destination key and is not a room here.
+            HideSeekPhase.Together => SupermarketWorld.TaskRoom,
             _ => Unknown, // Tally — see the doc comment.
         };
     }

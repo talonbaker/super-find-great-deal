@@ -348,12 +348,28 @@ public static class PlacementIntegrity
     /// clears one of them; the second pass sees the other. The total distance moved is still
     /// capped at <paramref name="maxTranslationM"/>, so this buys correctness in a corner
     /// without buying a prop that walks across the room.</para>
+    ///
+    /// <para><b>It judges by the CALLER's tolerance</b> (REVIEW-1 I5, 2026-09-20). All three
+    /// decisions inside the loop — is the depth worth pushing out of, does the pushed candidate
+    /// pass, does the un-pushed one — used to read
+    /// <see cref="DefaultOverlapToleranceM"/> directly, while <see cref="RestAudit.Correct"/>
+    /// hands the value down. Today they are the same number
+    /// (<c>PropManager.PlaceOverlapToleranceM</c> is aliased to the default), so nothing was
+    /// visibly wrong; the day anyone moves one, this loop starts reporting <c>Depenetrated</c>
+    /// for a pose the audit that called it then refuses, or refuses a pose the audit would have
+    /// accepted and sends a hidden object back to its last-good transform for no reason. That is
+    /// precisely the drift <see cref="Check"/>'s own parameter doc says the argument exists to
+    /// prevent.</para>
     /// </summary>
+    /// <param name="overlapToleranceM">Penetration allowed before a pose is refused — the same
+    /// bar the caller's own <see cref="Check"/> will apply. Not optional: it sits before the
+    /// <c>out</c> parameters, and a default here is how the two layers drifted in the first
+    /// place.</param>
     /// <returns>True with <paramref name="corrected"/> set to a transform that passes
-    /// <see cref="Check"/>; false with <paramref name="corrected"/> left at
-    /// <paramref name="at"/>.</returns>
+    /// <see cref="Check"/> at <paramref name="overlapToleranceM"/>; false with
+    /// <paramref name="corrected"/> left at <paramref name="at"/>.</returns>
     public static bool TryDepenetrate(RigidBody3D propBody, Transform3D at, float maxTranslationM,
-        out Transform3D corrected, out float movedM, out int queries)
+        float overlapToleranceM, out Transform3D corrected, out float movedM, out int queries)
     {
         corrected = at;
         movedM = 0f;
@@ -395,7 +411,7 @@ public static class PlacementIntegrity
 
             queries++;
             float depth = DeepestContact(space, query);
-            if (depth <= DefaultOverlapToleranceM)
+            if (depth <= overlapToleranceM)
                 break;
 
             float push = Mathf.Min(depth + DepenetrateSlackM, maxTranslationM - movedM);
@@ -405,7 +421,7 @@ public static class PlacementIntegrity
             movedM += push;
 
             queries++;
-            if (Check(propBody, candidate).Allowed)
+            if (Check(propBody, candidate, null, overlapToleranceM).Allowed)
             {
                 corrected = candidate;
                 return true;
@@ -418,7 +434,7 @@ public static class PlacementIntegrity
         // inside tolerance, in which case the candidate IS good and saying otherwise would send
         // a perfectly placed prop back to its last good transform for no reason.
         queries++;
-        if (movedM > 0f && Check(propBody, candidate).Allowed)
+        if (movedM > 0f && Check(propBody, candidate, null, overlapToleranceM).Allowed)
         {
             corrected = candidate;
             return true;

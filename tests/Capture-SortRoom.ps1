@@ -65,12 +65,26 @@ $ErrorActionPreference = "Stop"
 $BinStand = "82.0,3.0"
 $BinLook  = "180,-4"
 
+# Filled by the switch below. $SortSteps holds "<node name>:<bin slot>" pairs and is turned into
+# a --sort-script AFTER the server has printed its adoption log, because an authored prop's id is
+# a fact about the WHOLE world and this file used to type it.
+#
+# WHY IT USED TO BE WRONG (REVIEW-1 I3, 2026-09-20): the literals here were 1004..1013, TASK-1's
+# numbering on a base whose search room held four crates. On the merged tree those ids are the
+# HOLDING room's practice crates and near-misses, and the eighteen sortables are 1144..1161 --
+# so the bot fetched props 40 m away in another room, SortRoom never saw them, and the capture
+# was a photograph of an empty task room that looks exactly like a broken sort mechanic.
+# INT-1 ruling 5 fixed the ASSERTING suites and missed the capture harness.
+$SortSteps = @()
+$StandArgs = @()
+
 switch ($Pass) {
     "colour" {
         # No sorting: the plates are the subject and an object arcing through the frame is not.
         $Script     = "start@8,confirm@14,found@60,end@66"
         $WindowedIsFirst = $true
-        $SortArgs   = @("--goto-script", $BinStand, "--fp-look", $BinLook)
+        $SortSteps  = @()   # no sorting: the plates are the subject
+        $StandArgs  = @("--goto-script", $BinStand, "--fp-look", $BinLook)
         $Marks      = "20,24,28,32,36,40"
         $Duration   = 56
         $OtherDur   = 62
@@ -88,7 +102,11 @@ switch ($Pass) {
         # offset itself moved by a second between two runs of CLOCK-1's harness.
         $Script     = "start@8,confirm@14,found@60,end@66"
         $WindowedIsFirst = $true
-        $SortArgs   = @("--sort-script", "1004:0,1007:2,1010:2,1004:0,1013:-1")
+        # NODE NAMES, NOT IDS. See $SortSteps' note below and Get-AuthoredPropId in _Common.ps1.
+        # The same five steps Run-SortTest.ps1 stages: two right, one wrong, one re-placed, one
+        # still in the hand when the door goes.
+        $SortSteps  = @("Sort_000_Red:0", "Sort_003_Blue:2", "Sort_006_Yellow:2",
+                        "Sort_000_Red:0", "Sort_009_Red:-1")
         # The grid was walked onto the burst by MTIME rather than by arithmetic, which is
         # DOOR-1's own advice: a PNG's mtime is the capture's wall clock and the only
         # cross-process anchor it has. Second pass: the 54.5 s frame landed 2.406 s before
@@ -117,7 +135,10 @@ switch ($Pass) {
         # The three steps are one object of each SHAPE into its own bin, all correct.
         $Script     = "start@8,confirm@12,found@22,end@28,lost@36,start@46,confirm@50"
         $WindowedIsFirst = $false
-        $SortArgs   = @("--sort-script", "1004:0,1005:1,1006:2")
+        # One object of each SHAPE into its own bin: TaskRoom.tscn authors the crate interleaved
+        # cube / ball / can, so the first three sortables are one of each (Sort_000 cube ->
+        # bin 0, Sort_001 ball -> bin 1, Sort_002 can -> bin 2).
+        $SortSteps  = @("Sort_000_Red:0", "Sort_001_Blue:1", "Sort_002_Yellow:2")
         # Measured: the three deliveries land at 46.6 / 49.3 / 52.2 s of this client's own
         # life (it is the SECOND joiner, so its clock runs about four seconds BEHIND the
         # round script rather than ahead of it as the burst pass's does). The marks sit on
@@ -157,6 +178,24 @@ try {
     if (-not (Wait-ForLogLine $serverOut "\[server\] listening" 60)) {
         Write-Fail "the server never reported listening; see $serverOut"
     }
+
+    # Ids read out of the server's own adoption log, never typed. Adoption is logged BEFORE
+    # [server] listening, so the wait above is the only one needed. Get-AuthoredPropId fails loud
+    # and by NAME if a node was renamed or the world did not build, which is the whole point:
+    # a stale literal fails silently by photographing the wrong room.
+    $SortArgs = @()
+    if ($SortSteps.Count -gt 0) {
+        $pairs = @()
+        foreach ($step in $SortSteps) {
+            $node, $bin = $step -split ":", 2
+            $id = Get-AuthoredPropId $serverOut "TaskRoom/$node"
+            $pairs += ("{0}:{1}" -f $id, $bin)
+        }
+        $sortScript = ($pairs -join ",")
+        Write-Host "        --sort-script $sortScript" -ForegroundColor DarkGray
+        $SortArgs = @("--sort-script", $sortScript)
+    }
+    $SortArgs += $StandArgs
 
     # WINDOWED, no --headless: what is being photographed is what a camera renders. Engine flags
     # before the bare --, game flags after.
