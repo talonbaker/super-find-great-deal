@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    REACH-1: placement integrity layers 2 and 3 (program doc S5b). The planted room's six cases,
+    REACH-1: placement integrity layers 2 and 3 (program doc S5b). The planted room's eight cases,
     the Confirm-time refusal and acceptance on a live two-bot round, and what the audit costs
     with 150 props being disturbed.
 
@@ -25,10 +25,25 @@
         Prop_5_InBox       inside a closed movable box    -> None/Good,           reachable, first hit MOVABLE
         Prop_8_Shallow     0.12 m into a plinth           -> StaticOverlap/DEPENETRATED, reachable
         Prop_7_Faller      shoved into an open pit        -> KillPlane/RestoredLastGood, back within 0.05 m
+        Prop_2_HighLedge   Confirm pressed while it is
+                           still in the air (REVIEW-1 C2) -> still Loose, still un-frozen, still travelling
 
       The two "first hit MOVABLE" assertions are what give the bin and the box their teeth: a
       room where the bin was never authored would pass both of them on a clear line to the crate,
       and the boolean alone cannot tell those apart.
+
+      THE EIGHTH CASE IS THE ONE WHERE THE AUDIT COULD MOVE THE GAME RATHER THAN MEASURE IT.
+      ReachabilityFactSource.AuditBeforeConfirm used to re-audit unconditionally, and
+      PropManager.ServerAuditRest guards only PropMode.Held -- it cannot guard on Resting,
+      because the settle latch calls it on a prop that is still Loose. So a target still in
+      flight reached NetworkedProp.SettleToRest, which freezes the body and pins the transform,
+      and a prop a metre up passes both of layer 2's tests. A hider who dropped the object at the
+      Confirm plate and pressed inside the ~0.3 s settle window froze it in mid-air and the
+      seeker was sent to find a can hanging off the floor. Planted (guard removed) it printed
+      `modeAfterPress=Resting frozenAfterPress=True travelledAfter=0.000m -> FAIL`; with the
+      guard, `modeAfterPress=Loose frozenAfterPress=False travelledAfter=0.092m -> PASS`.
+      It goes through the shipped press seam, not through ServerAuditRest directly, because the
+      defect was in WHICH of those two a press reaches.
 
     PHASE 2 -- CONFIRM REFUSED, on a live round with two clients.
       A crate is seeded INSIDE the search room's pillar (--seed-test-props, which does not go
@@ -167,7 +182,7 @@ try {
     # ==========================================================================================
     # PHASE 1 -- the planted room
     # ==========================================================================================
-    Write-Host "[1/4] the planted room: six S5b cases plus the depenetration branch..." -ForegroundColor Cyan
+    Write-Host "[1/4] the planted room: six S5b cases, the depenetration branch and the Confirm-on-a-mover..." -ForegroundColor Cyan
     $plantOut = Join-Path $script:LogDir "reach-plant.out.log"
     $plant = Start-ReachServer "reach-plant" @("--server", "--port", $Port, "--reach-selftest")
     $procs += $plant
@@ -391,7 +406,7 @@ if ($script:Failures.Count -gt 0) {
     exit 1
 }
 
-Write-Host "PASS: the planted room's seven cases; Confirm refused NobodyCouldReachThat inside the pillar and accepted on the open floor; the audit's cost measured with $CostPropTarget props." -ForegroundColor Green
+Write-Host "PASS: the planted room's eight cases; Confirm refused NobodyCouldReachThat inside the pillar and accepted on the open floor; the audit's cost measured with $CostPropTarget props." -ForegroundColor Green
 Write-Host ""
 Write-Host "REACH-TEST OVERALL: PASS" -ForegroundColor Green
 exit 0

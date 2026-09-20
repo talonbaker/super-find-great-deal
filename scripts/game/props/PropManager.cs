@@ -257,6 +257,15 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
     /// (<see cref="RestAudit.Reason.None"/> / <see cref="RestAudit.Outcome.Good"/> with zero
     /// queries) — "there was nothing to audit" rather than "the audit passed".</para>
     /// </summary>
+    /// <summary>What the registry says this prop is doing, or <c>null</c> for an id it does not
+    /// know. Read-only, and the whole reason it is public: REACH-1's Confirm-time precondition
+    /// has to be able to tell a target that is AT REST from one that is still in the air, and
+    /// <see cref="ServerAuditRest"/> cannot answer that for it — the settle latch calls that
+    /// method on a prop that is still <see cref="PropMode.Loose"/>, which is exactly the tick it
+    /// is latching (REVIEW-1 C2, 2026-09-20).</summary>
+    public PropMode? ModeOf(int propId) =>
+        _registry.TryGet(propId, out PropState s) ? s.Mode : null;
+
     public RestAudit.Result ServerAuditRest(int propId)
     {
         if (!_isServer)
