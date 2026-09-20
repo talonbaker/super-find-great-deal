@@ -1188,3 +1188,61 @@ INT-0B's baseline was 1550. `SortRuleTests.cs` adds 69 and one MATCH-1 assertion
 its subject did (TASK-1 appends the hider's sort readout to the strip line that test was
 asserting; the seeker's half is added beside it, unchanged).
 
+## `Sandbox: mechanics` is load-flaky, and the discriminator is WHICH CHECK (TASK-1, measured 2026-09-19)
+
+**New to the load-flaky list**, measured rather than reasoned, and it does not look like the
+others: **120 of 121 checks passed and the one red was `phys_drop_no_holder_shove`** — an
+offline-sandbox physics assertion that the holder's own vertical velocity stays gravity-only for
+fifteen ticks after a drop (`SandboxSelfTest.cs`, `avatar.Velocity.Y <= 0.5f`).
+
+Measured on `feat/2026-09-19-task-1`, whose diff cannot reach it: the sandbox self-test runs an
+OFFLINE avatar (`NetRole.Offline`, `net.IsBot` false) in the sandbox scene, and TASK-1's only
+edits to shared files are one untaken branch in `SandboxAvatar`'s BOT brain selection
+(`SortScript.Count > 0`, and nothing in this suite passes `--sort-script`) and two appended
+members plus two new recipes in `SfxLab` (no existing recipe changed, no pool size changed,
+nothing here calls `Get` on either).
+
+| Run | Conditions | Result | The check |
+|---|---|---|---|
+| marathon, 6th of 40 suites in one PowerShell process | loaded — BTN-1's Godot processes alive on the machine throughout | **FAIL**, 120/121 | `phys_drop_no_holder_shove` |
+| tip, standalone `-SkipBuild` x3 | 4 other Godot processes alive (BTN-1's) for at least the first | **3/3 PASS**, 121/121 each | PASS each time |
+| **base** `9c16181`, detached worktree, standalone x3 | idle | **3/3 PASS**, 121/121 each | PASS each time |
+| the marathon's own three-suite TAIL (`Run-VoiceTest` -> `Run-HostingTest` -> `Run-SandboxTest`) in ONE PowerShell process | idle | **PASS**, 121/121 | PASS |
+
+**The last row is the one worth copying** and it is CELEBRATE-1's discriminator: a standalone
+re-run drops the PROCESS SHARING that the MOVE-1 env-var trap lives in, so re-running the tail in
+one process is what separates "the machine was loaded" from "the suite before it". Here it
+cleared both, which leaves load.
+
+**How to read a red here: COUNT THE CHECKS AND READ THE NAME.** A `120/121` with
+`phys_drop_no_holder_shove` as the only failure is this flake. A red on any of the other 120 — or
+more than one at once — is a different animal, and the carry/physics family's own rule applies
+first: read the failing check's name, then the log, before reaching for this list (CARRY-1's
+entry above is the case where a red written in this file's vocabulary was a real regression).
+
+**The A/B was inconclusive in the useful direction and that is worth saying** rather than
+claiming the base fails too: neither tree reproduced it standalone, so what is established is
+that the check passes 6/6 outside a marathon on both trees and failed once inside one. That is
+weaker than AVATAR-1's tidal-cycle measurement and it is what there is.
+
+## The task room has eighteen more rigid bodies, and `Run-ReachTest` counts them (TASK-1, 2026-09-19)
+
+`[reach-cost] props in world` moves from **154 to 172**: the 150 the suite seeds, CARRY-1's four
+in the search room, and TASK-1's eighteen sortables in the task room. The population check
+asserts AT LEAST the seeded count and is unaffected — REACH-1 already recorded why it is not an
+equality — but the numbers beside it moved and the next reader should not read that as a
+regression:
+
+| Quantity | REACH-1's baseline (154 props) | After TASK-1 (172 props) |
+|---|---|---|
+| rest audits in 20 s | 924 (46.2/s) | **1032 (51.6/s)** |
+| integrity queries | 924 | **1036** |
+| corrections | 0 | **1** |
+| server physics p50 / p95 / peak | 2.765 / 20.321 / 50.580 ms | **4.850 / 20.463 / 48.079 ms** |
+
+**Still one shape query per settle event**, which is the property that costing exercise exists to
+protect: 1036 queries against 1032 audits. The audit rate rises because there are more props to
+settle, not because each settle got dearer, and the p95 is within 1 % of REACH-1's while the peak
+is 5 % below it. The p50 roughly doubling is 18 more rigid bodies being simulated on a machine
+running another lane's suite. **SHELF-1's hundred will move all four again.**
+
