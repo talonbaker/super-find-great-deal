@@ -134,6 +134,22 @@ public partial class HideSeekDriver : Node
     /// is where they live.</summary>
     public event Action? ResetRequested;
 
+    /// <summary>Fires on every peer whenever a message carries a reason the round turned a press
+    /// down. <b>Edge-driven, and it has to be</b> (REVIEW-1 C1, 2026-09-20).
+    ///
+    /// <para><c>HideSeekState.Refusal</c> is true for exactly ONE sim tick — it is an answer to a
+    /// press, and a sticky one would still be on screen two minutes later describing a question
+    /// nobody remembers asking. <c>RoundStripWidget</c> used to read it as a LEVEL off
+    /// <c>GameHud</c>'s 10 Hz poll, which caught a ~16 ms window about one time in six; the
+    /// Hiding buzzer's refusal has no other delivery path at all
+    /// (<c>RoundButton.PlayPressResult</c> answers the PRESSER only, and the buzzer has no press
+    /// behind it), so the hider was handed <c>HideSeekTuning.HidingGraceSec</c> in silence.</para>
+    ///
+    /// <para><b>Not raised for a joining peer's first message</b>, on <see cref="PhaseChanged"/>'s
+    /// rule and for the same reason: a client that arrives on the tick somebody else's press was
+    /// refused has not been refused anything.</para></summary>
+    public event Action<HideSeekRefusal>? Refused;
+
     public override void _Ready() => Instance = this;
 
     public override void _ExitTree()
@@ -522,17 +538,25 @@ public partial class HideSeekDriver : Node
                      + $"hider={View.HiderPeerId} seeker={View.SeekerPeerId}");
             return;
         }
-        if (View.Phase == previous.Phase)
+        RoundViewEvents.Edges edges = RoundViewEvents.Between(previous, View);
+
+        // BEFORE the phase gate below, which is the whole of REVIEW-1 C1: the presses that get
+        // refused are exactly the ones that did NOT move the round, so a refusal raised only on a
+        // transition is a refusal raised never. See RoundViewEvents' class doc.
+        if (edges.Refusal != HideSeekRefusal.None)
+            Refused?.Invoke(edges.Refusal);
+
+        if (!edges.PhaseChanged)
             return;
 
         PhaseChanged?.Invoke(previous.Phase, View.Phase);
-        if (View.Phase == HideSeekPhase.Together && View.FoundTick >= 0)
+        if (edges.Found)
             Found?.Invoke(View.FoundTick);
         // The reset edge, derived on every peer from the one transition that IS the reset. The
         // server's own copy of this fires here too (CallLocal), which is what Gameplay subscribes
         // to — so the slice fan-out and the clients' repaint are driven by the same message rather
         // than by two clocks.
-        if (previous.Phase == HideSeekPhase.Tally && View.Phase == HideSeekPhase.Holding)
+        if (edges.ResetRequested)
             ResetRequested?.Invoke();
     }
 }
