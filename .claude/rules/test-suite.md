@@ -1276,6 +1276,7 @@ that walk, and it is the only copy).
 | **7908** | **`Run-AuthoredPropTest.ps1`** | **SHELF-1** |
 | **7909** | **`Run-HoldingBoardTest.ps1`** (and `Capture-HoldingBoard.ps1`, unregistered) | **HOLD-1** |
 | **7910** | **`Walk-DefinitionOfDone.ps1`** (the §8 walk, unregistered and manual) | **INT-1** |
+| **7911** | **`Run-StockTest.ps1`** (and `Capture-ShopFloor.ps1`, unregistered) | **STOCK-1** |
 
 Everything below 7893 is the pre-fork ladder and is unchanged: 7777, 7778, 7788, 7799, 7807,
 7809/7810, 7815, 7816, 7817, 7818, 7821, 7822, 7830, 7831, 7834.
@@ -1934,3 +1935,49 @@ sorts after `Prop_` in the same room. Nothing in the holding room can sort after
 because the room name is a PREFIX of every path under it -- so a prop added to an
 alphabetically-earlier room renumbers every later room, always, and the only durable answer is
 for the suites to stop typing the number.
+
+## STOCK-1 (2026-09-20): udp/7911, and a level that is GENERATED and committed
+
+`tests/Run-StockTest.ps1` claims **udp/7911** and is registered last in `tests/Run-AllTests.ps1`.
+The one ladder table above said 7910 was next; by the time this lane's merge landed, **INT-1's
+`Walk-DefinitionOfDone.ps1` had taken it** on a branch this worktree could not see. The
+orchestrator handed 7911 out rather than letting this lane compute one from a snapshot of
+`tests/` -- INT-0's lesson applied rather than re-learned for a sixth time, and it was right
+again. **The next free number is 7912.**
+
+### A level built in `_Ready` passes the check that exists to forbid it
+
+STOCK-1's packet asked for a `ShelfStocker` node that fills `MultiMesh` buffers at scene load.
+`.claude/rules/godot-scenes.md` forbids building a level in code, and
+`SupermarketWorldSelfTest.CheckAuthored` is the measurement behind that rule -- it counts a
+section's PACKED nodes against its LIVE nodes.
+
+**Filling a MultiMesh buffer in `_Ready` adds no node, so it passes that check**, while being
+precisely what the rule is about: a room that is empty in the editor and full at runtime. The
+class doc says so in its own words -- *"every part of a level is physically authored in the scene
+file SO IT CAN BE OPENED AND FLOWN AROUND IN THE EDITOR. That is not something a reviewer can
+verify from a diff ... so it is measured."*
+
+**So the fill is BAKED**: the same seeded arithmetic runs in a generator, writes
+`scenes/game/world/supermarket/StockBulk.tscn` and `scenes/game/props/BinMound.tscn`, and the
+result is committed. `SFGD_BAKE_STOCK=1 dotnet test tests/unit/SailNet.Tests.csproj` regenerates
+them; every other `dotnet test` run RE-DERIVES the whole layout and compares it, so the committed
+file is a pure function of eighty lines of arithmetic and a hand edit to it is a red with a line
+number rather than a mystery a year later. **The generalisation: a node-count check cannot see
+work that goes into a RESOURCE rather than into a node, so "it passes the level check" is not
+evidence that a level is authored.**
+
+### Bulk that overlaps a carryable is invisible until somebody hides behind it
+
+The 120 products SHELF-1 authored are networked `RigidBody3D` standing on the same boards the
+filler fills. Static filler laid over one puts a networked prop permanently inside static
+geometry: every rest audit reports `StaticOverlap`, REACH-1's layer 3 answers `InsideStatic`, and
+a hider who chose that prop is refused the Confirm with `NobodyCouldReachThat` -- **in a room that
+renders perfectly and whose every other suite is green.** The fill carves every cell that would
+come within 10 mm of a facing, and
+`StockBakeTests.NoBulkInstanceStandsWhereACarryableFacingStands` is the gate.
+
+**Why 10 mm and not the 0.02 m placement tolerance**, measured while writing it: at produce's
+0.175 m pitch for a 0.16 m sphere, a 0.02 m clearance empties both NEIGHBOURS of every facing as
+well and leaves an end-cap with 2 of 14 cells standing -- barer than SHELF-1 left it. The quantity
+that matters is penetration, and any positive clearance is already zero penetration.

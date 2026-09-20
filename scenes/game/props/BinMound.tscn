@@ -1,0 +1,51 @@
+[gd_scene load_steps=5 format=3 uid="uid://binmound0sfgdmvp"]
+
+; =============================================================================================
+; STOCK-1 (2026-09-20) — A BIN OF ORANGES. **GENERATED FILE: DO NOT EDIT BY HAND.**
+; Regenerate: SFGD_BAKE_STOCK=1 dotnet test tests/unit/SailNet.Tests.csproj
+;
+; 29 produce instances in one MultiMesh draw, in FloorBin.tscn's own local space: three
+; layers of 4x4 + 3x3 + 2x2, crowning at y = 0.40 inside a tub whose rim is at 0.60, so the pile
+; sits in the bin rather than on it.
+;
+; IT IS A CHILD OF THE BIN, NOT OF THE ROOM, and that is the whole reason this is a scene of its
+; own. A bin is a 6 kg RigidBody3D a player can pick up and tip over -- SHELF-1 put them in the
+; room precisely so "a bin knocked over is somewhere an object can end up". Static oranges
+; authored at a bin's room position would hang in the air the first time anybody moved it.
+;
+; NO COLLISION, AND IT IS A DECISION RATHER THAN AN OMISSION. STOCK-1's packet asks for a pile
+; collider "so a placed object nestles on the mound rather than floating or sinking". A bin's
+; interior is 0.78 x 0.54 x 0.78 and SHELF-1's bible check closed INTERACTION §3 on exactly that
+; number: "which clears a 0.44 m crate by 0.17 m horizontally and 0.10 m vertically, so 'hide it
+; under the bin' is a physical fact and not a scripted allowance." A crate needs 0.44 m of the
+; 0.54 m available, so ANY mound collider deletes that affordance outright -- there is no
+; half-fill that keeps it. Visual-only keeps both: the hollow is still hollow to physics, and an
+; object dropped into a stocked bin settles on the bin floor AMONG the oranges, which is both
+; what really happens and a better hiding place than an empty tub. The cost is stated rather
+; than hidden: something set down here beds into the fruit instead of resting on top of it.
+; =============================================================================================
+
+[sub_resource type="SphereMesh" id="SphereMesh_produce"]
+radius = 0.08
+height = 0.16
+radial_segments = 16
+rings = 8
+
+[sub_resource type="StandardMaterial3D" id="Mat_produce"]
+resource_name = "bulk produce (Produce.tscn's material, not local to scene)"
+albedo_color = Color(0.92, 0.51, 0.13, 1)
+roughness = 0.9
+metallic = 0.0
+emission_enabled = true
+emission = Color(0.92, 0.51, 0.13, 1)
+emission_energy_multiplier = 0.12
+
+[sub_resource type="MultiMesh" id="MultiMesh_mound"]
+transform_format = 1
+mesh = SubResource("SphereMesh_produce")
+instance_count = 29
+buffer = PackedFloat32Array(0.124665, 0, 0.992199, -0.259365, 0, 1, 0, 0.14, -0.992199, 0, 0.124665, -0.266468, 0.882343, 0, 0.470607, -0.260292, 0, 1, 0, 0.14, -0.470607, 0, 0.882343, -0.077432, -0.998992, 0, -0.044895, -0.271189, 0, 1, 0, 0.14, 0.044895, 0, -0.998992, 0.0842, 0.393054, 0, 0.919516, -0.256293, 0, 1, 0, 0.14, -0.919516, 0, 0.393054, 0.258601, -0.926915, 0, -0.375272, -0.094487, 0, 1, 0, 0.14, 0.375272, 0, -0.926915, -0.265587, -0.922825, 0, -0.38522, -0.094024, 0, 1, 0, 0.14, 0.38522, 0, -0.922825, -0.096735, -0.705943, 0, -0.708269, -0.091236, 0, 1, 0, 0.14, 0.708269, 0, -0.705943, 0.096039, 0.228063, 0, -0.973646, -0.087552, 0, 1, 0, 0.14, 0.973646, 0, 0.228063, 0.263374, 0.987285, 0, 0.158958, 0.078889, 0, 1, 0, 0.14, -0.158958, 0, 0.987285, -0.261391, 0.777946, 0, 0.628331, 0.094069, 0, 1, 0, 0.14, -0.628331, 0, 0.777946, -0.094667, -0.074734, 0, -0.997204, 0.092131, 0, 1, 0, 0.14, 0.997204, 0, -0.074734, 0.090601, 0.135809, 0, 0.990735, 0.094607, 0, 1, 0, 0.14, -0.990735, 0, 0.135809, 0.26865, 0.558261, 0, 0.829666, 0.269945, 0, 1, 0, 0.14, -0.829666, 0, 0.558261, -0.253453, 0.454388, 0, 0.890804, 0.256537, 0, 1, 0, 0.14, -0.890804, 0, 0.454388, -0.098953, -0.749006, 0, -0.662563, 0.258243, 0, 1, 0, 0.14, 0.662563, 0, -0.749006, 0.083718, 0.871833, 0, -0.489803, 0.266755, 0, 1, 0, 0.14, 0.489803, 0, 0.871833, 0.256143, 0.086504, 0, -0.996252, -0.184982, 0, 1, 0, 0.2712, 0.996252, 0, 0.086504, -0.178165, 0.366379, 0, 0.930466, -0.181676, 0, 1, 0, 0.2712, -0.930466, 0, 0.366379, 0.005559, 0.110106, 0, -0.99392, -0.178171, 0, 1, 0, 0.2712, 0.99392, 0, 0.110106, 0.168313, -0.592745, 0, -0.80539, 0.009381, 0, 1, 0, 0.2712, 0.80539, 0, -0.592745, -0.177006, -0.586962, 0, -0.809614, 0.010562, 0, 1, 0, 0.2712, 0.809614, 0, -0.586962, 0.000624, 0.431885, 0, -0.901929, 0.008441, 0, 1, 0, 0.2712, 0.901929, 0, 0.431885, 0.17034, -0.022848, 0, -0.999739, 0.176663, 0, 1, 0, 0.2712, 0.999739, 0, -0.022848, -0.184188, 0.929034, 0, 0.369996, 0.179401, 0, 1, 0, 0.2712, -0.369996, 0, 0.929034, 0.008948, -0.70456, 0, 0.709644, 0.18108, 0, 1, 0, 0.2712, -0.709644, 0, -0.70456, 0.16761, 0.084721, 0, -0.996405, -0.075686, 0, 1, 0, 0.4024, 0.996405, 0, 0.084721, -0.090619, 0.465065, 0, 0.885276, -0.081801, 0, 1, 0, 0.4024, -0.885276, 0, 0.465065, 0.080348, -0.364199, 0, 0.931321, 0.079676, 0, 1, 0, 0.4024, -0.931321, 0, -0.364199, -0.091311, -0.146478, 0, 0.989214, 0.098796, 0, 1, 0, 0.4024, -0.989214, 0, -0.146478, 0.087574)
+
+[node name="BinMound" type="MultiMeshInstance3D"]
+multimesh = SubResource("MultiMesh_mound")
+material_override = SubResource("Mat_produce")

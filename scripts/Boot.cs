@@ -175,6 +175,19 @@ public partial class Boot : Node
             return;
         }
 
+        if (options.StockSelfTest)
+        {
+            // STOCK-1: the baked bulk stock against the arithmetic that baked it, and every
+            // authored hole against the shipped placement check. A Node rather than a static
+            // Run() for SupermarketWorldSelfTest's reason one step further on - the second half
+            // needs a PHYSICS SPACE, so it needs a tree that has run frames, and posing a real
+            // collider is the only way to ask "will the object the round is about actually rest
+            // here" rather than to reason about it. Quits itself.
+            GD.Print("[boot] stock self-test");
+            AddChild(new Game.World.StockSelfTest { Name = "StockSelfTest" });
+            return;
+        }
+
         // The low-spec preset applies before any scene renders a frame (headless peers
         // have no viewport worth scaling).
         if (!net.IsHeadless)

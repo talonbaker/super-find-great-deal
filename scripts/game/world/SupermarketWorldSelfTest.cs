@@ -124,6 +124,21 @@ public sealed partial class SupermarketWorldSelfTest : Node3D
         // Carryable anywhere in them, which is the whole test for membership here.
         "res://scenes/game/world/supermarket/SortBin.tscn",
         "res://scenes/game/world/supermarket/SupplyCrate.tscn",
+        // STOCK-1 (2026-09-20). The bulk stock: two MultiMeshInstance3D nodes and a StaticBody3D
+        // of collision runs, instanced once into the search room. It is unambiguously LEVEL
+        // geometry and it is here for CLOCK-1's reason — CountNodes stops at an instance
+        // boundary, so a prefab that is not on this list is invisible from its room's count and
+        // there is no mechanism that notices one was forgotten.
+        //
+        // WORTH SAYING OUT LOUD, because this entry is the one that could have been skipped: the
+        // file is GENERATED, and this check is exactly why generating it was allowed to be the
+        // answer. A ShelfStocker node that filled those MultiMesh buffers in _Ready would have
+        // passed this check — filling a buffer adds no NODE — while being precisely what the
+        // rule forbids, a room that is empty in the editor and full at runtime. The buffers are
+        // baked instead, so this row is trivially equal for the RIGHT reason, and the drift
+        // between the bake and the arithmetic that produced it is caught by StockBakeTests in
+        // dotnet test rather than here.
+        "res://scenes/game/world/supermarket/StockBulk.tscn",
     };
 
     private readonly List<string> _failures = new();
