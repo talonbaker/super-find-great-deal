@@ -898,6 +898,12 @@ Every number below is a REGISTERED suite's bind port on the merged tree, audited
 every `$Port` in `tests/` after the last merge: **all distinct.** Read this table before picking
 the next one, and take **7905**.
 
+> **Updated by SHELF-1, 2026-09-19.** 7905-7908 are now spoken for; the next free number is
+> **7909**. The four were HANDED OUT BY THE ORCHESTRATOR, which is this section's own lesson
+> applied: BTN-1, TASK-1 and SHELF-1 branched off two different bases within an hour of each
+> other and none of their `tests/` directories contains the other two's suites, so a grep in any
+> one of the three worktrees would have produced 7905 three times.
+
 | Port | Suite | Lane |
 |---|---|---|
 | 7893 / 7894 / 7895 | `Run-CarryNetTest.ps1` (contention / authority / teleport) | CARRY-1 |
@@ -910,6 +916,10 @@ the next one, and take **7905**.
 | 7902 | `Run-MaterialSfxTest.ps1` | SFX-1 (SFX-2 merges at INT-1 on the same port) |
 | 7903 | `Run-ReachTest.ps1` | REACH-1 |
 | **7904** | **`Run-RoundClockTest.ps1`** (and `Capture-RoundClock.ps1`, unregistered) | **CLOCK-1** |
+| 7905 | *the match-end clock probe, unregistered and manual* | INT-0B (§8.5) |
+| 7906 | *reserved* | BTN-1 |
+| 7907 | *reserved* | TASK-1 |
+| **7908** | **`Run-AuthoredPropTest.ps1`** | **SHELF-1** |
 
 Everything below 7893 is the pre-fork ladder and is unchanged: 7777, 7778, 7788, 7799, 7807,
 7809/7810, 7815, 7816, 7817, 7818, 7821, 7822, 7830, 7831, 7834.
@@ -1070,3 +1080,34 @@ can legitimately still be showing the phase it had when the server has already m
 the wire's latency rather than a wrong clock. The suite counts the skips and the unpaired lines
 and **fails if fewer than 30 pairs were actually compared**, so a guard that swallowed everything
 cannot read as green.
+
+## SHELF-1 (2026-09-19): udp/7908, and two things a 130-prop room taught the suites
+
+`tests/Run-AuthoredPropTest.ps1` claims **udp/7908** and is registered last in
+`tests/Run-AllTests.ps1`. It is the "authored-prop adoption proof" `docs/PRUNE-BACKLOG.md` has
+listed as owed since the fork, returned with the props that made it worth having.
+
+### An id assigned by node-path sort is a dependency nobody can see in a diff
+
+`PropManager.AdoptAuthoredProps` hands out ids from 1000 in **ordinal node-path sort order**, so
+the id of every prop in a room is a function of the NAME of every other prop in it. That is fine
+until a room has more than a handful. The search room now authors 130, and `Run-PlaceTest.ps1`
+names 1000, 1001, 1002 and 1003 in its own source as CARRY-1's four crates.
+
+**Every product SHELF-1 added sorts before `Prop_`** — `Bin_`, `Box_`, `Can_` and `Produce_` all
+start below `P` — so dropping them in beside the crates would have renumbered CARRY-1's four by
+126 and turned another lane's suite red for a reason no reviewer would find from the diff. They
+live under a container node named **`Stock`** instead, because `S` sorts after `P`. That is the
+whole trick, and it is written into `SearchRoom.tscn` at the node so the next person to add a
+prop there reads it before they name it.
+
+**The generalisation, which is the part worth keeping:** when a system derives identity from a
+sort over names, adding a sibling is an edit to every existing id. Put the new population in its
+own container and choose the container's name against the sort, not against taste.
+
+### Zero-pad any name an ordinal sort will order
+
+`Can_10` sorts between `Can_1` and `Can_2`. Every product in the room is padded to three digits
+(`Can_000`), so the id order and the reading order are the same thing. An unpadded set would have
+been deterministic and identical on every peer — and wrong about which object a level author was
+looking at.
