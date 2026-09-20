@@ -130,12 +130,21 @@ function Report-Probe([string]$Tag, [string]$Title) {
     # the mean over the seconds that had two peers connected, which is the only interval the
     # number means anything for.
     $ns = Join-Path $script:LogDir "$Tag.netstats.jsonl"
-    if (Test-Path $ns) {
+    if (-not (Test-Path $ns)) {
+        Write-Host "  [net-stats] no log at $ns" -ForegroundColor Yellow
+    } else {
         $rows = @(Get-Content $ns | Where-Object { $_.Trim().Length -gt 0 } |
-                  ForEach-Object { $_ | ConvertFrom-Json })
+                  ForEach-Object { try { $_ | ConvertFrom-Json } catch { } })
         $live = @($rows | Where-Object { $_.PSObject.Properties.Name -contains "peers" -and [int]$_.peers -ge 2 })
         if ($live.Count -eq 0) { $live = $rows }
-        if ($live.Count -gt 0) {
+        if ($live.Count -eq 0) {
+            # SAY SO RATHER THAN SAY NOTHING. Measured: one run printed no bandwidth line at all
+            # and the file on disk was 4 KB of perfectly good JSON -- the server had just been
+            # stopped by pid and the log was still held when this read it. A reporter that goes
+            # quiet is indistinguishable from a run with no traffic, which is the failure mode
+            # the "mean sent 0 B/s" bug above already cost once.
+            Write-Host "  [net-stats] $ns parsed to 0 row(s) -- it may still have been held by the dying server; read it directly" -ForegroundColor Yellow
+        } else {
             # NetStatsLogger's own field names, read off a line rather than guessed: sent/recv are
             # BYTES in the interval and sentPkts/recvPkts the packet counts (ENet's PopStatistic
             # deltas). The first version of this reporter looked for sentBytes/recvBytes, found

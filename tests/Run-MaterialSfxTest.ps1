@@ -164,16 +164,24 @@ $ErrorActionPreference = "Stop"
 #      pickup that never happened.
 #   3. SO EACH DRIVER'S PROP LIVES IN THAT DRIVER'S OWN WALKWAY, matched to the spawn marker
 #      its join order gets it (measured from the bots' own first samples, not assumed):
-#        SfxCanBot     marker 0 (35.5,  0.0)  -> the can     at z =  0.0
+#        SfxCanBot     marker 0 (35.5,  0.0)  -> the can at (34.3, 0.0), one metre BEHIND it
 #        SfxBoxBot     marker 2 (38.5,  2.1)  -> the box     at z =  2.1
 #        SfxProduceBot marker 3 (41.5, -2.1)  -> the produce at z = -2.1
 #        (the windowed witness takes marker 1 (44.5, 0.0) and walks to nothing)
 #      The stack and the two free-fallers are seeded, dropped and never walked to, so they go
-#      together in the +Z edge walkway (z = 4.2) clear of the two bins at x = 33.6 and 46.4.
+#      together in the +Z edge walkway (z = 4.2), keeping SFX-1's own x values, clear of the two
+#      bins at x = 33.6 and 46.4.
+#
+#   4. A CHARACTERBODY3D DOES NOT PUSH A RIGIDBODY3D, so CARRY-1's four crates are WALLS to a
+#      walking bot. The can first went to (40, 0, 0) -- the same walkway as the bot, no shelf in
+#      the way -- and SfxCanBot moved 7 cm and stopped: Prop_0 sits at (36, 0.22, 0) and the bot
+#      halted at x = 35.635, which is the crate's face minus the body radius, to the millimetre.
+#      So the can is seeded at x = 34.3, one metre BEHIND the bot's own marker, where the only
+#      thing between them is floor.
 #
 # The SUBJECT of this suite has not moved an inch: same seven props, same kinds, same drop, same
 # relative geometry in the once-per-contact stack. Only the staging did, and it had to.
-$CanAt       = "40,0.35,0"
+$CanAt       = "34.3,0.35,0"
 $BoxAt       = "42,0.35,2.1"
 $ProduceAt   = "38,0.35,-2.1"
 # THE ONCE-PER-CONTACT FIXTURE: a can dropped onto a CRATE, in the far corner away from every
@@ -188,8 +196,8 @@ $ProduceAt   = "38,0.35,-2.1"
 # 0.035 m and being pushed out) sends the upper one down beside it instead of onto it. A crate
 # presents a 0.44 m square face. The rule under test is "one contact, one sound", which does not
 # care what the two bodies are made of -- so the fixture should be the one that cannot miss.
-$StackLowAt  = "44.5,0.25,4.2"
-$StackHighAt = "44.5,1.20,4.2"
+$StackLowAt  = "45,0.25,4.2"
+$StackHighAt = "45,1.20,4.2"
 
 # THE FREE-FALLERS, one cardboard and one produce, and they exist because of a measured lesson:
 # a bot's THROW is not a reliable way to produce an impact. Measured on the previous run -- the
@@ -198,8 +206,8 @@ $StackHighAt = "44.5,1.20,4.2"
 # so "produce never fired ProduceThump" was a fact about a ballistic arc rather than about the
 # sound. A controlled 1.14 m fall arrives at ~4.7 m/s every single time. Tin needs no free-faller
 # because the stacked pair already gives it one.
-$BoxFallAt     = "38,1.20,4.2"
-$ProduceFallAt = "35.5,1.20,4.2"
+$BoxFallAt     = "43,1.20,4.2"
+$ProduceFallAt = "41,1.20,4.2"
 
 # Prop ids are assigned by PropManager.ServerSpawn in seed order, starting at 1 (authored props
 # take 1000+, which is why there is no collision with SearchRoom's four crates).
