@@ -1,5 +1,6 @@
 using Godot;
 using MpFoundation.Game.Props;
+using MpFoundation.Net;
 
 namespace MpFoundation.Game.Round;
 
@@ -126,9 +127,27 @@ public sealed class ReachabilityFactSource : IRoundFactSource, IConfirmTimeAudit
     /// world whose last audit predates the shove. <see cref="PropManager.ServerAuditRest"/> is a
     /// no-op on a held prop, which is the one case this could otherwise reach into (and which the
     /// loop refuses with <c>PutTheObjectDownFirst</c> anyway).</para>
+    ///
+    /// <para><b>The re-audit runs only on a target that is ALREADY Resting</b> (REVIEW-1 C2,
+    /// 2026-09-20). Those three clauses are PRECONDITIONS; re-auditing unconditionally
+    /// implemented the first one as "make it Resting" instead. <c>ServerAuditRest</c> guards only
+    /// <see cref="PropMode.Held"/> — it cannot guard on Resting, because the settle latch calls
+    /// it on a prop that is still Loose — so a LOOSE target fell straight through it to
+    /// <c>NetworkedProp.SettleToRest</c>, which freezes the body, zeroes both velocities and pins
+    /// the transform. A hider standing at the Confirm plate who dropped or threw the target and
+    /// pressed inside the ~0.3 s settle window (<c>PropManager.SettleTicks</c>) therefore froze
+    /// the object wherever it happened to be, and a prop a metre up passes layer 2's bounds test
+    /// (all eight corners inside a room's box) and its overlap test (it is touching nothing), so
+    /// the audit returned Good and latched it in mid-air. The seeker was then sent to find a can
+    /// hanging off the floor.</para>
+    ///
+    /// <para>A prop in flight is now left alone: physics owns it, the settle latch audits it the
+    /// moment it comes to rest, and layer 3 below still measures the pose it has right now. There
+    /// is no "press a button to freeze physics" edge left. Planted and measured by
+    /// <c>ReachPlantSelfTest</c>'s eighth case.</para>
     public void AuditBeforeConfirm()
     {
-        if (_targetPropId >= 0)
+        if (_targetPropId >= 0 && _props.ModeOf(_targetPropId) == PropMode.Resting)
         {
             // The audit raises RestLatched, which would evaluate a second time for no new
             // information; the latch handler stands down while this flag is up and the one

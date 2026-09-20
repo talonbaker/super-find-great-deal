@@ -68,8 +68,11 @@
     first player arriving, and the gap between them is however long Godot takes to open a window.
 
 .PARAMETER Port
-    udp/7910, the next free number in the one ladder table in .claude/rules/test-suite.md.
-    Unregistered, like Capture-RoundClock and Capture-SortRoom, and it takes the machine mutex.
+    udp/7910, and it is NOW A ROW IN THAT TABLE rather than "the next free number" -- REVIEW-1
+    added it on 2026-09-20, because this file claimed 7910 while the one ladder table in
+    .claude/rules/test-suite.md went on saying 7910 was free in three places. The next free
+    number is 7911. Unregistered, like Capture-RoundClock and Capture-SortRoom, and it takes the
+    machine mutex.
 #>
 [CmdletBinding()]
 param(

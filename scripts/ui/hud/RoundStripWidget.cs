@@ -33,6 +33,15 @@ namespace MpFoundation.Ui.Hud;
 /// half of the same answer; this is the half that says the words, because
 /// <c>INTERACTION-BIBLE.md</c> §5 is about a control that refused and never said which key.</para>
 ///
+/// <para><b>It is taken from an EVENT, not from the poll</b> (REVIEW-1 C1, 2026-09-20). This
+/// widget used to read <c>view.Refusal</c> as a level inside <see cref="Tick"/>, which runs on
+/// <c>GameHud</c>'s 10 Hz poll — against a field that is true for one sim tick (~16 ms at 60 Hz),
+/// so the sentence was lost about five times in six. It now subscribes to
+/// <c>HideSeekDriver.Refused</c>, which fires on the message that carries the reason, and the
+/// latch below holds it for the same two seconds. The Hiding buzzer's refusal has no other
+/// delivery path in the game at all, which is what made a 1-in-6 read a defect rather than a
+/// polish item.</para>
+///
 /// <para><b>Nothing here holds its own appearance.</b> Every colour, size, weight and gap comes
 /// from <see cref="HudTheme"/>, which forwards to <c>UiTokens</c>/<c>UiScale</c>/<c>UiRecipes</c>
 /// — the unit tests enforce it by scanning this file's text for a typed literal.</para>
@@ -66,6 +75,17 @@ public partial class RoundStripWidget : PanelContainer
 
     private static RoundStripWidget? _instance;
     private string _localSentence = string.Empty;
+
+    /// <summary>The sentence <c>HideSeekDriver.Refused</c> delivered since the last poll, or
+    /// empty. Its own field rather than <see cref="_localSentence"/> so BTN-1's rule survives:
+    /// a LOCAL refusal (a button's own, which the round never hears about) wins a tie, because it
+    /// is the newer of the two and the newest refusal is the one the player is confused by.</summary>
+    private string _wireSentence = string.Empty;
+
+    /// <summary>The driver this widget's <see cref="OnRoundRefused"/> is currently hooked to.
+    /// Re-resolved in <see cref="Tick"/> because the driver node is replaced outright on a
+    /// reconnect resume, exactly as <c>GameHud</c>'s own lambdas are.</summary>
+    private HideSeekDriver? _subscribed;
 
     public RoundStripWidget() => MouseFilter = MouseFilterEnum.Ignore;
 
@@ -130,6 +150,25 @@ public partial class RoundStripWidget : PanelContainer
     {
         if (ReferenceEquals(_instance, this))
             _instance = null;
+        Unsubscribe();
+    }
+
+    private void Unsubscribe()
+    {
+        if (_subscribed is not null && GodotObject.IsInstanceValid(_subscribed))
+            _subscribed.Refused -= OnRoundRefused;
+        _subscribed = null;
+    }
+
+    /// <summary>The round refused a press. Held here until the next poll rather than painted
+    /// immediately: the latch, the flash and the two-second hold all live in <see cref="Tick"/>,
+    /// and a second painting path would be a second answer to "how long does a sentence stay
+    /// up".</summary>
+    private void OnRoundRefused(HideSeekRefusal reason)
+    {
+        string sentence = HideSeekText.RefusalSentence(reason);
+        if (sentence.Length > 0)
+            _wireSentence = sentence;
     }
 
     /// <summary>
@@ -146,22 +185,36 @@ public partial class RoundStripWidget : PanelContainer
             return;
         }
 
+        // The refusal subscription, re-resolved against the live driver: the node is replaced
+        // outright on a reconnect resume, and a handler left on the old one would go quiet with
+        // nothing to show for it.
+        if (!ReferenceEquals(_subscribed, driver))
+        {
+            Unsubscribe();
+            driver.Refused += OnRoundRefused;
+            _subscribed = driver;
+        }
+
         HideSeekView view = driver.View;
         Visible = true;
 
-        // A refusal arrives in ONE message and is gone from the next, so it is latched on arrival
-        // rather than read as a level. Re-arming on the same reason restarts the hold, which is
-        // what a player pressing twice expects.
+        // A refusal arrives in ONE message and is gone from the next, so it is delivered as an
+        // EVENT (HideSeekDriver.Refused) and latched here — never read off view.Refusal, which
+        // this poll samples six times too slowly to see it (REVIEW-1 C1). Re-arming on the same
+        // reason restarts the hold, which is what a player pressing twice expects.
         //
         // A LOCAL sentence (BTN-1's SayLocal) is consumed here and treated identically from this
         // line down, which is the whole point: a button's own refusal and the round's refusal are
         // the same event to the player. The local one wins a tie because it is the newer of the
         // two and the newest refusal is the one they are currently confused by.
-        string? pending = _localSentence.Length > 0 ? _localSentence : null;
+        string? pending = _localSentence.Length > 0 ? _localSentence
+            : _wireSentence.Length > 0 ? _wireSentence
+            : null;
         _localSentence = string.Empty;
-        if (pending is not null || view.Refusal != HideSeekRefusal.None)
+        _wireSentence = string.Empty;
+        if (pending is not null)
         {
-            string sentence = pending ?? HideSeekText.RefusalSentence(view.Refusal);
+            string sentence = pending;
             if (sentence.Length > 0)
             {
                 bool fresh = _refusalLeft <= 0.0 || sentence != _refusalText;
