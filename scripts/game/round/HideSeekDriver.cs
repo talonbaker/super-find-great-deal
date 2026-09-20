@@ -383,6 +383,17 @@ public partial class HideSeekDriver : Node
             case HideSeekPhase.Together:
                 // Behind the burst door, already facing in (program §5 step 1). The door itself is
                 // DOOR-1's; this only puts the body where the door will open onto.
+                //
+                // The cooldown is cleared FIRST (REVIEW-1 I2, 2026-09-20). RoomTeleport's 800 ms
+                // gate exists to stop a TRIGGER VOLUME bouncing a player between two rooms; an
+                // authoritative phase-change teleport is not that, and this is the one move in
+                // the round that a burst runs against on its own clock. BurstDoor stages from the
+                // Found tick and fires at StartleTuning.TellSec (0.4 s) on every peer whether or
+                // not the teleport landed, so a find inside 800 ms of the Confirm move (the case
+                // this file's own comment at the top names) left the seeker watching the door
+                // open from the search room and then being teleported in behind it. The retry
+                // queue below fixes ARRIVAL, not ordering.
+                RoomTeleport.ForgetPeer(_state.SeekerPeerId);
                 MoveTo(_state.SeekerPeerId, SupermarketWorld.Vestibule, 0);
                 break;
             case HideSeekPhase.Holding:

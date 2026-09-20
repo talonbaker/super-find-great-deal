@@ -1158,8 +1158,9 @@ stands, which is the list to read before picking the next one:
 wave-2 lanes were merged and their five separate part-tables could finally be resolved into one).
 Every number below is a REGISTERED suite's bind port on the merged tree, audited by grepping
 every `$Port` in `tests/` after the last merge: **all distinct.** Read this table before picking
-the next one, and take **7910** (INT-1, 2026-09-19 — the table below is the WHOLE wave, all
-three merges in, and it is the only copy).
+the next one, and take **7911** (REVIEW-1, 2026-09-20 — INT-1's own walk took 7910 while this
+sentence still said 7910 was free; the table below is the WHOLE wave, all three merges in, plus
+that walk, and it is the only copy).
 
 > **Updated by SHELF-1, 2026-09-19.** 7905-7908 are now spoken for; the next free number is
 > **7909**. The four were HANDED OUT BY THE ORCHESTRATOR, which is this section's own lesson
@@ -1184,6 +1185,7 @@ three merges in, and it is the only copy).
 | **7907** | **`Run-SortTest.ps1`** (and `Capture-SortRoom.ps1`, unregistered) | **TASK-1** |
 | **7908** | **`Run-AuthoredPropTest.ps1`** | **SHELF-1** |
 | **7909** | **`Run-HoldingBoardTest.ps1`** (and `Capture-HoldingBoard.ps1`, unregistered) | **HOLD-1** |
+| **7910** | **`Walk-DefinitionOfDone.ps1`** (the §8 walk, unregistered and manual) | **INT-1** |
 
 Everything below 7893 is the pre-fork ladder and is unchanged: 7777, 7778, 7788, 7799, 7807,
 7809/7810, 7815, 7816, 7817, 7818, 7821, 7822, 7830, 7831, 7834.
@@ -1196,6 +1198,17 @@ Everything below 7893 is the pre-fork ladder and is unchanged: 7777, 7778, 7788,
 > BTN-1's branch listed 7905 as SFX-2's; INT-0B's row (the unregistered match-end clock probe)
 > is the one on the merged tree and is what the table says. **HOLD-1 claims 7909** for
 > `Run-HoldingBoardTest.ps1`; the next free number is **7910**.
+
+> **Updated by REVIEW-1, 2026-09-20.** **7910 is TAKEN** — `tests/Walk-DefinitionOfDone.ps1`
+> binds it, and it landed at `bd69498` in the same delta that left all three "next free" lines
+> above and below saying 7910 was free. **The next free number is 7911.** The only record that it
+> had moved was one summary row in `docs/agents/handoffs/2026-09-19-INT-1.md`, and *a handoff is
+> not the ladder* — the next lane reads this table, sees a free number, claims it, and two suites
+> bind the same UDP port. That is the failure this repo has now paid for twice (three lanes on
+> 7896, two on 7899), and the table's own text calls itself "the WHOLE wave, all in one place",
+> which is only true while somebody keeps adding the rows. **An unregistered harness takes a row
+> like anything else**: it is never in `Run-AllTests.ps1`, so it can never collide with a
+> marathon, but it can collide with the next lane that grepped this table.
 
 > **Audited on the fully merged tree, INT-1, 2026-09-19.** One grep of every `$Port` in `tests/`
 > after the last of the three merges: **every REGISTERED suite's port is distinct.** Four numbers
@@ -1441,8 +1454,9 @@ section above has the row; **the next free number is 7908.**
 > header forbids deleting another agent's entry). **7908 was not free** — SHELF-1 took it for
 > `Run-AuthoredPropTest.ps1` on a branch TASK-1 could not see, and HOLD-1 then took 7909. This
 > is the SAME defect the entry itself is about, one wave later and from the other side: TASK-1
-> read the ladder correctly and the ladder was a snapshot. **The next free number is 7910**, and
-> the one table in the REACH-1 section is the only place that sentence should ever be written.
+> read the ladder correctly and the ladder was a snapshot. **The next free number is 7911**
+> (7910 is INT-1's `Walk-DefinitionOfDone.ps1`; corrected by REVIEW-1, 2026-09-20), and the one
+> table in the REACH-1 section is the only place that sentence should ever be written.
 
 Baseline, machine busy throughout (BTN-1's suite held the machine-wide mutex for ~11 minutes
 immediately before the first run and its Godot processes were alive during all four):
@@ -1726,7 +1740,8 @@ entry above makes a 3/3 clear a stronger flake verdict than an idle-machine pass
 
 `tests/Run-HoldingBoardTest.ps1` claims **udp/7909** and is registered last in
 `tests/Run-AllTests.ps1`; `tests/Capture-HoldingBoard.ps1` is unregistered and manual on the same
-number. **The next free port is 7910.** The one ladder table is in the REACH-1 section above.
+number. **The next free port is 7911** (7910 went to INT-1's `Walk-DefinitionOfDone.ps1`;
+corrected by REVIEW-1, 2026-09-20). The one ladder table is in the REACH-1 section above.
 
 ### An `[Export]` is not a level-authoring surface in this project, in EITHER shape
 
