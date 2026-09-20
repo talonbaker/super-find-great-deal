@@ -1,4 +1,4 @@
-[gd_scene load_steps=15 format=3]
+[gd_scene load_steps=21 format=3]
 
 ; BASE-1 (2026-09-19) — THE SEARCH ROOM. 14 x 10 x 3.5 m interior box, same construction as
 ; HoldingRoom.tscn (read that file's header for the convention and for why nothing here may be
@@ -8,10 +8,23 @@
 ; EMPTY ON PURPOSE. BASE-1 authors the shell and nothing else: the shelves, the bins, the rack of
 ; near-miss objects and the drop-off bin are SHELF-1's and BTN-1's, and an empty box is a cheaper
 ; thing for them to fill than a box full of guesses.
+;
+; NO LONGER EMPTY (SHELF-1, 2026-09-19). The shop floor — four aisles, two end-caps, six floor
+; bins and 120 products — is at the BOTTOM of this file, under its own banner, and the layout
+; arithmetic is written there rather than here. BASE-1's shell, CARRY-1's bounds/pillar/crates
+; and CLOCK-1's clock are all untouched above it, except that SearchSpawn_2 and _3 moved 1.2 m
+; to stay out of the fourth aisle (the reason is at those two nodes). The drop-off bin and the
+; rack of near-miss objects are still BTN-1's.
 
 [ext_resource type="PackedScene" path="res://scenes/game/props/Crate.tscn" id="1_crate"]
 [ext_resource type="Script" path="res://scripts/game/props/NetworkedProp.cs" id="2_netprop"]
 [ext_resource type="PackedScene" path="res://scenes/game/world/supermarket/RoundClock.tscn" id="9_clock"]
+[ext_resource type="PackedScene" path="res://scenes/game/world/supermarket/ShelfUnit.tscn" id="10_shelf"]
+[ext_resource type="PackedScene" path="res://scenes/game/world/supermarket/EndCap.tscn" id="11_endcap"]
+[ext_resource type="PackedScene" path="res://scenes/game/props/FloorBin.tscn" id="12_bin"]
+[ext_resource type="PackedScene" path="res://scenes/game/props/Can.tscn" id="13_can"]
+[ext_resource type="PackedScene" path="res://scenes/game/props/CerealBox.tscn" id="14_box"]
+[ext_resource type="PackedScene" path="res://scenes/game/props/Produce.tscn" id="15_produce"]
 
 [sub_resource type="StandardMaterial3D" id="Mat_floor"]
 resource_name = "search room floor (cool green-grey)"
@@ -131,11 +144,18 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4.5, 1.1, 0)
 ; contract (0..n-1, enforced by SupermarketWorldSelfTest) is why they are _2 and _3 rather than
 ; any other pair of numbers.
 
+; SHELF-1 (2026-09-19) — _2 and _3 MOVED from z = 3 to z = 4.2, and nothing else about them
+; changed. z = 3 is now inside the fourth aisle's footprint (bays run z 2.9..3.4), and a bot
+; that starts its run standing inside a shelf is the flake CARRY-1's own note above was written
+; to prevent. 4.2 is the centre of the 1.6 m walkway between that aisle and the +Z wall, which
+; is the same kind of spot the other two markers have. The NAMES and the COUNT are untouched,
+; which is what SupermarketWorldSelfTest's contract actually binds — see its numbering check.
+
 [node name="SearchSpawn_2" type="Marker3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4.5, 1.1, 3)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4.5, 1.1, 4.2)
 
 [node name="SearchSpawn_3" type="Marker3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4.5, 1.1, 3)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4.5, 1.1, 4.2)
 
 ; CARRY-1 (2026-09-19) — ROOM BOUNDS. The authored volume placement integrity layer 1 tests
 ; against (program doc §5b, a ruling from Talon): a prop may only be SET DOWN somewhere whose
@@ -240,3 +260,914 @@ script = ExtResource("2_netprop")
 
 [node name="RoundClock" parent="." instance=ExtResource("9_clock")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.35, -4.94)
+
+; =============================================================================================
+; SHELF-1 (2026-09-19) — THE SHOP FLOOR. Everything below this line is the search room's
+; dressing: four aisles of shelving, two end-caps, six floor bins and a hundred and twenty
+; products. Packet docs/agents/packets/2026-09-19-SHELF-1.md; the products-not-red-cubes
+; amendment and the deal band are PROPOSAL-2026-09-19-SOUND-STATES.md S2.
+;
+; THE LAYOUT, AND EVERY NUMBER IN IT IS ARITHMETIC RATHER THAN TASTE. The interior is 14 x 10 m.
+; Four bays 0.5 m deep run the room's LENGTH (x) with 1.6 m of walkable floor between every pair
+; and between the outer pair and the walls: 4 x 0.5 + 5 x 1.6 = 10.0 m, which is the room's
+; width exactly. Aisle centres are therefore z = -3.15, -1.05, +1.05, +3.15 and they are not
+; adjustable without giving up one of the two properties (1.6 m aisles, four of them).
+;
+; Along x the aisles stop at +/-4.6, leaving a 2.4 m cross-aisle at each end: four 2.3 m
+; ShelfUnit bays per aisle, centres -3.45 / -1.15 / +1.15 / +3.45. Adjacent bays' uprights meet
+; face to face and read as one post.
+;
+; WHAT IS DELIBERATELY NOT HERE. No back panels (see ShelfUnit.tscn), no architectural detail,
+; no second shelf colour, no textures and no models — the brief is "small, boxy, no
+; architectural detail; the visual draw is the density of items covering every surface", and a
+; room that is interesting by itself is a room whose one hidden object is not.
+;
+; THE PILLAR STAYS. CARRY-1 left SearchPillar deletable by this lane "the moment a real shelf
+; back does the same job", and no shelf back here does: the bays have none, and a 0.05 m board
+; cannot bury a 0.44 m crate the way REACH-1's phase 2 needs (it seeds one at world 46,1,2.5 —
+; the pillar's centre — and requires layer 3 to answer InsideStatic). Deleting it would have
+; cost a replacement fixture AND an edit to another lane's suite to buy nothing. The fourth
+; aisle and the +X cross-aisle are laid out around it instead.
+
+; Aisle 0 (cans), centre z = -3.15, four 2.3 m bays.
+[node name="Aisle0_Bay0" parent="." instance=ExtResource("10_shelf")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.45, 0, -3.15)
+
+[node name="Aisle0_Bay1" parent="." instance=ExtResource("10_shelf")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.15, 0, -3.15)
+
+[node name="Aisle0_Bay2" parent="." instance=ExtResource("10_shelf")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.15, 0, -3.15)
+
+[node name="Aisle0_Bay3" parent="." instance=ExtResource("10_shelf")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3.45, 0, -3.15)
+
+; Aisle 1 (boxs), centre z = -1.05, four 2.3 m bays.
+[node name="Aisle1_Bay0" parent="." instance=ExtResource("10_shelf")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.45, 0, -1.05)
+
+[node name="Aisle1_Bay1" parent="." instance=ExtResource("10_shelf")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.15, 0, -1.05)
+
+[node name="Aisle1_Bay2" parent="." instance=ExtResource("10_shelf")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.15, 0, -1.05)
+
+[node name="Aisle1_Bay3" parent="." instance=ExtResource("10_shelf")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3.45, 0, -1.05)
+
+; Aisle 2 (cans), centre z = 1.05, four 2.3 m bays.
+[node name="Aisle2_Bay0" parent="." instance=ExtResource("10_shelf")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.45, 0, 1.05)
+
+[node name="Aisle2_Bay1" parent="." instance=ExtResource("10_shelf")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.15, 0, 1.05)
+
+[node name="Aisle2_Bay2" parent="." instance=ExtResource("10_shelf")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.15, 0, 1.05)
+
+[node name="Aisle2_Bay3" parent="." instance=ExtResource("10_shelf")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3.45, 0, 1.05)
+
+; Aisle 3 (boxs), centre z = 3.15, four 2.3 m bays.
+[node name="Aisle3_Bay0" parent="." instance=ExtResource("10_shelf")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.45, 0, 3.15)
+
+[node name="Aisle3_Bay1" parent="." instance=ExtResource("10_shelf")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.15, 0, 3.15)
+
+[node name="Aisle3_Bay2" parent="." instance=ExtResource("10_shelf")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.15, 0, 3.15)
+
+[node name="Aisle3_Bay3" parent="." instance=ExtResource("10_shelf")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3.45, 0, 3.15)
+
+; THE TWO END-CAPS, rotated 90 deg about Y so their 1.4 m length runs along z and their 0.5 m
+; depth faces the cross-aisle — a display you walk past rather than into, which is what an
+; end-cap is. EndCap.tscn is symmetric about both horizontal axes, so +90 and -90 occupy the
+; identical volume and the basis-row trap in .claude/rules/godot-scenes.md cannot bite here;
+; it still got a headed look (docs/qa/2026-09-19-shelf-1/). They close the OUTER two aisles at
+; OPPOSITE ends, so neither cross-aisle is blocked twice.
+
+[node name="EndCap_0" parent="." instance=ExtResource("11_endcap")]
+transform = Transform3D(0, 0, -1, 0, 1, 0, 1, 0, 0, 4.85, 0, -3.15)
+
+[node name="EndCap_1" parent="." instance=ExtResource("11_endcap")]
+transform = Transform3D(0, 0, -1, 0, 1, 0, 1, 0, 0, -4.85, 0, 3.15)
+
+; =============================================================================================
+; THE STOCK. Every authored PROP in this room that SHELF-1 added lives under this one node, and
+; the node exists for a reason that is not tidiness.
+;
+; PropManager.AdoptAuthoredProps assigns ids by ORDINAL NODE-PATH SORT starting at 1000, so the
+; id of every prop in the world depends on the name of every other one. CARRY-1's four crates
+; are Prop_0..Prop_3 at ids 1000..1003 and tests/Run-PlaceTest.ps1 names all four of those
+; numbers in its own source. "Bin_", "Box_", "Can_" and "Produce_" all sort BEFORE "Prop_", so
+; putting 126 new props beside them in this room would have renumbered CARRY-1's four and
+; turned another lane's suite red for a reason nobody would have found from the diff.
+; "Stock/..." sorts AFTER "Prop_" ('S' > 'P'), so the crates keep 1000..1003 and the shop floor
+; takes one contiguous block above them:
+;
+;     1000..1003   Prop_0..Prop_3    CARRY-1's crates, unmoved
+;     1004..1009   Stock/Bin_0..5    the six floor bins
+;     1010..1057   Stock/Box_000..047
+;     1058..1105   Stock/Can_000..047
+;     1106..1129   Stock/Produce_000..023
+;
+; The numbering above is ASSERTED, not assumed: tests/Run-AuthoredPropTest.ps1 checks the whole
+; block on a server and on a late-joining client and was proved able to fail by renaming one
+; product node. If you add, remove or rename anything under here, that suite is the thing that
+; tells you what you moved.
+;
+; NAMES ARE ZERO-PADDED TO THREE DIGITS for the same reason: an ordinal sort puts "Can_10"
+; between "Can_1" and "Can_2", so unpadded names would give an id order that is not the reading
+; order and a level author would be wrong about which object they were looking at.
+;
+; STRUCTURE of each entry is CARRY-1's, and the name "Body" is not cosmetic: NetworkedProp._Ready
+; BINDS that child rather than building one.
+
+[node name="Stock" type="Node3D" parent="."]
+
+; --- the six floor bins ----------------------------------------------------------------------
+; FloorBin.tscn: 0.9 x 0.6 x 0.9 open-top tubs, 6 kg, RigidBody3D NetworkedProps — tippable and
+; carryable, which is the packet's point: a bin knocked over is somewhere an object can end up
+; and somewhere it can be hidden under. They stand in the two cross-aisles, clear of the
+; end-caps and of SearchPillar, and y = 0 because the prefab's origin is its base.
+
+[node name="Bin_0" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6.4, 0, -4.3)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Bin_0" instance=ExtResource("12_bin")]
+
+[node name="Bin_1" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6.4, 0, -1.05)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Bin_1" instance=ExtResource("12_bin")]
+
+[node name="Bin_2" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6.4, 0, 4.3)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Bin_2" instance=ExtResource("12_bin")]
+
+[node name="Bin_3" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 6.4, 0, -4.3)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Bin_3" instance=ExtResource("12_bin")]
+
+[node name="Bin_4" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 6.4, 0, 0)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Bin_4" instance=ExtResource("12_bin")]
+
+[node name="Bin_5" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 6.4, 0, 4.3)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Bin_5" instance=ExtResource("12_bin")]
+
+; --- forty-eight cereal boxes, aisles 1 and 3 --------------------------------------------------
+; CerealBox.tscn, 0.19 x 0.28 x 0.06, 0.4 kg, cardboard voice. Eight per shelf as two runs of
+; four at 0.24 m centres, the runs staggered to a different pair of bays on each of the three
+; levels and alternating between the front and back half of the 0.5 m depth, so the aisle reads
+; stocked from either side and from either end. y is the board's top surface plus the product's
+; own half-height, so every one of them starts RESTING rather than dropping 8 cm on the first
+; physics tick.
+
+[node name="Box_000" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.81, 0.565, -1.16)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_000" instance=ExtResource("14_box")]
+
+[node name="Box_001" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.57, 0.565, -1.16)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_001" instance=ExtResource("14_box")]
+
+[node name="Box_002" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.33, 0.565, -1.16)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_002" instance=ExtResource("14_box")]
+
+[node name="Box_003" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.09, 0.565, -1.16)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_003" instance=ExtResource("14_box")]
+
+[node name="Box_004" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.79, 0.565, -0.94)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_004" instance=ExtResource("14_box")]
+
+[node name="Box_005" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.03, 0.565, -0.94)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_005" instance=ExtResource("14_box")]
+
+[node name="Box_006" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.27, 0.565, -0.94)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_006" instance=ExtResource("14_box")]
+
+[node name="Box_007" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.51, 0.565, -0.94)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_007" instance=ExtResource("14_box")]
+
+[node name="Box_008" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.51, 1.115, -0.94)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_008" instance=ExtResource("14_box")]
+
+[node name="Box_009" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.27, 1.115, -0.94)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_009" instance=ExtResource("14_box")]
+
+[node name="Box_010" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.03, 1.115, -0.94)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_010" instance=ExtResource("14_box")]
+
+[node name="Box_011" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.79, 1.115, -0.94)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_011" instance=ExtResource("14_box")]
+
+[node name="Box_012" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3.09, 1.115, -1.16)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_012" instance=ExtResource("14_box")]
+
+[node name="Box_013" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3.33, 1.115, -1.16)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_013" instance=ExtResource("14_box")]
+
+[node name="Box_014" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3.57, 1.115, -1.16)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_014" instance=ExtResource("14_box")]
+
+[node name="Box_015" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3.81, 1.115, -1.16)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_015" instance=ExtResource("14_box")]
+
+[node name="Box_016" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.21, 1.665, -1.16)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_016" instance=ExtResource("14_box")]
+
+[node name="Box_017" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.97, 1.665, -1.16)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_017" instance=ExtResource("14_box")]
+
+[node name="Box_018" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.73, 1.665, -1.16)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_018" instance=ExtResource("14_box")]
+
+[node name="Box_019" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.49, 1.665, -1.16)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_019" instance=ExtResource("14_box")]
+
+[node name="Box_020" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.49, 1.665, -0.94)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_020" instance=ExtResource("14_box")]
+
+[node name="Box_021" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.73, 1.665, -0.94)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_021" instance=ExtResource("14_box")]
+
+[node name="Box_022" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.97, 1.665, -0.94)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_022" instance=ExtResource("14_box")]
+
+[node name="Box_023" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3.21, 1.665, -0.94)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_023" instance=ExtResource("14_box")]
+
+[node name="Box_024" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.81, 0.565, 3.04)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_024" instance=ExtResource("14_box")]
+
+[node name="Box_025" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.57, 0.565, 3.04)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_025" instance=ExtResource("14_box")]
+
+[node name="Box_026" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.33, 0.565, 3.04)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_026" instance=ExtResource("14_box")]
+
+[node name="Box_027" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.09, 0.565, 3.04)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_027" instance=ExtResource("14_box")]
+
+[node name="Box_028" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.79, 0.565, 3.26)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_028" instance=ExtResource("14_box")]
+
+[node name="Box_029" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.03, 0.565, 3.26)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_029" instance=ExtResource("14_box")]
+
+[node name="Box_030" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.27, 0.565, 3.26)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_030" instance=ExtResource("14_box")]
+
+[node name="Box_031" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.51, 0.565, 3.26)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_031" instance=ExtResource("14_box")]
+
+[node name="Box_032" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.51, 1.115, 3.26)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_032" instance=ExtResource("14_box")]
+
+[node name="Box_033" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.27, 1.115, 3.26)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_033" instance=ExtResource("14_box")]
+
+[node name="Box_034" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.03, 1.115, 3.26)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_034" instance=ExtResource("14_box")]
+
+[node name="Box_035" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.79, 1.115, 3.26)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_035" instance=ExtResource("14_box")]
+
+[node name="Box_036" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3.09, 1.115, 3.04)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_036" instance=ExtResource("14_box")]
+
+[node name="Box_037" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3.33, 1.115, 3.04)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_037" instance=ExtResource("14_box")]
+
+[node name="Box_038" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3.57, 1.115, 3.04)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_038" instance=ExtResource("14_box")]
+
+[node name="Box_039" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3.81, 1.115, 3.04)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_039" instance=ExtResource("14_box")]
+
+[node name="Box_040" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.21, 1.665, 3.04)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_040" instance=ExtResource("14_box")]
+
+[node name="Box_041" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.97, 1.665, 3.04)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_041" instance=ExtResource("14_box")]
+
+[node name="Box_042" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.73, 1.665, 3.04)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_042" instance=ExtResource("14_box")]
+
+[node name="Box_043" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.49, 1.665, 3.04)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_043" instance=ExtResource("14_box")]
+
+[node name="Box_044" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.49, 1.665, 3.26)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_044" instance=ExtResource("14_box")]
+
+[node name="Box_045" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.73, 1.665, 3.26)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_045" instance=ExtResource("14_box")]
+
+[node name="Box_046" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.97, 1.665, 3.26)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_046" instance=ExtResource("14_box")]
+
+[node name="Box_047" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3.21, 1.665, 3.26)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Box_047" instance=ExtResource("14_box")]
+
+; --- forty-eight cans, aisles 0 and 2 ----------------------------------------------------------
+; Can.tscn, r 0.035 x h 0.12, 0.35 kg, tin voice. Same scheme as the boxes at 0.16 m centres.
+; Cans and boxes are shelved on SEPARATE aisles on purpose and it is a gameplay fact, not
+; merchandising: SFX-1 gave each material its own voice, so knocking a can over in the dark
+; tells the other player which aisle you are in.
+
+[node name="Can_000" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.69, 0.485, -3.26)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_000" instance=ExtResource("13_can")]
+
+[node name="Can_001" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.53, 0.485, -3.26)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_001" instance=ExtResource("13_can")]
+
+[node name="Can_002" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.37, 0.485, -3.26)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_002" instance=ExtResource("13_can")]
+
+[node name="Can_003" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.21, 0.485, -3.26)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_003" instance=ExtResource("13_can")]
+
+[node name="Can_004" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.91, 0.485, -3.04)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_004" instance=ExtResource("13_can")]
+
+[node name="Can_005" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.07, 0.485, -3.04)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_005" instance=ExtResource("13_can")]
+
+[node name="Can_006" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.23, 0.485, -3.04)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_006" instance=ExtResource("13_can")]
+
+[node name="Can_007" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.39, 0.485, -3.04)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_007" instance=ExtResource("13_can")]
+
+[node name="Can_008" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.39, 1.035, -3.04)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_008" instance=ExtResource("13_can")]
+
+[node name="Can_009" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.23, 1.035, -3.04)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_009" instance=ExtResource("13_can")]
+
+[node name="Can_010" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.07, 1.035, -3.04)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_010" instance=ExtResource("13_can")]
+
+[node name="Can_011" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.91, 1.035, -3.04)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_011" instance=ExtResource("13_can")]
+
+[node name="Can_012" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3.21, 1.035, -3.26)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_012" instance=ExtResource("13_can")]
+
+[node name="Can_013" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3.37, 1.035, -3.26)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_013" instance=ExtResource("13_can")]
+
+[node name="Can_014" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3.53, 1.035, -3.26)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_014" instance=ExtResource("13_can")]
+
+[node name="Can_015" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3.69, 1.035, -3.26)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_015" instance=ExtResource("13_can")]
+
+[node name="Can_016" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.09, 1.585, -3.26)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_016" instance=ExtResource("13_can")]
+
+[node name="Can_017" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.93, 1.585, -3.26)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_017" instance=ExtResource("13_can")]
+
+[node name="Can_018" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.77, 1.585, -3.26)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_018" instance=ExtResource("13_can")]
+
+[node name="Can_019" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.61, 1.585, -3.26)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_019" instance=ExtResource("13_can")]
+
+[node name="Can_020" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.61, 1.585, -3.04)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_020" instance=ExtResource("13_can")]
+
+[node name="Can_021" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.77, 1.585, -3.04)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_021" instance=ExtResource("13_can")]
+
+[node name="Can_022" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.93, 1.585, -3.04)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_022" instance=ExtResource("13_can")]
+
+[node name="Can_023" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3.09, 1.585, -3.04)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_023" instance=ExtResource("13_can")]
+
+[node name="Can_024" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.69, 0.485, 0.94)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_024" instance=ExtResource("13_can")]
+
+[node name="Can_025" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.53, 0.485, 0.94)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_025" instance=ExtResource("13_can")]
+
+[node name="Can_026" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.37, 0.485, 0.94)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_026" instance=ExtResource("13_can")]
+
+[node name="Can_027" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.21, 0.485, 0.94)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_027" instance=ExtResource("13_can")]
+
+[node name="Can_028" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.91, 0.485, 1.16)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_028" instance=ExtResource("13_can")]
+
+[node name="Can_029" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.07, 0.485, 1.16)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_029" instance=ExtResource("13_can")]
+
+[node name="Can_030" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.23, 0.485, 1.16)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_030" instance=ExtResource("13_can")]
+
+[node name="Can_031" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.39, 0.485, 1.16)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_031" instance=ExtResource("13_can")]
+
+[node name="Can_032" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.39, 1.035, 1.16)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_032" instance=ExtResource("13_can")]
+
+[node name="Can_033" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.23, 1.035, 1.16)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_033" instance=ExtResource("13_can")]
+
+[node name="Can_034" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.07, 1.035, 1.16)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_034" instance=ExtResource("13_can")]
+
+[node name="Can_035" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.91, 1.035, 1.16)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_035" instance=ExtResource("13_can")]
+
+[node name="Can_036" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3.21, 1.035, 0.94)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_036" instance=ExtResource("13_can")]
+
+[node name="Can_037" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3.37, 1.035, 0.94)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_037" instance=ExtResource("13_can")]
+
+[node name="Can_038" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3.53, 1.035, 0.94)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_038" instance=ExtResource("13_can")]
+
+[node name="Can_039" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3.69, 1.035, 0.94)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_039" instance=ExtResource("13_can")]
+
+[node name="Can_040" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.09, 1.585, 0.94)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_040" instance=ExtResource("13_can")]
+
+[node name="Can_041" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.93, 1.585, 0.94)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_041" instance=ExtResource("13_can")]
+
+[node name="Can_042" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.77, 1.585, 0.94)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_042" instance=ExtResource("13_can")]
+
+[node name="Can_043" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.61, 1.585, 0.94)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_043" instance=ExtResource("13_can")]
+
+[node name="Can_044" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.61, 1.585, 1.16)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_044" instance=ExtResource("13_can")]
+
+[node name="Can_045" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.77, 1.585, 1.16)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_045" instance=ExtResource("13_can")]
+
+[node name="Can_046" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.93, 1.585, 1.16)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_046" instance=ExtResource("13_can")]
+
+[node name="Can_047" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3.09, 1.585, 1.16)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Can_047" instance=ExtResource("13_can")]
+
+; --- twenty-four pieces of produce, the end-caps and the bins ----------------------------------
+; Produce.tscn, r 0.08, 0.25 kg, damped so it does not roll out of the room. Twelve on the two
+; end-caps (two per shelf) and twelve loose in the six bins (two each, resting on the bin's
+; interior floor at y = 0.06 + the sphere's own radius). Produce is the kind that is NOT on a
+; long aisle, which is what makes "which population did the hider choose" a real choice: hiding
+; a deal orange means hiding it among two dozen scattered oranges, not among four dozen cans in
+; a row.
+
+[node name="Produce_000" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4.85, 0.505, -3.5)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Produce_000" instance=ExtResource("15_produce")]
+
+[node name="Produce_001" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4.85, 0.505, -2.8)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Produce_001" instance=ExtResource("15_produce")]
+
+[node name="Produce_002" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4.85, 1.055, -3.5)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Produce_002" instance=ExtResource("15_produce")]
+
+[node name="Produce_003" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4.85, 1.055, -2.8)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Produce_003" instance=ExtResource("15_produce")]
+
+[node name="Produce_004" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4.85, 1.605, -3.5)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Produce_004" instance=ExtResource("15_produce")]
+
+[node name="Produce_005" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4.85, 1.605, -2.8)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Produce_005" instance=ExtResource("15_produce")]
+
+[node name="Produce_006" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4.85, 0.505, 2.8)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Produce_006" instance=ExtResource("15_produce")]
+
+[node name="Produce_007" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4.85, 0.505, 3.5)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Produce_007" instance=ExtResource("15_produce")]
+
+[node name="Produce_008" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4.85, 1.055, 2.8)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Produce_008" instance=ExtResource("15_produce")]
+
+[node name="Produce_009" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4.85, 1.055, 3.5)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Produce_009" instance=ExtResource("15_produce")]
+
+[node name="Produce_010" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4.85, 1.605, 2.8)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Produce_010" instance=ExtResource("15_produce")]
+
+[node name="Produce_011" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4.85, 1.605, 3.5)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Produce_011" instance=ExtResource("15_produce")]
+
+[node name="Produce_012" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6.57, 0.14, -4.3)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Produce_012" instance=ExtResource("15_produce")]
+
+[node name="Produce_013" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6.23, 0.14, -4.3)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Produce_013" instance=ExtResource("15_produce")]
+
+[node name="Produce_014" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6.57, 0.14, -1.05)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Produce_014" instance=ExtResource("15_produce")]
+
+[node name="Produce_015" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6.23, 0.14, -1.05)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Produce_015" instance=ExtResource("15_produce")]
+
+[node name="Produce_016" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6.57, 0.14, 4.3)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Produce_016" instance=ExtResource("15_produce")]
+
+[node name="Produce_017" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6.23, 0.14, 4.3)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Produce_017" instance=ExtResource("15_produce")]
+
+[node name="Produce_018" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 6.23, 0.14, -4.3)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Produce_018" instance=ExtResource("15_produce")]
+
+[node name="Produce_019" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 6.57, 0.14, -4.3)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Produce_019" instance=ExtResource("15_produce")]
+
+[node name="Produce_020" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 6.23, 0.14, 0)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Produce_020" instance=ExtResource("15_produce")]
+
+[node name="Produce_021" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 6.57, 0.14, 0)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Produce_021" instance=ExtResource("15_produce")]
+
+[node name="Produce_022" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 6.23, 0.14, 4.3)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Produce_022" instance=ExtResource("15_produce")]
+
+[node name="Produce_023" type="Node3D" parent="Stock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 6.57, 0.14, 4.3)
+script = ExtResource("2_netprop")
+
+[node name="Body" parent="Stock/Produce_023" instance=ExtResource("15_produce")]
+

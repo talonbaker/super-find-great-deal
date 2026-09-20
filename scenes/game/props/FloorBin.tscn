@@ -1,0 +1,153 @@
+[gd_scene load_steps=11 format=3 uid="uid://floorbin0sfgdmvp"]
+
+[ext_resource type="Script" path="res://scripts/game/sandbox/Carryable.cs" id="1_carryable"]
+[ext_resource type="Script" path="res://scripts/game/sandbox/feel/Interactable.cs" id="2_interactable"]
+
+; A shop-fixture blue-grey: not a wall colour, not a shelf colour, and not any product's colour,
+; so a bin reads as the one thing in the aisle that is furniture you can pick up. Emission is ON
+; at 0.10 -- the lowest in the room, below the produce's 0.12 -- for one mechanical reason and
+; not for looks: Carryable's highlight pulse drives emission_energy_multiplier up from whatever
+; the material arrives with, and a material with emission DISABLED cannot be highlighted at all,
+; so a bin with no emission would be the one prop in the room that never tells you it is
+; interactable (INTERACTION-BIBLE S1).
+[sub_resource type="StandardMaterial3D" id="Mat_bin"]
+resource_local_to_scene = true
+albedo_color = Color(0.3, 0.42, 0.5, 1)
+roughness = 0.88
+metallic = 0.0
+emission_enabled = true
+emission = Color(0.3, 0.42, 0.5, 1)
+emission_energy_multiplier = 0.1
+
+[sub_resource type="BoxMesh" id="BoxMesh_floor"]
+size = Vector3(0.9, 0.06, 0.9)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_floor"]
+size = Vector3(0.9, 0.06, 0.9)
+
+[sub_resource type="BoxMesh" id="BoxMesh_wall_x"]
+size = Vector3(0.06, 0.54, 0.9)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_wall_x"]
+size = Vector3(0.06, 0.54, 0.9)
+
+[sub_resource type="BoxMesh" id="BoxMesh_wall_z"]
+size = Vector3(0.78, 0.54, 0.06)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_wall_z"]
+size = Vector3(0.78, 0.54, 0.06)
+
+; SHELF-1 (2026-09-19) — A SUPERMARKET FLOOR BIN: an open-top tub of loose product, 6 kg, that a
+; player can tip over and carry. Outer 0.90 x 0.60 x 0.90, walls and base 0.06 thick, interior
+; 0.78 x 0.54 x 0.78 — which clears a 0.44 m crate by 0.17 m on the horizontal and 0.10 m on the
+; vertical, so the object can be dropped INTO it and, tipped on its side, the bin covers one
+; completely. That is the packet's "big enough to hide a cube under when tipped", measured
+; rather than eyeballed.
+;
+; ORIGIN AT THE BASE, not the centre: a level places a bin at floor y and reads the number in
+; the scene as the floor it stands on, the way SearchRoom's crates use y = 0.22 (their own
+; half-height) for the same reason. Godot derives the centre of mass from the shapes, so an
+; off-centre origin costs nothing physically.
+;
+; STRUCTURE IS CRATE.TSCN'S with one difference that matters: FIVE collision shapes, not one, and
+; the FIRST of them by tree order is the base slab. Three separate pieces of code read a prop's
+; collider and they do not read it the same way, so the ordering and the naming are both
+; load-bearing:
+;
+;   PlacementIntegrity.FirstShapeOf   first CollisionShape3D by TREE ORDER  -> the base slab
+;   Carryable.ResolveMaterial         the child NAMED "CollisionShape3D"    -> the base slab
+;   PropManager.AuthoredKindOf        the same named lookup                 -> the base slab
+;   Carryable._Ready                  the same named lookup, and if it is MISSING the prop
+;                                     silently abandons its authored meshes and builds a crate
+;                                     in code instead
+;
+; So the base slab is named "CollisionShape3D" and is written first. HollowShell.tscn made the
+; same choice for its lid and wrote down why: a multi-shape prop is AUDITED BY ONE SHAPE, and
+; for a bin the base slab is the right one — it is the part that rests on the floor, it is what
+; the "did this land somewhere legal" question is actually about, and it is small enough that
+; the audit never reports the bin's own hollow as an overlap.
+;
+; THE BIN IS CARDBOARD, AND THAT IS A CHOICE THE COLLIDER MAKES FOR US. Carryable.ResolveMaterial
+; reads the named shape: a 0.90 x 0.06 x 0.90 box is not a cube, so ShapeFromCollider answers
+; Box, which answers PropMaterial.Cardboard and PropKind.Box. The alternative was to pick wood by
+; giving the bin a cubic audit collider it does not physically have, or to set the [Export]
+; Material — which is silently dropped on a nested PackedScene instance on this build and would
+; have been a lie that worked in the editor and nowhere else (SFX-1 S2). A corrugated promotional
+; dump bin is a real supermarket object and a cardboard thud is the right sound for one going
+; over, so the honest reading of the collider is also the right answer. `kind` and `material`
+; below are written to MATCH what resolves, as documentation; nothing depends on them.
+;
+; NO `layers` LINE ON ANY MESH — render layer 19 is FP-1's first-person self-cull and a prop on
+; it vanishes from the hands of whoever carries it. The absence is deliberate; see Can.tscn.
+;
+; NOT IN SupermarketWorldSelfTest.SectionScenes, for exactly the reason Crate.tscn is not: this
+; is a gameplay prop, and Carryable builds its outline shell and blob shadow at runtime by
+; design. ShelfUnit.tscn and EndCap.tscn — which have no script and build nothing — ARE listed.
+[node name="FloorBin" type="RigidBody3D"]
+mass = 6.0
+script = ExtResource("1_carryable")
+kind = 3
+material = 2
+tint = Color(0.3, 0.42, 0.5, 1)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.03, 0)
+shape = SubResource("BoxShape3D_floor")
+
+[node name="WallXNeg" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.42, 0.33, 0)
+shape = SubResource("BoxShape3D_wall_x")
+
+[node name="WallXPos" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.42, 0.33, 0)
+shape = SubResource("BoxShape3D_wall_x")
+
+[node name="WallZNeg" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.33, -0.42)
+shape = SubResource("BoxShape3D_wall_z")
+
+[node name="WallZPos" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.33, 0.42)
+shape = SubResource("BoxShape3D_wall_z")
+
+; THE VISUAL IS OFFSET TO THE BASE SLAB'S CENTRE ON PURPOSE. Carryable parents its inverted-hull
+; outline to this node at the node's OWN origin (scaled 1.08, no transform of its own) and gives
+; it the mesh of the child literally named "MeshInstance3D". Putting Visual at the slab's centre
+; and the slab mesh at Visual's origin is therefore what makes the highlight land ON the bin
+; instead of floating: it reads as an amber plate under the bin's footprint. The four walls hang
+; off the same node at their offsets minus 0.03.
+;
+; The known cost of that choice, stated rather than discovered later: Carryable takes the load's
+; half-height from the same mesh, so this bin reports 0.03 m and an armful carry lifts it
+; almost not at all. A 0.9 m tub held level with the hands rather than above them is cosmetic
+; and is the smaller of the two prices; a highlight nobody can see is an INTERACTION S1 failure.
+
+[node name="Visual" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.03, 0)
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Visual"]
+mesh = SubResource("BoxMesh_floor")
+material_override = SubResource("Mat_bin")
+
+[node name="MeshWallXNeg" type="MeshInstance3D" parent="Visual"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.42, 0.3, 0)
+mesh = SubResource("BoxMesh_wall_x")
+material_override = SubResource("Mat_bin")
+
+[node name="MeshWallXPos" type="MeshInstance3D" parent="Visual"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.42, 0.3, 0)
+mesh = SubResource("BoxMesh_wall_x")
+material_override = SubResource("Mat_bin")
+
+[node name="MeshWallZNeg" type="MeshInstance3D" parent="Visual"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.3, -0.42)
+mesh = SubResource("BoxMesh_wall_z")
+material_override = SubResource("Mat_bin")
+
+[node name="MeshWallZPos" type="MeshInstance3D" parent="Visual"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.3, 0.42)
+mesh = SubResource("BoxMesh_wall_z")
+material_override = SubResource("Mat_bin")
+
+[node name="Interactable" type="Node" parent="."]
+script = ExtResource("2_interactable")

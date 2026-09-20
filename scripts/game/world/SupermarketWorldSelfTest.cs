@@ -77,6 +77,23 @@ public sealed partial class SupermarketWorldSelfTest : Node3D
     /// geometry, and its script builds its own outline shell and blob shadow at runtime by
     /// design — that is the documented exception <see cref="CountNodes"/> exists for, and
     /// listing it would assert the opposite of what CARRY-1 decided.</para>
+    ///
+    /// <para><b>SHELF-1 (2026-09-19) adds the shelving.</b> <c>ShelfUnit.tscn</c> and
+    /// <c>EndCap.tscn</c> are instanced eighteen times between them into the search room and are
+    /// unambiguously LEVEL geometry — static frames a level author places — so they belong here
+    /// by CLOCK-1's rule. Neither carries a script today, which is why both are trivially equal;
+    /// that is not a reason to leave them out, because the list is the ONLY mechanism that
+    /// notices a prefab at all, and "it has no script yet" is a fact about today. Proved the
+    /// entry works rather than assumed it: a temporary <c>AddChild(new Node3D())</c> planted in
+    /// a script attached to <c>ShelfUnit.tscn</c>'s root left all four pre-existing rows green
+    /// and turned <c>ShelfUnit.tscn</c> red at <c>12 packed but 13 live</c> — the same plant,
+    /// and the same result, CLOCK-1 measured on <c>RoundClock</c>.</para>
+    ///
+    /// <para><c>FloorBin.tscn</c> and the three <c>Deal*.tscn</c> near-miss prefabs are
+    /// deliberately NOT here, for exactly <c>Crate.tscn</c>'s reason: they are
+    /// <see cref="MpFoundation.Game.Sandbox.Carryable"/>s, and a <c>Carryable</c> builds its
+    /// outline shell and blob shadow at runtime by design. A bin IS floor furniture to look at,
+    /// but it is a gameplay prop to the engine, and this list is about what builds itself.</para>
     /// </summary>
     private static readonly string[] SectionScenes =
     {
@@ -84,6 +101,8 @@ public sealed partial class SupermarketWorldSelfTest : Node3D
         "res://scenes/game/world/supermarket/SearchRoom.tscn",
         "res://scenes/game/world/supermarket/TaskRoom.tscn",
         "res://scenes/game/world/supermarket/RoundClock.tscn",
+        "res://scenes/game/world/supermarket/ShelfUnit.tscn",
+        "res://scenes/game/world/supermarket/EndCap.tscn",
     };
 
     private readonly List<string> _failures = new();
