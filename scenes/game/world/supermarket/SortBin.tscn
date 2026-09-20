@@ -183,15 +183,20 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.79, -0.37)
 mesh = SubResource("BoxMesh_plate")
 surface_material_override/0 = SubResource("Mat_plate")
 
-; font_size 28 at the default pixel_size 0.005 is 0.14 m of glyph height, so the widest word
-; either rule can produce -- YELLOW, six characters -- spans about 0.54 m across a 0.66 m plate at
-; this font's measured 0.64 advance ratio (CLOCK-1 3.3 measured that ratio off a render; the
-; arithmetic is pinned by SortRuleTests.EveryPlateWord_FitsThePlate and the RENDER is still the
-; instrument).
+; font_size 24 at the default pixel_size 0.005 is 0.12 m of glyph height, so the widest word
+; either rule can produce -- YELLOW, six characters -- spans about 0.46 m across a 0.66 m plate at
+; this font's measured 0.64 advance ratio, leaving 0.10 m of margin each side.
+;
+; IT WAS 28 AND THE RENDER CORRECTED IT, which is CLOCK-1 3.3's lesson happening a second time:
+; the arithmetic said 0.54 m on a 0.66 m plate and passed, and the first capture
+; (tests/Capture-SortRoom.ps1 -Pass colour) showed YELLOW touching both edges of its plate with
+; no margin at all. A character count is an AVERAGE and is wrong in both directions. The bound in
+; SortRuleTests.EveryPlateWord_FitsThePlate keeps the COPY from growing; only a photograph can
+; tell you the size is right, so a change to this number or to the plate owes a new capture.
 [node name="PlateLabel" type="Label3D" parent="."]
 transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, 0, 0.7, -0.39)
 text = "-"
-font_size = 28
+font_size = 24
 
 [node name="PlateIcon" type="Node3D" parent="."]
 transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, 0, 0.92, -0.4)
