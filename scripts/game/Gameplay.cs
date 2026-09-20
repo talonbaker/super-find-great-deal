@@ -365,8 +365,29 @@ public partial class Gameplay : Node3D
                     // SHELF-1: <= 0 means never shove, which is how the at-rest frame time is
                     // measured at all. See LaunchOptions.CostShoveEverySec.
                     ShoveEverySec = net.Options.CostShoveEverySec,
+                    // PROBE-1: a fixed wave size, so the "under a wave" column of a capacity
+                    // table compares row to row. See LaunchOptions.CostShoveCount.
+                    ShoveCount = net.Options.CostShoveCount,
                 });
             }
+        }
+
+        // PROBE-1 (2026-09-20): --probe-ablate, applied on EVERY peer and not only the server.
+        // The at-rest fixes this packet lands are per-prop per-tick work that a client pays too
+        // (Carryable._PhysicsProcess runs on every peer), so a client-side measurement of the
+        // unfixed build needs the same switch thrown in the client process. Silent on every
+        // launch that did not ask; loud about a token it did not recognise, because an ablation
+        // that silently measured the FIXED build would be a wrong number in a handoff.
+        if (net.Options.ProbeAblate.Length > 0)
+        {
+            System.Collections.Generic.List<string> unknown =
+                Props.PropCostSwitches.Ablate(net.Options.ProbeAblate);
+            foreach (string token in unknown)
+                GD.PushError($"[probe] --probe-ablate: unknown token '{token}' — "
+                             + "nothing was ablated for it (valid: carryable, loop, all, none)");
+            GD.Print($"[probe] ablation '{net.Options.ProbeAblate}': "
+                     + $"carryableIdleGate={Props.PropCostSwitches.CarryableIdleGate} "
+                     + $"looseIndex={Props.PropCostSwitches.LooseIndex}");
         }
 
         // HOLD-1 (2026-09-19): the practice corner's snap pad, on the SERVER side.

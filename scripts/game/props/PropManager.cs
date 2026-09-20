@@ -413,6 +413,10 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
     /// position. Unused on clients (they never arbitrate).</summary>
     public System.Func<int, Node3D?>? AvatarResolver { get; set; }
 
+    // PROBE-1 (2026-09-20): the world node, remembered at adoption so --probe-props can
+    // resolve the search room's transform. Null in any process that never adopted.
+    private Node? _worldRoot;
+
     // The world string SpawnInitialProps last seeded (CORE-PROG-A2) — what the boundary restore
     // re-runs; empty until the server has seeded once.
     private string _world = "";
@@ -498,6 +502,10 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
             }
             GD.Print($"[props] --seed-test-props: seeded {seeded.Count} test prop(s) in world '{world}'");
         }
+
+        // PROBE-1's capacity population. Same ServerSpawn, same PropKind, same Resting
+        // birth as every other prop in the world — see SeedProbeProps.
+        SeedProbeProps(NetworkManager.Instance?.Options.ProbeProps ?? 0);
 
         if (world != "propsync")
             return;
@@ -590,6 +598,98 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
     private readonly System.Collections.Generic.List<int> _seededIds = new();
     private double _seededDropClock;
     private bool _seededDropFired;
+
+    /// <summary>The prefix on every line PROBE-1's seeding prints, so a script greps for this
+    /// rather than for a sentence somebody may reword.</summary>
+    public const string ProbeLogPrefix = "[probe-props]";
+
+    /// <summary>How far, in plan, a seeded slot must keep from anything already in the room.
+    /// The biggest thing it has to clear is a floor bin (0.90 m square, so a 0.64 m half-
+    /// diagonal) plus the widest seeded prop's own half-diagonal (a cereal box, 0.10 m); 0.85 m
+    /// leaves 0.11 m on top of that. Generous on purpose — a seeded prop that starts the run
+    /// interpenetrating an authored one would put the whole measurement's first second into the
+    /// depenetrate path and report the cost of a mistake.</summary>
+    private const float ProbeClearanceM = 0.85f;
+
+    /// <summary>
+    /// <b>PROBE-1 (2026-09-20): N extra Resting props in the search room, so "what does one more
+    /// item cost" is a measurement.</b> Server-only, off unless <c>--probe-props</c> asked, and
+    /// it runs once.
+    ///
+    /// <para><b>Ordinary <see cref="ServerSpawn"/>, ordinary <see cref="PropKind"/>, ordinary
+    /// Resting birth</b> — the same argument <c>--seed-test-props</c> makes above. A fixture with
+    /// its own spawn path would measure the fixture. The kinds cycle Can / Box / Produce so every
+    /// population carries all three of SFX-1's material voices and all three collider shapes
+    /// rather than two thousand copies of one mesh.</para>
+    ///
+    /// <para><b>Every seeded prop is AUDITED after it lands, with the shipped layer 2</b>
+    /// (<see cref="ServerAuditRest"/>), and the counts are printed. That is two facts for the
+    /// price of one: it proves the lattice is not standing inside STOCK-1's static filler or on
+    /// top of an authored facing (corrections would be non-zero and the handoff would say so),
+    /// and the wall time of that burst is the one-tick audit cost at ~150 and ~1500 props that
+    /// SYNC-4 has to know and nobody has measured (program R6).</para>
+    ///
+    /// <para><b>Before any client connects</b>, because <c>SpawnInitialProps</c> runs at world
+    /// build. The audit's broadcasts therefore reach nobody and cost nothing — a seeding that ran
+    /// mid-session would put two thousand reliable RPCs on the wire in one tick and measure
+    /// that.</para>
+    /// </summary>
+    private void SeedProbeProps(int count)
+    {
+        if (!_isServer || count <= 0)
+            return;
+        var room = _worldRoot?.GetNodeOrNull<Node3D>("SearchRoom");
+        if (room == null)
+        {
+            GD.PushWarning($"{ProbeLogPrefix} --probe-props: no SearchRoom node in this world; nothing seeded");
+            return;
+        }
+        Transform3D roomXf = room.GlobalTransform;
+        Transform3D toLocal = roomXf.AffineInverse();
+
+        // Everything a slot has to keep away from, in ROOM-LOCAL coordinates: every prop already
+        // registered (the four crates and six bins on this room's floor, and the 120 facings on
+        // its boards, which the lattice never reaches anyway), plus every Marker3D in the room —
+        // the spawn markers a bot is teleported onto, which is where a bot wedged in a wall of
+        // frozen cans would come from.
+        var blocked = new System.Collections.Generic.List<Vector3>();
+        foreach (PropState p in _registry.All)
+            blocked.Add(toLocal * p.Transform.Origin);
+        foreach (Node child in room.GetChildren())
+            if (child is Marker3D marker)
+                blocked.Add(marker.Position);
+
+        System.Collections.Generic.List<(Vector3 Local, PropKind Kind)> slots =
+            ProbeSeedLayout.Slots(count, blocked, ProbeClearanceM);
+        long spawnStart = System.Diagnostics.Stopwatch.GetTimestamp();
+        var seeded = new System.Collections.Generic.List<int>(slots.Count);
+        foreach ((Vector3 local, PropKind kind) in slots)
+        {
+            NetworkedProp? spawned = ServerSpawn(kind, new Transform3D(Basis.Identity, roomXf * local));
+            if (spawned != null)
+                seeded.Add(spawned.PropId);
+        }
+        double spawnMs = (System.Diagnostics.Stopwatch.GetTimestamp() - spawnStart)
+                         * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+
+        long auditsBefore = RestAuditCount;
+        long correctionsBefore = RestCorrectionCount;
+        long stuckBefore = StuckPropCount;
+        long auditStart = System.Diagnostics.Stopwatch.GetTimestamp();
+        foreach (int id in seeded)
+            ServerAuditRest(id);
+        double auditMs = (System.Diagnostics.Stopwatch.GetTimestamp() - auditStart)
+                         * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+
+        GD.Print($"{ProbeLogPrefix} asked {count}, seeded {seeded.Count} in {spawnMs:0.0} ms "
+                 + $"({ProbeSeedLayout.SlotsPerLayer} slot(s) per floor layer, "
+                 + $"pitch {ProbeSeedLayout.PitchM:0.00} m)");
+        GD.Print($"{ProbeLogPrefix} SUMMARY seeded={seeded.Count} asked={count} "
+                 + $"spawnMs={spawnMs:0.0} auditBurstMs={auditMs:0.0} "
+                 + $"audits={RestAuditCount - auditsBefore} "
+                 + $"corrections={RestCorrectionCount - correctionsBefore} "
+                 + $"stuck={StuckPropCount - stuckBefore}");
+    }
 
     private void StepSeededDrop(double delta)
     {
@@ -935,6 +1035,11 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
     /// not itself a cost worth gating behind a flag.</para></summary>
     public void AdoptAuthoredProps(Node worldRoot)
     {
+        // PROBE-1: remembered so --probe-props can find the room it is seeding into.
+        // Adoption is the one call that is already handed the world root on every peer,
+        // and it runs before SpawnInitialProps (Gameplay.cs), which is the ordering the
+        // seeding depends on: the blocked list is every prop ALREADY registered.
+        _worldRoot = worldRoot;
         long startedTicks = System.Diagnostics.Stopwatch.GetTimestamp();
         var found = new System.Collections.Generic.List<NetworkedProp>();
         CollectNetworkedProps(worldRoot, found);

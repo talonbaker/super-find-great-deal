@@ -69,7 +69,37 @@ public sealed partial class ReachCostProbe : Node
     /// hundred and fifty identical clean settles.</summary>
     public float ShoveSpeed { get; set; } = 2.5f;
 
+    /// <summary>
+    /// How many props one wave knocks loose, lowest id first; 0 or negative means all of them
+    /// (SHELF-1's and REACH-1's behaviour, unchanged).
+    ///
+    /// <para><b>PROBE-1 (2026-09-20) added this because a wave stops being a disturbance once the
+    /// population is the variable.</b> "Every prop in the room" is a fixed experiment only while
+    /// the room holds a fixed number of props: at 130 it is already harsher than two players
+    /// could be, and at 2000 it is 2000 simultaneously loose bodies streaming at 30 Hz, which
+    /// measures the wire and the settle wave rather than what one more resting item costs. A
+    /// capacity table's "under a wave" column has to hold the disturbance constant and vary only
+    /// N, which is what a cap does. The FIRST n by id, not a random n, for the same reason the
+    /// shove direction is derived from the id: two runs at the same N must disturb the same
+    /// props.</para>
+    /// </summary>
+    public int ShoveCount { get; set; }
+
     private readonly List<double> _frameMs = new();
+    // PROBE-1: the three engine-side physics counters, sampled beside the frame time on the same
+    // tick. These are what turn "the server spends 6 ms at rest" from a number into a diagnosis:
+    // ACTIVE OBJECTS is the count of bodies the physics server is still integrating, and a room
+    // of resting props whose active count equals its prop count is a room whose bodies never went
+    // to sleep — the exact suspect this packet was cut to settle. Free to read (Performance
+    // monitors are engine counters, not computed on demand) and reported as a mean and a peak
+    // rather than a percentile, because a body count is not a latency.
+    private readonly List<double> _activeObjects = new();
+    private readonly List<double> _collisionPairs = new();
+    private readonly List<double> _islands = new();
+    private int _gc0AtStart;
+    private int _gc1AtStart;
+    private int _gc2AtStart;
+    private long _allocAtStart;
     private double _elapsed;
     private double _measuredFor;
     private long _auditsAtStart;
@@ -102,16 +132,43 @@ public sealed partial class ReachCostProbe : Node
             _auditsAtStart = Props.RestAuditCount;
             _queriesAtStart = Props.IntegrityQueryCount;
             _correctionsAtStart = Props.RestCorrectionCount;
+            // PROBE-1: GC, because the tail is the question. SHELF-1's at-rest rows read p50
+            // 1.48 ms / p95 5.80 ms / PEAK 20.4 ms, and a 14x gap between p95 and peak on an
+            // IDLE room is the shape of a collection or a scheduler, not of per-prop work. A
+            // collection count over the window is the cheapest way to tell those apart: if the
+            // peaks and the gen-0 count both move with N, the per-tick allocation is the cost;
+            // if the count is flat while p50 climbs, the work is real and the tail is the
+            // machine.
+            _gc0AtStart = System.GC.CollectionCount(0);
+            _gc1AtStart = System.GC.CollectionCount(1);
+            _gc2AtStart = System.GC.CollectionCount(2);
+            _allocAtStart = System.GC.GetTotalAllocatedBytes(precise: false);
         }
 
         _measuredFor += delta;
         _frameMs.Add(Performance.GetMonitor(Performance.Monitor.TimePhysicsProcess) * 1000.0);
+        _activeObjects.Add(Performance.GetMonitor(Performance.Monitor.Physics3DActiveObjects));
+        _collisionPairs.Add(Performance.GetMonitor(Performance.Monitor.Physics3DCollisionPairs));
+        _islands.Add(Performance.GetMonitor(Performance.Monitor.Physics3DIslandCount));
 
-        int count = 0;
-        foreach (NetworkedProp _ in Props.LiveProps)
-            count++;
-        if (count > _peakLoose)
-            _peakLoose = count;
+        // THE POPULATION IS COUNTED ONCE, NOT EVERY TICK (PROBE-1, 2026-09-20).
+        //
+        // This was a per-tick walk of PropManager.LiveProps, which was free at 130 props and is
+        // not at 2000: LiveProps is a C# iterator, so every call allocates a state machine, and
+        // its body does one dictionary lookup and one IsInstanceValid interop call PER PROP. At
+        // 2000 props and 60 Hz that is 120 000 lookups and 120 000 interop calls a second —
+        // inside the loop that is measuring how expensive the tick is. A measurement rig that
+        // scales with the thing it measures reports its own cost as the subject's, which is
+        // exactly what this probe's own header warns about one paragraph up.
+        //
+        // Nothing spawns or despawns a prop during the window (SpawnInitialProps runs at world
+        // build, and the shove moves props between modes without creating any), so one count on
+        // the first measured tick is the same number every tick would have produced.
+        if (_peakLoose == 0)
+        {
+            foreach (NetworkedProp _ in Props.LiveProps)
+                _peakLoose++;
+        }
 
         if (ShoveEverySec > 0.0)
         {
@@ -140,6 +197,13 @@ public sealed partial class ReachCostProbe : Node
         var ids = new List<int>();
         foreach (NetworkedProp prop in Props.LiveProps)
             ids.Add(prop.PropId);
+        // PROBE-1: a FIXED wave, lowest id first, so the disturbance is the same at every
+        // population. Sorted rather than taken in enumeration order because a Dictionary's
+        // enumeration order is not a contract, and "the same props every run" is the property
+        // this whole method's id-derived direction exists to hold.
+        ids.Sort();
+        if (ShoveCount > 0 && ids.Count > ShoveCount)
+            ids.RemoveRange(ShoveCount, ids.Count - ShoveCount);
         foreach (int id in ids)
         {
             float angle = Mathf.Tau * ((id * 2654435761u) % 997u) / 997f;
@@ -147,7 +211,8 @@ public sealed partial class ReachCostProbe : Node
                 Mathf.Cos(angle) * ShoveSpeed, 1.2f, Mathf.Sin(angle) * ShoveSpeed));
         }
         _shoves++;
-        GD.Print($"{Prefix} shove {_shoves}: {ids.Count} prop(s) back into loose physics");
+        GD.Print($"{Prefix} shove {_shoves}: {ids.Count} prop(s) back into loose physics"
+                 + (ShoveCount > 0 ? $" (capped at {ShoveCount})" : ""));
     }
 
     private void Report()
@@ -172,12 +237,62 @@ public sealed partial class ReachCostProbe : Node
         GD.Print($"{Prefix} integrity queries: {queries} in {secs:0.00} s = {queries / secs:0.0}/s");
         GD.Print($"{Prefix} server physics frame time over {_frameMs.Count} tick(s): "
                  + $"p50 {p50:0.000} ms, p95 {p95:0.000} ms, peak {peak:0.000} ms");
+
+        // PROBE-1: the diagnosis half. ACTIVE OBJECTS against the prop population is the whole
+        // "do resting bodies sleep?" question answered in one number; collision pairs and
+        // islands say whether the broadphase is carrying the room; the GC line says whether the
+        // tail is allocation.
+        double activeMean = Mean(_activeObjects);
+        double pairsMean = Mean(_collisionPairs);
+        double islandsMean = Mean(_islands);
+        int gc0 = System.GC.CollectionCount(0) - _gc0AtStart;
+        int gc1 = System.GC.CollectionCount(1) - _gc1AtStart;
+        int gc2 = System.GC.CollectionCount(2) - _gc2AtStart;
+        double allocMb = (System.GC.GetTotalAllocatedBytes(precise: false) - _allocAtStart)
+                         / (1024.0 * 1024.0);
+        GD.Print($"{Prefix} physics server, mean over the window: active bodies {activeMean:0.0} "
+                 + $"(of {_peakLoose} prop(s) in the world), collision pairs {pairsMean:0.0}, "
+                 + $"islands {islandsMean:0.0}");
+        GD.Print($"{Prefix} managed heap over the window: gen0 {gc0}, gen1 {gc1}, gen2 {gc2} "
+                 + $"collection(s), {allocMb:0.0} MB allocated ({allocMb / secs:0.0} MB/s)");
+        GD.Print($"{Prefix} fixes: carryableIdleGate="
+                 + $"{MpFoundation.Game.Props.PropCostSwitches.CarryableIdleGate}, "
+                 + $"looseIndex={MpFoundation.Game.Props.PropCostSwitches.LooseIndex}");
+
         GD.Print($"{SummaryPrefix} props={_peakLoose} audits={audits} corrections={corrections} "
                  + $"queries={queries} auditsPerSec={audits / secs:0.00} "
                  + $"queriesPerSec={queries / secs:0.00} shoves={_shoves} "
                  + $"frameP50Ms={p50:0.000} frameP95Ms={p95:0.000} framePeakMs={peak:0.000} "
-                 + $"seconds={secs:0.00}");
+                 + $"seconds={secs:0.00} "
+                 + $"activeBodies={activeMean:0.0} activeBodiesPeak={Peak(_activeObjects):0} "
+                 + $"collisionPairs={pairsMean:0.0} islands={islandsMean:0.0} "
+                 + $"gc0={gc0} gc1={gc1} gc2={gc2} allocMb={allocMb:0.0} "
+                 + $"idleGate={MpFoundation.Game.Props.PropCostSwitches.CarryableIdleGate} "
+                 + $"looseIndex={MpFoundation.Game.Props.PropCostSwitches.LooseIndex}");
         GetTree().Quit(0);
+    }
+
+    /// <summary>Mean of a sample list, 0 when empty. Reported for the body/pair/island counts
+    /// rather than a percentile because those are populations, not latencies: a p95 of a body
+    /// count says nothing a mean and a peak do not say more plainly.</summary>
+    private static double Mean(List<double> xs)
+    {
+        if (xs.Count == 0)
+            return 0.0;
+        double t = 0.0;
+        foreach (double x in xs)
+            t += x;
+        return t / xs.Count;
+    }
+
+    /// <summary>Largest value in a sample list, 0 when empty.</summary>
+    private static double Peak(List<double> xs)
+    {
+        double m = 0.0;
+        foreach (double x in xs)
+            if (x > m)
+                m = x;
+        return m;
     }
 
     /// <summary>Nearest-rank percentile on an already-sorted list. Nearest-rank rather than a

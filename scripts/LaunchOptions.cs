@@ -809,6 +809,35 @@ public sealed class LaunchOptions
     /// unless <c>--reach-cost</c> attached the probe at all.</summary>
     public double CostShoveEverySec { get; private set; } = 3.0;
 
+    /// <summary><c>--cost-shove-count &lt;n&gt;</c>: PROBE-1 (2026-09-20). Caps how many props a
+    /// shove wave knocks loose, lowest prop id first. 0 or negative (the default) means every
+    /// prop in the world, which is what SHELF-1 and REACH-1 measured.
+    ///
+    /// <para><b>Why a cap is needed once the population is a variable.</b> ReachCostProbe's shove
+    /// is "every prop in the room, every N seconds", and its own header calls that a strictly
+    /// harsher load than two players could apply. At 130 props that overstates a real session; at
+    /// 2000 it stops describing anything at all — 2000 simultaneously loose props is 2000 x 30 Hz
+    /// of loose stream, which measures the wire rather than the room. A FIXED wave size across
+    /// every population is the only way the "under a wave" column of a capacity table compares
+    /// row to row: the disturbance is held constant and the population is the variable.</para></summary>
+    public int CostShoveCount { get; private set; }
+
+    /// <summary><c>--probe-props &lt;n&gt;</c>: PROBE-1 (2026-09-20). Server-only. Seeds n extra
+    /// Resting props into the search room's walkway floor at world build, on top of whatever the
+    /// level authored, so server and client cost can be measured against a population rather than
+    /// estimated from one. See <c>PropManager.SeedProbeProps</c> and <c>ProbeSeedLayout</c>.
+    ///
+    /// <para>0 (the default) seeds nothing, which is every launch that did not ask.</para></summary>
+    public int ProbeProps { get; private set; }
+
+    /// <summary><c>--probe-ablate &lt;csv&gt;</c>: PROBE-1 (2026-09-20). Turns OFF one or more of
+    /// this packet's at-rest fixes for the life of the process, so the saving each one makes is a
+    /// measured difference between two runs of ONE build rather than a comparison of two builds.
+    /// Tokens: <c>carryable</c>, <c>loop</c>, <c>all</c>, <c>none</c>. See
+    /// <c>MpFoundation.Game.Props.PropCostSwitches</c>, which is also where the argument for a
+    /// switch rather than two branches is written down.</summary>
+    public string ProbeAblate { get; private set; } = "";
+
     // --- end REACH-1 ------------------------------------------------------------------------------
 
     // --- CLOCK-1 (2026-09-19) ---------------------------------------------------------------------
@@ -1303,6 +1332,24 @@ public sealed class LaunchOptions
                         options.CostShoveEverySec = shoveEvery;
                     else
                         GD.PushWarning("[reach] --cost-shove-every: not a number of seconds; ignored");
+                    break;
+                case "--cost-shove-count":
+                    // NOT gated on > 0: zero is the meaningful "no cap" value and is the default.
+                    if (int.TryParse(Next(args, ref i).Trim(), NumberStyles.Integer,
+                            CultureInfo.InvariantCulture, out int shoveCount))
+                        options.CostShoveCount = shoveCount;
+                    else
+                        GD.PushWarning("[probe] --cost-shove-count: not a whole number; ignored");
+                    break;
+                case "--probe-props":
+                    if (int.TryParse(Next(args, ref i).Trim(), NumberStyles.Integer,
+                            CultureInfo.InvariantCulture, out int probeProps) && probeProps > 0)
+                        options.ProbeProps = probeProps;
+                    else
+                        GD.PushWarning("[probe] --probe-props: not a positive whole number; ignored");
+                    break;
+                case "--probe-ablate":
+                    options.ProbeAblate = Next(args, ref i).Trim();
                     break;
                 case "--build-ui-theme":
                     options.BuildUiTheme = true;

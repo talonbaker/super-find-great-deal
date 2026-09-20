@@ -639,7 +639,39 @@ public partial class BotHarness : Node
             // That is deliberately cheap: a per-frame accumulator here would be a measurement rig
             // running inside every bot in the repo, which is exactly what ReachCostProbe's own
             // header argues against.
-            (float)(Performance.GetMonitor(Performance.Monitor.TimePhysicsProcess) * 1000.0));
+            (float)(Performance.GetMonitor(Performance.Monitor.TimePhysicsProcess) * 1000.0),
+            // PROBE-1 (2026-09-20): THE RENDER SIDE OF THE SAME 5 Hz SPOT READING, and the gap
+            // it closes is survey R10 — "the repo has no client render-time instrument at all".
+            //
+            // SHELF-1 added `pms` (TimePhysicsProcess) and was explicit about what it is NOT:
+            // "pms is TimePhysicsProcess on a HEADLESS bot, so the client column does not measure
+            // rendering at all ... the client column is not evidence about what Talon will see"
+            // (STOCK-1 S5.4, restating it after 2 212 MultiMesh instances landed on the GPU and
+            // the headless column went DOWN). Three numbers close that, and they are three rather
+            // than one because they fail differently:
+            //
+            //   prs  TimeProcess — the main loop's own CPU time, the half a script can inflate.
+            //   fms  the WHOLE frame, derived from TimeFps. This is the one with a bar on it
+            //        (16.6 ms = 60 fps) because it is the only one that includes the time the
+            //        renderer spends that no script monitor can see. Derived from fps rather
+            //        than accumulated per frame for the reason ReachCostProbe's header gives
+            //        about always-on rigs; 0 when fps has not been established yet.
+            //   draws RenderTotalDrawCallsInFrame — the quantity that actually scales with the
+            //        item count, and the one a MultiMesh bake exists to hold down. A frame time
+            //        that is fine on this machine and a draw-call count that is not is a result
+            //        worth having, because the second number generalises to Talon's machine and
+            //        the first does not.
+            //
+            // ALL THREE READ ZERO-ISH ON A HEADLESS BOT, deliberately and not as a defect: a
+            // headless peer submits no draw calls, so a headless row of this table is the
+            // control, and the windowed --first-person-cam row is the measurement. Saying that
+            // in the log beats a reader assuming a headless 0.0 ms means the room is free.
+            (float)(Performance.GetMonitor(Performance.Monitor.TimeProcess) * 1000.0),
+            Performance.GetMonitor(Performance.Monitor.TimeFps) > 0.0
+                ? (float)(1000.0 / Performance.GetMonitor(Performance.Monitor.TimeFps))
+                : 0f,
+            (int)Performance.GetMonitor(Performance.Monitor.RenderTotalDrawCallsInFrame),
+            (int)Performance.GetMonitor(Performance.Monitor.RenderTotalObjectsInFrame));
         string line = JsonSerializer.Serialize(sample, JsonOptions);
         if (_writer != null)
         {
@@ -709,7 +741,14 @@ public partial class BotHarness : Node
         // VoiceManager.GetEmitRoutingVerdict.
         Voice.VoiceRouting.Verdict Vroute,
         // SHELF-1: this peer's own physics frame time in ms, as `pms`. See its computation site.
-        float Pms);
+        float Pms,
+        // PROBE-1: this peer's own RENDER-side reading, as `prs` (process ms), `fms` (whole frame
+        // ms, from fps), `draws` and `objs`. See their computation site for what each one is for
+        // and why a headless bot reads ~0 on all four.
+        float Prs,
+        float Fms,
+        int Draws,
+        int Objs);
 
     // THE FIRST-PERSON LENS, in world space (INT-0, 2026-09-19). X/Y/Z is the lens itself, not the
     // rig node it hangs off; Dx/Dy/Dz is the direction it faces (-Z of its own basis, which is
