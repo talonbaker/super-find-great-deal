@@ -946,6 +946,116 @@ absence-without-a-positive-control this file warns about elsewhere. If
 `TheLiveGravityForActuallyReadsTheModeAndTheTwoBakedKnobs` is ever red again, the first thing to
 check is whether a fourth class has started writing the tuning without joining the collection.
 
+### A bot that crashes AFTER printing `done`, with the stack BASE-1 asked for (INT-1, 2026-09-20)
+
+BASE-1's entry above closes with a request: *"capture the Windows fault log alongside the bot's
+stdout, and check whether it only ever happens to a bot that has already printed `done`."*
+**Both halves, answered.** `Netcode: arrive latch` was red in INT-1's second marathon with
+
+```
+FAIL: LatchBot exited with code -1073741819
+```
+
+`-1073741819` is `0xC0000005`, `STATUS_ACCESS_VIOLATION` — a different fault from BASE-1's
+`0xC000001D`, same family. **Yes, it had already finished.** `arrivelatch.latch.out.log` ends:
+
+```
+[client] connected as peer 869539124
+[bot] LatchBot running as peer 869539124 for 40s
+[bot] LatchBot done
+```
+
+195 JSONL samples written, full duration served. **And the stack names the phase outright** —
+`arrivelatch.latch.err.log`:
+
+```
+0xC0000005
+   at Godot.NativeInterop.NativeFuncs.godotsharp_internal_object_get_associated_gchandle(IntPtr)
+   at Godot.GodotObject.Dispose(Boolean)
+   at Godot.GodotObject.Finalize()
+   at System.GC.RunFinalizers()
+```
+
+**A .NET FINALIZER touching a Godot object after the native side is gone.** That is teardown by
+construction: `GC.RunFinalizers` at shutdown, a managed wrapper whose native peer has already
+been freed, and a null gchandle lookup. Nothing a suite asserts can reach it, and nothing under
+test is running by then. **3/3 PASS standalone** on the same tree immediately afterwards.
+
+**So the rule BASE-1 wanted is now earned rather than suspected: read the bot's `.out.log` for
+its completion line, and its `.err.log` for a `Finalize`/`Dispose`/`RunFinalizers` frame. Both
+present = teardown, re-run and move on. Either absent = a real crash, and the JSONL's last
+sample says how far it got.** This suite also runs under `--netsim latency=60ms loss=80%
+jitter=800ms` by design, so it tears down more objects under more pressure than most.
+
+## `Sfx: material voices` loses ONE driver intermittently, and the cause is NOT the spawn race (INT-1, measured 2026-09-19/20)
+
+**SHELF-1 named this suite's intermittent red and named a cause. The cause is wrong, and it is
+ruled out here by measurement rather than by argument.** SHELF-1 §8 recorded 2 of 3 runs each
+losing exactly one driver, a different one each time, and attributed it to spawn markers being
+dealt by join order (§6.3). INT-1 added `--spawn-index` (ruling 6) and pinned all five of this
+suite's bots by NAME. **The pins demonstrably applied** — the server logs them —
+
+```
+[server] spawn pinned peer=1070851738 name=SfxCanBot     marker=0 at=(35.50,1.10,0.00) moved=True
+[server] spawn pinned peer=850499413  name=SfxBoxBot     marker=2 at=(38.50,1.10,2.10) moved=True
+[server] spawn pinned peer=1451927024 name=SfxProduceBot marker=3 at=(41.50,1.10,-2.10) moved=True
+```
+
+**— and a driver was still lost.** Tally on the merged tree: **3 PASS, 2 FAIL across five runs**,
+always exactly ONE driver, a different one each time (marathon: `produce`; standalone:
+`cardboard`), and **no run ever played the WRONG sound.**
+
+### What it actually is, from the two failures' own traces
+
+| | marathon (produce lost) | standalone (cardboard lost) |
+|---|---|---|
+| pinned to | marker 3 `(41.50, -2.10)` | marker 2 `(38.50, 2.10)` |
+| its prop at | `(38.0, 0.35, -2.1)` | `(42.0, 0.35, 2.1)` |
+| came to rest at | `(38.02, 0.00, -0.65)` | `(41.99, 0.00, 3.55)` |
+| **closest approach** | **1.49 m** | **1.49 m** |
+| `heldPropId`, ever | −1 | −1 |
+| motionless for | the rest of the run | 18 s of a 26 s run |
+
+**1.49 m in BOTH, to the centimetre. That is a geometric constant, not a race.**
+
+```
+ScriptedCarryIntentSource.ArriveRadius = 1.2f
+    if (dist <= ArriveRadius && _clock >= _earliestGrabSec)   // the grab intent is formed HERE
+```
+
+The bot walks AT its prop; the prop is a `RigidBody3D` and **a `CharacterBody3D` does not push
+one** (SHELF-1 §6.2), so it wedges between the prop and the adjacent bay and stops 1.49 m away —
+**0.29 m outside the 1.2 m arrive radius.** `dist <= ArriveRadius` is therefore never true, the
+grab intent is never formed, and **the server log contains no `grab denied` line at all**,
+because — TASK-1 §3.3 — *a press that is never made is never refused.* The suite then reports
+`prop N never made a sound at all`, which is an assertion about AUDIO describing a bot that never
+reached its object.
+
+### The fix is one TASK-1 already found, one file over
+
+TASK-1 §3.3 hit this exact wall with its own intent source and wrote the generalisation down:
+*"an arrive radius is a fact about the FURNITURE the target sits on."* It raised
+`ScriptedSortIntentSource.FetchStandM` from the copied 1.2 to **1.8 m, DERIVED from the server's
+reach** (`SandboxAvatar.PickupRadius` 1.5 + `PropManager.GrabRangeTolerance` 0.75 = 2.25 m in 3D)
+rather than guessed. **`ScriptedCarryIntentSource` never got the same treatment**, and it is the
+brain four suites drive. Raising its `ArriveRadius` the same way is the fix.
+
+**Deliberately NOT done at INT-1, and the reason is the blast radius rather than the size.** That
+constant is shared by `Run-PlaceTest`, `Run-CarryNetTest`, `Run-MaterialSfxTest` and
+`Run-CarryDriftTest`; raising it moves where every one of their bots comes to rest, and several
+of them assert on a distance. That is a change that wants its own packet and its own four-suite
+re-run, not a one-line edit at a wave's final gate. **Handed to the orchestrator.**
+
+### How to read a red here
+
+- **`prop N never fired <Pick> on PickedUp` / `never made a sound at all`** with **no
+  `grab denied` on the server** and the bot's own trace showing it motionless outside 1.2 m:
+  this staging flake. Not the wire, not the profile, not the mix.
+- **The bot reached its prop and still played nothing**, or **played the wrong material**: the
+  real thing. Assertion 4 (`-PlantCrossedProfile`) is what defends the second.
+- **Check the bot's JSONL before anything else.** Its `heldPropId` and its closest approach
+  answer this in two lines, and no server log can.
+
 ## A fixture staged against an UNDRESSED room is a defect with no owner (INT-1, measured 2026-09-19)
 
 **`Sfx: material voices` was the only real red in INT-1's first marathon, and neither lane that
