@@ -606,6 +606,19 @@ public partial class Gameplay : Node3D
         // Populate the world's networked props (the deployment world's real prop set by
         // default; test worlds get theirs — see PropManager.SpawnInitialProps).
         _propManager.SpawnInitialProps(net.Options.World);
+
+        // --spawn-index (INT-1): parsed once, here, so a malformed spec is reported at startup
+        // beside the rest of the server's configuration rather than discovered as a bot that
+        // quietly took the wrong marker. SpawnPin.Empty for every session that passes no flag.
+        _spawnPins = World.SpawnPin.Parse(net.Options.SpawnIndexSpec);
+        if (_spawnPins.Count > 0)
+        {
+            var pins = new List<string>();
+            foreach (System.Collections.Generic.KeyValuePair<string, int> pin in _spawnPins.Pins)
+                pins.Add($"{pin.Key}={pin.Value}");
+            pins.Sort(System.StringComparer.Ordinal);
+            ServerLog.Info("spawn pins", string.Join(",", pins));
+        }
     }
 
     private void OnPeerConnected(long id)
@@ -999,12 +1012,82 @@ public partial class Gameplay : Node3D
 
         if (!_isServer)
             return;
+        ApplySpawnPins();
         _sinceStatus += delta;
         if (_sinceStatus >= StatusIntervalSec)
         {
             _sinceStatus = 0;
             LogStatus();
             _reconnects.SweepExpired(Time.GetTicksMsec() / 1000.0);
+        }
+    }
+
+    // --- --spawn-index (INT-1, 2026-09-19, packet ruling 6) ---------------------------------
+
+    /// <summary>Parsed once from <c>--spawn-index</c>. <see cref="World.SpawnPin.Empty"/> in
+    /// every session that does not pass the flag, which is every session a player ever starts.
+    /// </summary>
+    private World.SpawnPin _spawnPins = World.SpawnPin.Empty;
+
+    /// <summary>Peers already pinned (or decided against), so the poll below does its work once
+    /// per peer and then costs one set lookup. Keyed by peer id rather than by name because a
+    /// name is what we are WAITING for and a peer id is what we have from the first frame.
+    /// </summary>
+    private readonly HashSet<int> _spawnPinned = new();
+
+    /// <summary>
+    /// <b>Moves a NAMED peer onto its pinned spawn marker, once, as soon as its name is known.
+    /// </b> Server-only, and a no-op costing one <c>Count == 0</c> test in every session that
+    /// passes no <c>--spawn-index</c>.
+    ///
+    /// <para><b>Why this is a poll and not part of <c>OnPeerConnected</c>, which is where every
+    /// other spawn decision is made.</b> The spawn position is computed the instant a peer
+    /// connects, and at that instant the server does not know who it is:
+    /// <c>SandboxAvatar.DisplayName</c> is written by the OWNING CLIENT (see that property, and
+    /// <c>SandboxAvatar</c>'s <c>Sync</c> child taking client authority) and arrives a frame or
+    /// several later. So the choice is between inventing a new handshake field — which changes
+    /// the payload shape and would owe a <c>ProtocolVersion</c> bump this wave has already
+    /// spent — and waiting for a value that already replicates. This waits.</para>
+    ///
+    /// <para><b>It re-uses <see cref="World.RoomTeleport.ServerMove"/> rather than writing a
+    /// position directly</b>, because that is the one place in this codebase that bumps the
+    /// prediction epoch — without it the owning client rubber-bands back to where it spawned
+    /// instead of snapping, which is the exact case
+    /// <c>SandboxAvatar.ServerTeleportTo</c>'s own doc says it exists for. A pinned bot is moved
+    /// before it has taken a step, so nothing is interrupted.</para>
+    ///
+    /// <para><b>It cannot be reached by a player.</b> The flag is the SERVER's; a client has no
+    /// way to ask for a marker, and an unpinned name keeps the ordinary join-order deal. That is
+    /// deliberately not the same as "harmless if a client could" — a self-teleport verb is an
+    /// anti-cheat surface and this lane is not the place to open one.</para>
+    /// </summary>
+    private void ApplySpawnPins()
+    {
+        if (_spawnPins.Count == 0 || _players == null || !GodotObject.IsInstanceValid(_players))
+            return;
+        foreach (Node child in _players.GetChildren())
+        {
+            if (child is not SandboxAvatar avatar)
+                continue;
+            int peer = avatar.OwnerPeerId;
+            if (_spawnPinned.Contains(peer))
+                continue;
+            // Not pinned, or the name has not replicated yet. IndexFor answers -1 for both, and
+            // the two are told apart by the name being empty: an avatar with no name yet is
+            // asked again next frame rather than written off, which is the whole reason this is
+            // a poll. An avatar whose name HAS arrived and is not in the map is settled forever.
+            string name = avatar.DisplayName;
+            if (string.IsNullOrEmpty(name))
+                continue;
+            int index = _spawnPins.IndexFor(name);
+            _spawnPinned.Add(peer);
+            if (index < 0)
+                continue;
+            Vector3 destination = SpawnPositionFor(index);
+            bool moved = World.RoomTeleport.ServerMove(avatar, destination);
+            ServerLog.Info("spawn pinned",
+                $"peer={peer} name={name} marker={index} "
+                + $"at=({destination.X:F2},{destination.Y:F2},{destination.Z:F2}) moved={moved}");
         }
     }
 

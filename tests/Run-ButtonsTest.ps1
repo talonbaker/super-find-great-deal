@@ -403,6 +403,12 @@ try {
     $p3Out = Join-Path $script:LogDir "buttons-p3-server.out.log"
     $server = Start-ButtonsServer "buttons-p3-server" @(
         "--server", "--port", $Port, "--world", "supermarket", "--spawn-room", "search",
+        # --spawn-index (INT-1, ruling 6). The header above this phase states the mapping it
+        # depends on -- "A gets SearchSpawn_0 (35.5, 0), B gets _1 (44.5, 0) and C, the
+        # mid-round joiner, gets _2 (38.5, 2.1)" -- and then stages each courier's prop in that
+        # bot's own walkway, because a bot that has to change walkway walks into a shelf. That
+        # mapping was a bet on join order (SHELF-1 SS6.3 measured it losing); it is a pin now.
+        "--spawn-index", "BinHider=0,BinSeeker=1,BinCourier=2",
         "--reach-target", $SearchTargetId,
         "--round-script", "object@6,start@8,confirm@14,end@600")
     $procs += $server

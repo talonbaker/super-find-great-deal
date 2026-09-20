@@ -116,8 +116,14 @@ $procs = @()
 try {
     Write-Host "[1/3] launching dedicated server (supermarket world, spawning in the search room)..." -ForegroundColor Cyan
     $serverOut = Join-Path $script:LogDir "place.server.out.log"
+    # --spawn-index (INT-1, ruling 6): the four bots each get THEIR OWN marker by NAME rather
+    # than by join order. The comment below this launch has always said "bots connect in order,
+    # so each of the four starts at its own marker"; join order races (SHELF-1 SS6.3), and in a
+    # room that is four corridors a bot on the wrong marker walks into a shelf. Now it is true
+    # by construction instead of by hope.
     $server = Start-Godot @("--server", "--port", $Port, "--world", "supermarket",
-        "--spawn-room", "search") "place.server"
+        "--spawn-room", "search",
+        "--spawn-index", "PlaceBotA=0,PlaceBotB=1,PlaceBotC=2,PlaceBotD=3") "place.server"
     $procs += $server
     if (-not (Wait-ForLogLine $serverOut "\[server\] listening" 30)) {
         Write-Fail "server never reported listening; see $serverOut"

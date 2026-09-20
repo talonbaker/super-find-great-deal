@@ -389,6 +389,12 @@ try {
     $host1 = Start-Process -FilePath $script:GodotExe `
         -ArgumentList @("--path", $script:Root, "--",
             "--server", "--port", $Port, "--world", "supermarket", "--spawn-room", "search",
+            # --spawn-index (INT-1, ruling 6): PINS each driver to the marker its fixture was
+            # staged for, instead of hoping join order deals it. SHELF-1 SS6.3 measured the race
+            # this ends -- the box bot drew marker 2 on one run and marker 1 on the next, and
+            # the run that drew the far marker went red on a pickup that never happened -- and
+            # the mapping below is that section's own table, now enforced rather than assumed.
+            "--spawn-index", "SfxCanBot=0,SfxWitness=1,SfxBoxBot=2,SfxProduceBot=3",
             "--seed-test-props", $seed1, "--seed-props-drop", $DropAtSec, "--log-sfx", "--windowed") `
         -RedirectStandardOutput $s1Out `
         -RedirectStandardError (Join-Path $script:LogDir "matsfx.host.err.log") `
@@ -506,6 +512,12 @@ try {
     $server2 = Start-Process -FilePath $script:GodotExe `
         -ArgumentList @("--path", $script:Root, "--",
             "--server", "--port", $Port, "--world", "supermarket", "--spawn-room", "search",
+            # --spawn-index (INT-1, ruling 6): PINS each driver to the marker its fixture was
+            # staged for, instead of hoping join order deals it. SHELF-1 SS6.3 measured the race
+            # this ends -- the box bot drew marker 2 on one run and marker 1 on the next, and
+            # the run that drew the far marker went red on a pickup that never happened -- and
+            # the mapping below is that section's own table, now enforced rather than assumed.
+            "--spawn-index", "SfxCanBot=0,SfxWitness=1,SfxBoxBot=2,SfxProduceBot=3",
             "--seed-test-props", $seed2, "--seed-props-drop", $DropAtSec,
             "--log-sfx", "--windowed") `
         -RedirectStandardOutput $s2Out `

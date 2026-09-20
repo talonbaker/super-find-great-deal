@@ -320,6 +320,30 @@ public sealed class LaunchOptions
     /// (<c>Gameplay.SpawnPositionFor</c>), is the smaller of the two costs.</para></summary>
     public string SpawnRoom { get; private set; } = "";
 
+    /// <summary><c>--spawn-index "BotA=2,BotB=0"</c>: SERVER-side. Pins a NAMED peer to a spawn
+    /// marker index, so a scripted bot lands where the suite staged its fixture regardless of the
+    /// order it happened to connect in (INT-1, 2026-09-19, packet ruling 6).
+    ///
+    /// <para><b>Why a pin is needed at all, measured rather than assumed.</b> Markers are dealt
+    /// by JOIN ORDER (<c>Gameplay.OnPeerConnected</c>'s <c>_spawnIndex++</c>) and join order
+    /// races. SHELF-1 §6.3 measured it across three runs of <c>Run-MaterialSfxTest</c>: the box
+    /// bot drew marker 2 on one run and marker 1 on the next, and the run where it drew the far
+    /// marker went red on a pickup that never happened. That was survivable while the search room
+    /// was an empty box; the dressed room is four 9.2 m corridors with no cross-aisle, and a
+    /// straight-line walk brain in the wrong walkway stops dead at a shelf face.</para>
+    ///
+    /// <para><b>It takes nothing onto any wire.</b> The name matched on is
+    /// <c>SandboxAvatar.DisplayName</c>, which already replicates from the owning client through
+    /// the existing <c>Sync</c> synchronizer, so there is no new message and no
+    /// <c>ProtocolVersion</c> bump. It is also not something a client can ask for: a peer cannot
+    /// pin itself, only the process that started the SERVER can pin it. Empty by default, so an
+    /// ordinary session's spawn path is byte-for-byte unchanged.</para>
+    ///
+    /// <para>Parsing, the sentinel and the per-entry tolerance live in
+    /// <c>MpFoundation.Game.World.SpawnPin</c>, which is engine-free and unit-tested.</para>
+    /// </summary>
+    public string SpawnIndexSpec { get; private set; } = "";
+
     // --- the sorting job (TASK-1, 2026-09-19) -----------------------------------------------
 
     /// <summary>
@@ -1405,6 +1429,12 @@ public sealed class LaunchOptions
                 }
                 case "--spawn-room":
                     options.SpawnRoom = Next(args, ref i).Trim().ToLowerInvariant();
+                    break;
+                // NOT lower-cased, unlike --spawn-room above: this value contains PEER NAMES and
+                // is matched against SandboxAvatar.DisplayName exactly. A room id is a keyword
+                // the game owns; a display name belongs to whoever typed it.
+                case "--spawn-index":
+                    options.SpawnIndexSpec = Next(args, ref i).Trim();
                     break;
                 case "--carry-grab-retry":
                     if (double.TryParse(Next(args, ref i), NumberStyles.Float, CultureInfo.InvariantCulture, out double grabRetry))
