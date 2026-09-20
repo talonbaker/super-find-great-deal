@@ -895,6 +895,54 @@ animal from one that names a bot exit code.
 > handoffs for the same clock minute** — the cause of this red was recorded in REACH-1's §8 and
 > in no log SFX-1 could reach.
 
+## The xUnit suite has a parallel-collection race in it, and any new test anywhere can trip it (INT-1, measured 2026-09-19)
+
+**`dotnet test` is not deterministically green either, and for a reason that has nothing to do
+with load.** The first full run on the tree with TASK-1 merged was:
+
+```
+Failed!  - Failed: 1, Passed: 1652, Skipped: 0, Total: 1653
+  Failed SailNet.Tests.AnticipationCoilTests.TheLiveGravityForActuallyReadsTheModeAndTheTwoBakedKnobs
+  Assert.Equal() Failure
+  Expected: 31.9758396
+  Actual:   24
+```
+
+**24 is `AvatarMotor.Gravity` with the launch-coil factor absent** — the live motor reading a
+tuning that was not the one the test applied two lines above it. Re-run on the same tree,
+unchanged, **13 times: 13 PASS at 1653.** One red in fourteen.
+
+**It is not load and it is not the merge.** Nothing in wave 2 touches gravity, the coil or the
+tuning. The cause is structural and is visible without running anything:
+
+- `MotorTuning.Current` is ONE process-wide static and is what the live `AvatarMotor` reads.
+- **Three test classes write it** — `AnticipationCoilTests`, `MotorTuningTests`,
+  `MotorTuningSessionTests` — 27 call sites of `TryApply` / `SetSessionProbeForTests` /
+  `ResetForTests` between them.
+- Each parks the value and restores it in a `finally`, which is correct WITHIN a class and
+  defends against nothing: **xUnit gives every class its own collection and runs collections in
+  parallel**, and there is no `xunit.runner.json` in this project turning that off. A second
+  class can apply a different tuning BETWEEN two lines of the first one's test.
+
+**What changed was the SCHEDULE, not the code**, and that is the part worth carrying forward:
+69 new tests landed in an unrelated file and moved the thread timing enough to surface a latent
+race. **A test that parks a process-wide static is a trap armed for whoever adds the next test,
+anywhere in the suite** — it has no failure of its own to find and nothing in review looks wrong.
+
+**Fixed at INT-1** with `tests/unit/MotorTuningStaticsCollection.cs`: one
+`[CollectionDefinition]` and the attribute on all three classes, so xUnit runs them one at a
+time. No assertion changed and the suite's wall clock did not move measurably. **If you write a
+fourth class that touches `MotorTuning`, put the attribute on it** — and treat any other
+process-wide static a test parks the same way.
+
+**Honest about what is and is not proved.** The mechanism is established by construction (one
+static, three writers, no serialisation) and the fix removes the concurrency the mechanism needs.
+It is NOT proved by measurement that the flake is gone: at one failure in fourteen runs, a green
+streak after the fix is not evidence at that rate, and claiming otherwise would be exactly the
+absence-without-a-positive-control this file warns about elsewhere. If
+`TheLiveGravityForActuallyReadsTheModeAndTheTwoBakedKnobs` is ever red again, the first thing to
+check is whether a fourth class has started writing the tuning without joining the collection.
+
 ## REACH-1: udp/7903, and four measured things about the placement audit (2026-09-19)
 
 ### The port ladder, written down rather than recomputed

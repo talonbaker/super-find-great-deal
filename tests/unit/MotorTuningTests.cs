@@ -28,6 +28,7 @@ namespace SailNet.Tests;
 /// <b>MOVE-4c added no test that parks anything</b>: its two new shapes are pure functions of their
 /// arguments, so every non-default value it exercises is passed in rather than applied.</para>
 /// </summary>
+[Collection(MotorTuningStaticsCollection.Name)]
 public class MotorTuningTests
 {
     private static readonly DateTimeOffset Stamp =

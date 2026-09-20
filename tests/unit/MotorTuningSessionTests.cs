@@ -23,6 +23,7 @@ namespace SailNet.Tests;
 /// default is <see cref="MotorTuning.TryApply"/>; every test below hands it a fake writer holding
 /// its own tuning, so the global is never written at all.</para>
 /// </summary>
+[Collection(MotorTuningStaticsCollection.Name)]
 public class MotorTuningSessionTests
 {
     /// <summary>A stand-in for <c>MotorTuning.TryApply</c> that keeps its own tuning instead of the

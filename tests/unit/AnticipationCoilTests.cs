@@ -25,6 +25,7 @@ namespace SailNet.Tests;
 /// those restore it in a <c>finally</c>. Every other test evaluates a candidate tuning through
 /// <c>MotorTuningInvariants</c>, which is MOVE-4b's standing rule.</para>
 /// </summary>
+[Collection(MotorTuningStaticsCollection.Name)]
 public class AnticipationCoilTests
 {
     private const float Dt = AvatarMotor.TickDelta;
