@@ -1112,6 +1112,14 @@ PASS 3/3 consecutively**. The wedge signature — a driver motionless with `held
 closest approach of 1.49 m — **did not occur once in six runs.** The two reds are different
 animals and are worth separating here so the next reader does not re-diagnose them as this one:
 
+- **Confirmed a third time in REVIEW-1's own marathon** (2026-09-20, 43 suites, 42 PASS / 1 FAIL,
+  this suite the only red): `cardboard: prop 2 never made a sound at all`. `SfxBoxBot` was pinned
+  to marker 2 `(38.50, 1.10, 2.10)` with `moved=True` on the server, its first sample is its
+  pre-pin body at `(44.40, 0.65, 0.10)`, and it ended at `(46.16, 0.06, -4.06)` — the far corner,
+  **closest approach 3.144 m in 3D**, `heldPropId = -1` throughout. **3/3 PASS standalone**
+  immediately afterwards on the same tree, all three drivers firing every run. Same shape as run 3
+  below, in the other corner: a bot whose reconciled body starts one walkway over steers into a
+  bay and slides. **Three metres is not a radius anybody can set.**
 - **Run 3 is SHELF-1's four-corridor room, not an arrive radius.** `SfxProduceBot` spawned pinned
   at `(41.50, 2.30, -2.10)` and its next sample is `(46.16, 0.06, 4.06)` — it slid along the bay
   it was walking into, ended in the far `+X +Z` corner, and stayed there for the remaining 24 s.
