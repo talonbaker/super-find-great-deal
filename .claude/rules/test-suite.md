@@ -1046,11 +1046,93 @@ constant is shared by `Run-PlaceTest`, `Run-CarryNetTest`, `Run-MaterialSfxTest`
 of them assert on a distance. That is a change that wants its own packet and its own four-suite
 re-run, not a one-line edit at a wave's final gate. **Handed to the orchestrator.**
 
+### REVIEW-1 (2026-09-20): the wedge is real, the PROPOSED FIX was wrong, and the bar is the CLIENT's
+
+**INT-1's diagnosis above is confirmed. Its prescription — "raise `ArriveRadius` the same way
+TASK-1 did, to 1.8 m derived from the server's 2.25 m reach" — is RULED OUT BY MEASUREMENT**, the
+same way INT-1 ruled out SHELF-1's spawn race. Raised to 1.8 m, two OTHER suites in the group of
+four went red on the first sweep:
+
+| Suite | What it printed | What actually happened |
+|---|---|---|
+| `Run-CarryNetTest` phase 2 | `STAGING: DropC did not disconnect while holding -- it never held the ball at all` | the bot stood **1.482 m horizontally / 1.564 m in 3D** from a ball at y = 0.5 for 28 s with `heldPropId = -1`, and **the server logged nothing at all** |
+| `Run-PlaceTest` | `bot D: prop 1016 holder=0 in the final sample` | D pressed 0.6 m further out, its NAMED prop fell outside the client's pickup radius, nearest-carryable ran instead, and it came away holding **1027 — a shelf product** (`place refused peer=… prop=1027 OutsideRoomBounds`) |
+
+**There are TWO bars between a scripted press and a held prop, and the SMALLER one binds.**
+
+```
+SandboxAvatar.FindNearestCarryable   PickupRadius            1.5 m, 3D, from the avatar's ORIGIN
+PropManager.RequestGrab              GrabRange               2.25 m, 3D  (= PickupRadius + 0.75)
+```
+
+`FindNearestCarryable` is the CLIENT's, it runs first, and `ScriptedGrabPropId` honours a named
+prop **only inside that same 1.5 m** — its own doc says it "narrows the choice, never widens the
+reach". Outside 1.5 m the press composes **no request**, so:
+
+- **the 2.25 m server reach is unreachable by a press the client declined to send**, and
+- **"no `grab denied` line" does not only mean "a press that was never made" any more.** It also
+  means "a press that was made and found nothing". TASK-1 §3.3's sentence still holds; this is a
+  second way to produce the same silence, and the discriminator between them is the bot's own
+  closest approach against **1.5 m in 3D**, not against any arrive radius.
+
+**So `ScriptedCarryIntentSource.ArriveRadius` stays at 1.2 m and it is now DERIVED**: a prop rests
+0.2–0.5 m above the avatar's origin, so the client's 1.5 m in 3D is 1.41–1.48 m horizontally, and
+1.2 m leaves 0.2 m of slack for the settle and a frame of prediction error. `ScriptedSortIntentSource`'s
+1.8 m is safe only because its sortables sit on a 1.4 m plinth that stops the bot well inside it;
+the horizontal number overstates the 3D one it is really spending.
+
+**The wedge is fixed at the PRESS instead.** 1.49 m in 3D is *inside* the client's 1.5 m radius —
+the wedged bot could have grabbed, it simply never asked, because the arrive branch it asks from
+is gated on a 1.2 m horizontal walk it can no longer complete. `ScriptedCarryIntentSource` now
+presses **while still walking**, on the `--carry-grab-retry` cadence, as soon as the 3D distance
+is inside `SandboxAvatar.PickupRadius` — the client's own question, referenced rather than copied.
+The walk is untouched, so no bot's resting position moves, which is what makes it safe for the
+four suites that measure distances against the arrive radius.
+
+**Before / after, the four suites that share the constant** (standalone, `-SkipBuild`, one lane on
+the machine, nothing else running):
+
+| Suite | Before | After |
+|---|---|---|
+| `Run-CarryDriftTest` | mean **0.997** m, peak **1.067** m, growth 0.000 m, n = 83 | mean **0.997** m, peak **1.071** m, growth 0.000 m, n = 83 |
+| `Run-CarryNetTest` | worst hold 1.01 m own / 1.07 m witness; teleport worst 1.00 m over 104 samples | worst hold **1.01** m own / **1.09** m witness |
+| `Run-PlaceTest` | placed **0.008 m / 0.00 deg**; spring-vs-anchor mean 0.047 m, peak 0.759 m, n = 280 | placed **0.008 m / 0.00 deg**; spring-vs-anchor mean **0.048** m, peak **1.099** m, n = 281 |
+| `Run-MaterialSfxTest` | PASS | PASS |
+
+**The one number that moved is `Run-PlaceTest`'s spring-vs-anchor PEAK, 0.759 → 1.099 m**, and it
+is expected rather than incidental: a bot that grabs while still walking picks the prop up in
+motion, so the spring's transient lag is sampled at speed instead of from a standing start. The
+mean (0.047 → 0.048 m) and the placed pose (0.008 m / 0.00 deg) are unmoved, which is what says
+the change is in when the grab happens and not in what the spring does.
+
+### `Sfx: material voices` after the press fix — 4 PASS / 2 FAIL over six runs, and NEITHER red is the wedge
+
+Tally on the fixed tree, standalone, machine otherwise idle: runs 1 and 3 FAIL, **runs 4, 5 and 6
+PASS 3/3 consecutively**. The wedge signature — a driver motionless with `heldPropId = -1` at a
+closest approach of 1.49 m — **did not occur once in six runs.** The two reds are different
+animals and are worth separating here so the next reader does not re-diagnose them as this one:
+
+- **Run 3 is SHELF-1's four-corridor room, not an arrive radius.** `SfxProduceBot` spawned pinned
+  at `(41.50, 2.30, -2.10)` and its next sample is `(46.16, 0.06, 4.06)` — it slid along the bay
+  it was walking into, ended in the far `+X +Z` corner, and stayed there for the remaining 24 s.
+  **Closest approach to its prop: 4.01 m in 3D / 3.50 m horizontally**, never once inside any
+  radius anybody could set. `--carry-walk-to` is one point walked in a STRAIGHT LINE and this room
+  has no cross-aisle except at its ends (HOLD-1's entry above). That is the level change SHELF-1
+  deferred to Talon's ride and it is still his call.
+- **Run 1 is not a staging failure at all.** All three drivers picked up (`TinPick x1`,
+  `CardPick x1`, `ProducePick x1`) and the host heard seven impacts; the witness heard three, all
+  `CardThud`, and the suite reported *"THE OTHER PLAYER IS DEAF to tin / to produce"*. Nothing
+  about the walk. Unexplained here and NOT chased — `OneShotSteals` was 27.3 % on that run — but
+  recorded so that a future reader with the same two lines knows it has been seen once on a tree
+  where the drivers demonstrably reached their props.
+
 ### How to read a red here
 
 - **`prop N never fired <Pick> on PickedUp` / `never made a sound at all`** with **no
   `grab denied` on the server** and the bot's own trace showing it motionless outside 1.2 m:
-  this staging flake. Not the wire, not the profile, not the mix.
+  this staging flake. Not the wire, not the profile, not the mix. **Since REVIEW-1, read the
+  closest approach against 1.5 m in 3D**: inside it and motionless is a press that found nothing
+  (fixed); several metres out is the four-corridor mis-walk, which no constant can reach.
 - **The bot reached its prop and still played nothing**, or **played the wrong material**: the
   real thing. Assertion 4 (`-PlantCrossedProfile`) is what defends the second.
 - **Check the bot's JSONL before anything else.** Its `heldPropId` and its closest approach
