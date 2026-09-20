@@ -51,11 +51,30 @@ $ErrorActionPreference = "Stop"
 Write-Host "=== STOCK-1: the baked shop floor, and the holes in it ===" -ForegroundColor White
 
 $RoundScript = "start@6,confirm@14"
+$SeedDropAtSec = 2          # released well before the Start, so it has settled by the Confirm
 $BotDurationSec = 26
 $SeededPropId = 1          # PropRegistry.Register starts at 1; authored props are 1000+
-$AuthoredCount = 130       # SHELF-1: 4 crates + 6 bins + 120 products
-$AuthoredFirst = 1000
-$AuthoredLast = 1129
+
+# THE AUTHORED BLOCK IS DERIVED FROM Run-AuthoredPropTest.ps1, NEVER TYPED HERE, and this lane
+# paid for the lesson rather than inheriting it. The first version of this suite carried 130 /
+# 1000..1129, copied out of SHELF-1's handoff -- correct on SHELF-1's branch and STALE by the
+# time BTN-1's rack, TASK-1's eighteen sortables and HOLD-1's board had merged. The run reported
+# 162 / 1000..1161 and this suite called it a STOCK-1 regression, which is exactly the failure
+# HOLD-1's handoff warns about: "three renumberings in two days ... the only durable answer is
+# for the suites to stop typing the number."
+#
+# Run-AuthoredPropTest.ps1 keeps its own literals deliberately -- the block IS its subject, and a
+# version that derived them would pass whatever the world did. This suite's subject is the
+# opposite: that STOCK-1 changed NOTHING. So it reads that suite's expectation and asserts the
+# server agrees with it, and the two can never disagree about what "unchanged" means.
+$authoredSrc = Get-Content (Join-Path $PSScriptRoot "Run-AuthoredPropTest.ps1") -Raw
+if ($authoredSrc -match '\$AuthoredFirst\s*=\s*(\d+)') { $AuthoredFirst = [int]$matches[1] } else { $AuthoredFirst = 0 }
+if ($authoredSrc -match '\$AuthoredLast\s*=\s*(\d+)')  { $AuthoredLast  = [int]$matches[1] } else { $AuthoredLast  = 0 }
+$AuthoredCount = $AuthoredLast - $AuthoredFirst + 1
+if ($AuthoredFirst -le 0 -or $AuthoredLast -le $AuthoredFirst) {
+    Write-Fail "could not read the authored id block out of Run-AuthoredPropTest.ps1; that suite is the one source of truth for it"
+}
+Write-Host "  authored block, read from Run-AuthoredPropTest.ps1: $AuthoredCount props, ids $AuthoredFirst..$AuthoredLast" -ForegroundColor DarkGray
 
 $mutex = Enter-SuiteMutex $MutexTimeoutMinutes
 $procs = @()
@@ -151,6 +170,19 @@ try {
     foreach ($m in @("Can", "Box", "Produce")) {
         $hit = @($places | Where-Object { $_ -match "material=$m\b" }) | Select-Object -First 1
         if ($hit -and $hit -match 'at=([-\d.]+),([-\d.]+),([-\d.]+)') {
+            # SEEDED AT THE EXACT RESTING POSE, and released by --seed-props-drop below so that
+            # it settles and gets audited. Both halves were measured rather than assumed:
+            #
+            #   at the pose with NO release -- born Resting and frozen kinematic, never
+            #     transitions, ZERO [reach] layer2 lines, so no layer-2 assertion could fail;
+            #   5 cm ABOVE with a release -- lands hard enough to penetrate the BOARD (SHELF-1's
+            #     Aisle0_Bay0, not this packet's bulk) by 0.035 m against a 0.020 m tolerance,
+            #     and the audit correctly depenetrates it by 0.040 m.
+            #
+            # That second one is a fact about DROPPING, not about the hole, and it is worth
+            # writing down: the packet's "0 corrections" is a claim about a PLACED prop -- the
+            # place RPC sets the exact pose, it does not throw the object at the shelf. A test
+            # that stages by dropping cannot assert it and must not pretend to.
             $script:PlacePose = "$($matches[1]),$($matches[2]),$($matches[3]),$($m.ToLower())"
             $script:PlaceWhere = $hit
             break
@@ -168,6 +200,14 @@ try {
         $server = Start-StockServer "stock.server" @(
             "--server", "--port", $Port, "--world", "supermarket", "--spawn-room", "search",
             "--seed-test-props", $script:PlacePose,
+            # A SEEDED PROP IS BORN RESTING AND FROZEN KINEMATIC (PropManager.StepSeededDrop's
+            # own header: "a prop from ServerSpawn is born Resting, and NetworkedProp._Ready
+            # freezes a Resting prop kinematic on every peer -- so a --seed-test-props fixture
+            # hangs"). Without this flag it never falls, never latches, and layer 2 never audits
+            # it: the first two runs of this suite produced ZERO [reach] layer2 lines, so no
+            # layer-2 assertion could have failed. --seed-props-drop releases it, it falls the
+            # 5 cm into the hole, and the settle is what gets audited.
+            "--seed-props-drop", $SeedDropAtSec,
             "--reach-target", $SeededPropId,
             "--round-script", $RoundScript)
         $procs += $server
@@ -198,23 +238,39 @@ try {
         $slog = @()
         if (Test-Path $serverOut) { $slog = @(Get-Content $serverOut) }
 
-        # LAYER 2. Every audit prints one line. A prop standing in a hole must come out
-        # None/Good: StaticOverlap means bulk collision is IN the hole, and Stuck is the outcome
-        # REACH-1 turns into InsideStatic.
-        $layer2 = @($slog | Where-Object { $_ -match "^\[reach\] layer2 " -and $_ -match "prop=$SeededPropId\b" })
-        foreach ($l in $layer2 | Select-Object -First 3) { Write-Host "        $l" -ForegroundColor DarkGray }
-        if ($layer2.Count -eq 0) {
-            Add-Failure "the seeded prop never latched Resting at all, so layer 2 never audited it -- the run did not stage. Read stock.server.out.log."
-        }
-        $bad = @($layer2 | Where-Object { $_ -match 'StaticOverlap' })
-        if ($bad.Count -gt 0) {
-            Add-Failure "layer 2 reported StaticOverlap on a prop standing in an AUTHORED HOLE ($($bad.Count) of $($layer2.Count) audit(s)): $($bad[0]). Bulk collision is inside the hole; a hider who used it would be refused the Confirm."
-        }
-        $stuck = @($slog | Where-Object { $_ -match '^\[reach\] STUCK ' })
-        if ($stuck.Count -gt 0) {
-            Add-Failure "the rest audit latched STUCK $($stuck.Count) time(s): $($stuck[0])"
+        # LAYER 2, AND THE POLARITY IS THE WHOLE POINT. PropManager.NoteAudit returns early
+        # when nothing was corrected -- "a passing audit is SILENT by design: 150 props settling
+        # after a shove would otherwise print 150 lines saying nothing happened, and the line
+        # that matters would be invisible inside them." So a "[reach] layer2" line for this prop
+        # means the audit HAD TO ACT, and the pass is its absence.
+        #
+        # An absence is only evidence with a positive control, and this one has a measured
+        # one rather than an argued one: staging the same prop 5 cm above the hole and letting
+        # it fall produced, on this tree,
+        #   [reach] layer2 prop=1 StaticOverlap -> Depenetrated ... depth=0.035m pushed 0.040 m;
+        #   penetrates /root/Gameplay/World/SearchRoom/Aisle0_Bay0 by 0.035 m
+        # -- a LANDING penetration against SHELF-1's board, not this packet's bulk, and the
+        # audit correctly fixing it. So the line fires when there is something to say.
+        $latched = @($slog | Where-Object { $_ -match '^\[reach\] layer3 \[rest\]' -and $_ -match "prop=$SeededPropId\b" })
+        if ($latched.Count -eq 0) {
+            Add-Failure "no '[reach] layer3 [rest]' line for prop $SeededPropId -- it never latched Resting, so nothing audited it. It is seeded at the hole's exact resting pose and released by --seed-props-drop; if it never latched, that is a STAGING failure, not a STOCK-1 one. Read stock.server.out.log."
+        } else {
+            Write-Host "        $($latched[-1])" -ForegroundColor DarkGray
         }
 
+        $layer2 = @($slog | Where-Object { $_ -match '^\[reach\] layer2 ' -and $_ -match "prop=$SeededPropId\b" })
+        foreach ($l in $layer2) { Write-Host "        $l" -ForegroundColor DarkGray }
+        $static = @($layer2 | Where-Object { $_ -match 'StaticOverlap' })
+        if ($static.Count -gt 0) {
+            Add-Failure "layer 2 reported StaticOverlap on a prop resting in an AUTHORED HOLE: $($static[0]). Read WHAT it says it penetrates -- StockBulk/Collision is this packet's bulk and is a hole that is too small; a bay (Aisle*_Bay*) is SHELF-1's board and is a landing penetration, i.e. a staging artefact."
+        }
+        $corrected = @($layer2 | Where-Object { $_ -match 'Depenetrated|RestoredLastGood|Stuck' })
+        if ($corrected.Count -gt 0) {
+            Add-Failure "layer 2 CORRECTED a prop resting in an authored hole $($corrected.Count) time(s): $($corrected[0]). The packet's bar is 0 corrections, and a hole that needs depenetration is a hole the hider would watch the object move out of after letting go."
+        }
+        if ($layer2.Count -eq 0) {
+            Write-Host "        layer 2: silent for prop $SeededPropId across the whole run, which is a clean audit" -ForegroundColor DarkGray
+        }
         # LAYER 3. The packet's own sentence: InsideStatic must never fire for a prop in a hole.
         $layer3 = @($slog | Where-Object { $_ -match '^\[reach\] layer3 ' })
         foreach ($l in $layer3 | Select-Object -First 3) { Write-Host "        $l" -ForegroundColor DarkGray }
@@ -268,7 +324,7 @@ try {
                 Add-Failure "the adoption line reads '$adopt'; STOCK-1 adds no NetworkedProp, so it must still say '$want'. Something under the search room was added, removed or renamed, and every id above it has moved -- Run-PlaceTest.ps1 names four of them in its own source."
             }
             if ($adopt -notmatch "ids $AuthoredFirst\.\.$AuthoredLast") {
-                Add-Failure "the adoption line does not report ids $AuthoredFirst..$AuthoredLast: '$adopt'"
+                Add-Failure "the adoption line does not report ids $AuthoredFirst..${AuthoredLast}: '$adopt'"
             }
         }
     }
