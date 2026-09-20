@@ -1419,7 +1419,15 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
     /// exists.</b> A consumed or despawned prop's release arrives as a Resting transition that may
     /// land after the node has gone (spawner despawns and RPCs are not ordered relative to each
     /// other), and that transition must still empty the hand — otherwise <see cref="FindHeldBy"/>
-    /// would keep answering with an id whose node has been freed.</summary>
+    /// would keep answering with an id whose node has been freed.
+    ///
+    /// <para><b>No <c>TransferChannel</c>, so this rides Godot's default channel 0</b> — stated
+    /// because a paragraph in <c>NetProfile.PropImpactChannel</c> used to claim it was on
+    /// channel 4 (REVIEW-1 I4, 2026-09-20). Channel 0 also carries <see cref="RequestGrab"/>,
+    /// <see cref="RequestDrop"/>, <see cref="RequestPlace"/>, <see cref="RequestThrow"/>, the two
+    /// denial RPCs and the <c>MultiplayerSpawner</c>'s replication, and the reset edge puts one
+    /// of these per adopted prop onto it in a single tick. Moving it is a WIRE CHANGE and wants a
+    /// protocol note of its own, not a line slipped into a fix commit.</para></summary>
     [Rpc(MultiplayerApi.RpcMode.Authority, TransferMode = MultiplayerPeer.TransferModeEnum.Reliable, CallLocal = true)]
     private void ApplyPropState(int propId, int mode, int holderPeerId, Transform3D transform,
         int release)
