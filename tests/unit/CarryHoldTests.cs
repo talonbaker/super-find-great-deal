@@ -275,6 +275,29 @@ public class CarryHoldTests
             .IsEqualApprox(CarryHold.PoseBasis(0.3f, Basis.Identity, holdLocal)));
     }
 
+    [Fact]
+    public void TheGrabbedPoint_IsONTheProp_EvenWhenTheRayMissesIt()
+    {
+        // A bot has no pitch and the aim cone is generous, so the view ray can pass a metre over
+        // a crate on the floor and still pick it. The grabbed point is then the nearest point on
+        // the prop, never the point in mid-air: a grab offset longer than the prop is a LEVER,
+        // and a lever that long swings faster than the hold can follow every time the holder
+        // turns.
+        var centre = new Vector3(2f, 0.22f, 0f);
+        var rayPoint = new Vector3(2f, 1.2f, 0f);
+        Vector3 onProp = CarryHold.GrabPointOnProp(centre, rayPoint, 0.38f);
+        Near(0.38f, centre.DistanceTo(onProp), 1e-4f);
+        Assert.True(onProp.Y > centre.Y, "it should be the face nearest the ray");
+    }
+
+    [Fact]
+    public void AGrabbedPointAlreadyOnTheProp_IsLeftWhereItIs()
+    {
+        var centre = new Vector3(2f, 0.22f, 0f);
+        var inside = new Vector3(2.1f, 0.25f, 0f);
+        Assert.True(CarryHold.GrabPointOnProp(centre, inside, 0.38f).IsEqualApprox(inside));
+    }
+
     // ---------------------------------------------------------------- never inside the holder
 
     [Fact]
@@ -334,6 +357,44 @@ public class CarryHoldTests
         float radial = new Vector3(pushed.X, 0f, pushed.Z).Length();
         Assert.True(radial - r >= CapsuleRadius - 1e-4f,
             $"the crate's near face is {radial - r:F3} m from the axis, capsule is {CapsuleRadius:F3}");
+    }
+
+    // ------------------------------------------------- a held prop cannot shove the world hard
+
+    [Fact]
+    public void MaxHoldSpeed_IsDerivedFromHowFastTheHolderCanWalk()
+    {
+        Assert.True(CarryHold.MaxHoldSpeedMps(2.4f) > 2.4f,
+            "the hold has to be able to keep up with the walk");
+        Assert.True(CarryHold.MaxHoldSpeedMps(2.4f) <= 3f * 2.4f,
+            "and not so much faster that it becomes a weapon");
+    }
+
+    [Fact]
+    public void AStepInsideTheCap_IsLeftAlone()
+    {
+        var from = new Vector3(0f, 1f, 0f);
+        var to = new Vector3(0f, 1f, -0.05f);
+        Assert.True(CarryHold.CapStep(from, to, 5f, 0.016f).IsEqualApprox(to));
+    }
+
+    [Fact]
+    public void AStepPastTheCap_IsShortenedToTheCapAndKeepsItsDirection()
+    {
+        var from = Vector3.Zero;
+        var to = new Vector3(0f, 0f, -10f);
+        Vector3 capped = CarryHold.CapStep(from, to, 5f, 0.02f);
+        Near(0.1f, capped.Length(), 1e-4f);              // 5 m/s x 0.02 s
+        Near(-1f, capped.Normalized().Z, 1e-4f);
+    }
+
+    [Fact]
+    public void TheCap_IsASPEED_SoItScalesWithTheTick()
+    {
+        var from = Vector3.Zero;
+        var to = new Vector3(0f, 0f, -10f);
+        Near(2f * CarryHold.CapStep(from, to, 5f, 0.01f).Length(),
+            CarryHold.CapStep(from, to, 5f, 0.02f).Length(), 1e-4f);
     }
 
     // ---------------------------------------------------------------- the break

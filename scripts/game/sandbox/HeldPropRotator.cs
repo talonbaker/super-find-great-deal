@@ -45,9 +45,13 @@ public partial class HeldPropRotator : Node
     /// is too fast" becomes "I can't line the crate up".</summary>
     public const float MouseRadiansPerPixel = 0.010f;
 
-    /// <summary>One wheel notch, degrees. A coarse, repeatable step for lining an object up
-    /// squarely — the thing the analogue mouse is bad at. 15° divides 90° and 360° exactly, so
-    /// six notches is a quarter turn and nobody has to eyeball it.</summary>
+    /// <summary><b>The wheel no longer turns a held object</b> (FEEL-1, 2026-09-20). It used to
+    /// give coarse 15° yaw steps while the modifier was held; the wheel is now the HOLD DISTANCE,
+    /// unconditionally, because Talon asked for exactly that — <i>"I'd like a scroll wheel to move
+    /// the object forward and back in space"</i> — and one input with two meanings depending on
+    /// whether a modifier happens to be down is the kind of rule a player has to be told rather
+    /// than discover. The constant is kept as a record of what the notch used to be; nothing
+    /// reads it.</summary>
     public const float WheelStepDegrees = 15f;
 
     private SandboxAvatar _avatar = null!;
@@ -102,13 +106,8 @@ public partial class HeldPropRotator : Node
             return;
         }
 
-        if (@event is InputEventMouseButton { Pressed: true } button
-            && button.ButtonIndex is MouseButton.WheelUp or MouseButton.WheelDown)
-        {
-            float sign = button.ButtonIndex == MouseButton.WheelUp ? 1f : -1f;
-            var step = new Basis(Vector3.Up, Mathf.DegToRad(WheelStepDegrees) * sign);
-            _avatar.HeldPropLocalRotation = (step * _avatar.HeldPropLocalRotation).Orthonormalized();
-            GetViewport().SetInputAsHandled();
-        }
+        // (The wheel branch that used to live here is gone -- see WheelStepDegrees. It is
+        // HoldDistanceController's input now, and deliberately NOT gated on this modifier: the
+        // wheel means one thing whether or not the right button is down.)
     }
 }

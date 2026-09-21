@@ -365,6 +365,12 @@ public sealed class LaunchOptions
     public IReadOnlyList<(int PropId, int BinSlot)> SortScript => _sortScript;
     private readonly List<(int PropId, int BinSlot)> _sortScript = new();
 
+    /// <summary>--hold-stress: once this bot is holding something, run
+    /// <c>HoldStressIntentSource</c>'s loop — forward, backward, strafe both ways, two 180s — for
+    /// the rest of the run instead of whatever walk the carry script had left (FEEL-1,
+    /// 2026-09-20). Off by default, so every existing carry suite's pacing is unchanged.</summary>
+    public bool HoldStress { get; private set; }
+
     /// <summary>--walk-speed &lt;m/s&gt;: this process's top ground speed, overriding
     /// <c>BrowsePace.DefaultWalkSpeedMps</c> (FEEL-1, 2026-09-20).
     ///
@@ -1460,6 +1466,9 @@ public sealed class LaunchOptions
                 // the game owns; a display name belongs to whoever typed it.
                 case "--spawn-index":
                     options.SpawnIndexSpec = Next(args, ref i).Trim();
+                    break;
+                case "--hold-stress":
+                    options.HoldStress = true;
                     break;
                 case "--walk-speed":
                     if (float.TryParse(Next(args, ref i), NumberStyles.Float, CultureInfo.InvariantCulture, out float walkSpeed))

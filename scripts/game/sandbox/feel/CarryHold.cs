@@ -148,6 +148,32 @@ public static class CarryHold
     public static Vector3 HoldPoint(Vector3 eye, Vector3 direction, float distanceM) =>
         direction.LengthSquared() < 1e-12f ? eye : eye + direction.Normalized() * distanceM;
 
+    /// <summary>
+    /// <b>The grabbed point, kept ON the object.</b> Where the view ray passes through the prop
+    /// this is the ray point itself; where it misses — over the top of a crate on the floor, which
+    /// is the ordinary case for anything aimed at from standing height — it is the nearest point
+    /// of the prop's bounding sphere instead.
+    ///
+    /// <para><b>Measured, on this suite's second run.</b> Without the clamp a bot with no pitch
+    /// grabbed a crate at y = 0.22 along a ray at eye height and came away with a grab offset
+    /// 1.2 m long. That offset is a LEVER: the hold point orbits the holder at the hold distance,
+    /// so a 180-degree turn in half a second sweeps it through pi x 1.2 = 3.8 m — 7.5 m/s, past
+    /// any honest speed cap — and the prop fell far enough behind its target, for long enough,
+    /// that the break-hold rule gave it up 0.3 s after every grab. The log said
+    /// <c>hold broken prop=1014 blocked=1.23m for 0.30s</c>, nine samples after the grab, every
+    /// run.</para>
+    ///
+    /// <para>It is also simply what a grab IS: you take hold of the object, not of a point in the
+    /// air a metre away from it.</para></summary>
+    public static Vector3 GrabPointOnProp(Vector3 propCentre, Vector3 rayPoint, float propRadiusM)
+    {
+        Vector3 away = rayPoint - propCentre;
+        float dist = away.Length();
+        return dist <= propRadiusM || dist < 1e-6f
+            ? rayPoint
+            : propCentre + away * (propRadiusM / dist);
+    }
+
     /// <summary>The grabbed point expressed in the prop's own frame, so it survives every
     /// rotation the player then spins the object through — the object pivots about where you are
     /// holding it, which is the whole reason this is stored in local space.</summary>
@@ -216,6 +242,38 @@ public static class CarryHold
             return a;
         float t = Mathf.Clamp((p - a).Dot(ab) / lenSq, 0f, 1f);
         return a + ab * t;
+    }
+
+    // --------------------------------------------- a held prop cannot shove the world hard
+
+    /// <summary>
+    /// <b>The fastest a held prop may be driven through the world</b>, m/s — twice the holder's
+    /// own top speed.
+    ///
+    /// <para><b>Why there is a cap at all.</b> Talon, 2026-09-20: <i>"I want to know objects
+    /// won't freak out and make other objects jump around randomly … if they accidentally hit a
+    /// bunch of boxes those should fall over like dominoes, cans should roll."</i> A spring that
+    /// is allowed to resolve a whole metre in one tick hands whatever it meets a 60 m/s impulse,
+    /// and the shelf goes across the room. Capping the STEP caps the energy a carry can ever
+    /// deposit, whatever the response dial is set to and whatever the frame time was.</para>
+    ///
+    /// <para><b>Twice the walk, and both halves of that matter.</b> Below the walk speed the hold
+    /// could not keep up with its own holder — the prop would trail further every tick and the
+    /// hold would break on a straight line. Much above it and the cap stops capping anything a
+    /// player can do on purpose. Two is the smallest multiple that leaves the scroll wheel and a
+    /// turn-on-the-spot room to resolve without the cap firing on ordinary play.</para>
+    /// </summary>
+    public static float MaxHoldSpeedMps(float topSpeedMps) => 2f * topSpeedMps;
+
+    /// <summary>One tick of hold motion, with <see cref="MaxHoldSpeedMps"/> applied: the step
+    /// keeps its direction and loses whatever length is past <c>maxSpeed × dt</c>. A SPEED rather
+    /// than a distance, so the bound is the same on a 30 Hz machine and a 240 Hz one.</summary>
+    public static Vector3 CapStep(Vector3 from, Vector3 to, float maxSpeedMps, float dt)
+    {
+        Vector3 step = to - from;
+        float limit = Mathf.Max(0f, maxSpeedMps) * Mathf.Max(0f, dt);
+        float len = step.Length();
+        return len <= limit || len < 1e-9f ? to : from + step * (limit / len);
     }
 
     // ------------------------------------------------------------------------------- the break

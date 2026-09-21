@@ -1216,15 +1216,35 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
             return;
         }
 
-        // The hand, not the body: "within reach of where I am holding it" is the rule the verb
-        // describes, and the hand is up to ~0.9 m in front of the body. GrabRangeTolerance is
-        // added for the identical reason it is added to the grab reach — the client measured
-        // against its PREDICTED body and the server is measuring against the authoritative one.
-        Vector3 hand = avatar is SandboxAvatar sa
-            ? sa.CarryAnchorGlobalTransform.Origin
+        // THE EYE, NOT THE CHEST (FEEL-1, 2026-09-20), and the allowance is DERIVED from how far
+        // the holder is allowed to hold the thing in the first place.
+        //
+        // The rule the verb describes has not changed -- "you may set it down where you are
+        // holding it" -- but where that is has. Until FEEL-1 a held prop rode a chest-height
+        // socket, so measuring 0.9 m from the carry anchor was measuring from the object. It now
+        // rides the VIEW RAY at a distance the wheel sets, up to CarryHold.HoldMaxBaseM from the
+        // eye, so the old anchor refuses perfectly honest placements: a player looking down to
+        // set a can on the floor at their feet is ~1.1 m from their own carry anchor and was
+        // denied TooFarToPlace. Measured against the eye, with the ceiling the hold itself
+        // enforces, "as far as you can hold it" and "as far as you can place it" are the same
+        // number by construction rather than by two constants agreeing.
+        //
+        // It is still a REACH and not telekinesis: the sender must already be within GrabRange of
+        // the prop (checked above), the prop's own bulk is the only thing added to the ceiling
+        // (the intended transform names the prop's ORIGIN, while the hold distance measures to
+        // the GRABBED POINT, which can be a bounding radius away from it), and
+        // GrabRangeTolerance is added for the identical reason it is added to the grab reach --
+        // the client measured against its PREDICTED body and the server against the
+        // authoritative one.
+        Vector3 eye = avatar is SandboxAvatar sa
+            ? sa.AimOriginGlobalPosition
             : avatar.GlobalPosition;
-        float placeReach = PlaceReachM + GrabRangeTolerance;
-        if (hand.DistanceSquaredTo(intended.Origin) > placeReach * placeReach)
+        float propRadius = node.Body.BoundingRadiusM;
+        float placeReach = Sandbox.Feel.CarryHold.HoldMaxM(
+            Sandbox.Feel.CarryHold.HoldMinM(
+                avatar is SandboxAvatar prop ? prop.Proportions.CapsuleRadiusM : 0f, propRadius))
+            + propRadius + GrabRangeTolerance;
+        if (eye.DistanceSquaredTo(intended.Origin) > placeReach * placeReach)
         {
             DenyPlace(peer, PlaceDenial.TooFarToPlace);
             return;
@@ -1468,12 +1488,19 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
                 }
                 if (holder != null)
                 {
-                    // The ONE peer whose local player is the holder carries the prop on the feel
-                    // system's spring; everybody else derives it from the holder's anchor exactly
-                    // as before (see NetworkedProp.BindToHolderSpring for why only the holder).
-                    // The host-as-player satisfies this too, which is deliberate: a host's hand is
-                    // not a lesser hand.
-                    node.BindToHolder(holder, springOnThisPeer: holderPeerId == Multiplayer.GetUniqueId());
+                    // The ONE peer whose local player is the holder carries the prop on the ray
+                    // hold (NetworkedProp.BindToHolderRayHold explains why only the holder); every
+                    // other peer holds it at the pose it had RELATIVE TO THE HOLDER at this
+                    // instant. The host-as-player satisfies this too, which is deliberate: a
+                    // host's hand is not a lesser hand.
+                    //
+                    // `transform` is the prop's pose at the grab and FEEL-1 is what made it load-
+                    // bearing on this arm: the Held case used to ignore it entirely, so every
+                    // non-holder peer had to invent a pose (the chest anchor) and disagreed with
+                    // the holder about where the object was. Passing the argument that was
+                    // already on the wire is the whole of that fix -- no new field, no bump.
+                    node.BindToHolder(holder, transform,
+                        springOnThisPeer: holderPeerId == Multiplayer.GetUniqueId());
                     // Telemetry (inert unless this is a real client session): count only THIS
                     // client's own confirmed grab, never a teammate's replicated one — this funnel
                     // runs on every peer via CallLocal, so gating on the local id is what keeps

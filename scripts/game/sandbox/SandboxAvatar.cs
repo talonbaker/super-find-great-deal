@@ -342,7 +342,8 @@ public partial class SandboxAvatar : CharacterBody3D, IServerConfirmedBody
     public IIntentSource? IntentSource
     {
         get => _intentSource;
-        set => _intentSource = value is { IsHumanInput: false } scripted
+        // A source that fills its own look is adopted as it is: see IIntentSource.SuppliesLook.
+        set => _intentSource = value is { IsHumanInput: false, SuppliesLook: false } scripted
             ? new TravelFacingIntentSource(scripted)
             : value;
     }
@@ -1271,6 +1272,14 @@ public partial class SandboxAvatar : CharacterBody3D, IServerConfirmedBody
             source = net.Options.AimScript
                 ? new ScriptedAimIntentSource(baseSource, net.Options.AimRaiseAtSec, net.Options.AimLowerAtSec)
                 : baseSource;
+            // FEEL-1: --hold-stress layers the carry-clip manoeuvre on top of whatever brain got
+            // the bot to its prop. Outermost, because it supplies its own look and the wrapper
+            // the IntentSource setter would otherwise apply fills AimYaw from the movement
+            // direction -- which would silently delete the 180s this brain exists to perform.
+            if (net.Options.HoldStress)
+                source = new HoldStressIntentSource(source,
+                    () => Props?.FindHeldBy(Multiplayer.GetUniqueId()) != null,
+                    GlobalRotation.Y);
             // Marketing/screenshot capture: a windowed bot with --spectate-cam gets a follow
             // camera so the roaming avatar renders a real gameplay view. View-only; the bot's
             // intent source above is unchanged. Headless CI never sets this.
@@ -1340,6 +1349,11 @@ public partial class SandboxAvatar : CharacterBody3D, IServerConfirmedBody
             // coupling CARRY-1's own header flagged for this merge, and it holds — measured, not
             // assumed: see docs/agents/handoffs/2026-09-19-INT-0.md.
             HeldPropRotator.Attach(this);
+            // ...and the wheel, which moves the held object forward and back in space (FEEL-1,
+            // Talon's ask). A sibling node rather than a branch inside the rotator, because it is
+            // NOT gated on the rotate modifier: the wheel means one thing whether or not the
+            // right button is down.
+            HoldDistanceController.Attach(this);
         }
         ConfigureAsNetworked(true, source);
     }
@@ -2750,22 +2764,24 @@ public partial class SandboxAvatar : CharacterBody3D, IServerConfirmedBody
                 NetworkedProp? held = Props.FindHeldBy(_ownerPeerId);
                 if (held == null)
                     return;
-                // PLACE vs DROP, and the difference is where you are looking.
+                // A CLICK WHILE HOLDING ALWAYS PLACES (FEEL-1, 2026-09-20). Talon's ruling, in
+                // his own words: the object is released "right where it is", because "that's why
+                // there's physics and collision on the objects" -- physics takes it from there.
                 //
-                //   aiming at a surface within reach -> PLACE: the object is set down exactly
-                //                                       where the spring is holding it, at the
-                //                                       orientation you turned it to, with no
-                //                                       velocity. This is the verb the hiding
-                //                                       game is built on.
-                //   nothing in front of you          -> DROP: the existing light toss off your
-                //                                       facing. "Get this out of my hands."
+                // This used to branch on whether the aim ray met a surface within
+                // PlaceAimProbeM: a surface meant PLACE (set it down exactly where the spring is
+                // holding it) and open air meant DROP (a light toss off your facing). The branch
+                // existed because a held prop collided with NOTHING, so "release it where it is"
+                // could leave a crate hanging inside a shelf -- the toss was how you got rid of
+                // something you could not legally set down. A held prop now keeps the world
+                // collision mask and is swept against it every tick, so where it IS is a legal
+                // place by construction, and the branch has nothing left to protect. One button,
+                // one meaning, which is also the whole of "don't press E to do anything".
                 //
-                // One key, and which meaning you get is legible before you press it, because it
-                // is the same thing your eyes are already doing.
-                if (AimedSurfaceWithinPlaceReach(held))
-                    Props.ClientRequestPlace(held.PropId, held.Body.GlobalTransform);
-                else
-                    Props.ClientRequestDrop();
+                // DROP is still on the wire and is still what a disconnect and a round reset use;
+                // THROW (Q) is still the "get this out of my hands" verb, and it is the one that
+                // deliberately loses the orientation you lined the object up in.
+                Props.ClientRequestPlace(held.PropId, held.Body.GlobalTransform);
             }
             else if (intent.Throw && Props.FindHeldBy(_ownerPeerId) != null)
             {
