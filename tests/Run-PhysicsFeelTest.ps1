@@ -63,25 +63,40 @@ $ErrorActionPreference = "Stop"
 # a pitch of 0.21 m leaves the gap the packet names and a falling box (0.28 m of reach) still
 # arrives at its neighbour.
 $BoxPitch = 0.21
-$BoxX0 = 42.00
+$BoxX0 = 42.30
 $BoxIds = 1..5                 # --seed-test-props assigns ids from 1 in seed order
 $RollCanId = 6
 
-# THE ROW STANDS AT SHELF HEIGHT, NOT ON THE FLOOR, and that is the fixture's most important
-# line. MEASURED on the first two runs: FEEL-1 holds a prop on the VIEW RAY, and a bot has no
-# pitch, so a carried crate rides at y 0.45-0.89 -- it passes clean OVER a row of cereal boxes
-# standing on the floor (centre 0.14, top 0.28) and cannot touch them however far it walks.
-# Talon's sentence is about a shelf in the first place ("if they're placing an object on a shelf
-# and accidentally hit a bunch of boxes"), so the fixture is the sentence.
+# THE ROW STANDS ON THE FLOOR AND THE MOVER IS THE PLAYER'S OWN BODY, and getting here took
+# three runs, each of which measured why the previous fixture could not work.
 #
-# A seeded prop is born RESTING = frozen kinematic, so it hangs at whatever height it is seeded
-# at until something wakes it -- which is exactly what a shelved prop IS in this game, and is why
-# no shelf geometry has to be found for it to stand on. When the crate knocks it, it wakes, falls
-# and topples, and bar (3)'s can gets the fall a can knocked off a shelf really has.
-$RowY = 0.62
+#  run 1/2  Row on the floor, knocked by the CARRIED CRATE. It never touched them: FEEL-1 holds a
+#           prop on the VIEW RAY and a bot has no pitch, so a carried crate rides at y 0.45-0.89
+#           and passes clean OVER a 0.28 m cereal box. "NONE of the 5 boxes tilted" was the suite
+#           correctly reporting that nothing had hit anything.
+#  run 3    Row hung at shelf height (0.62) so the crate WOULD reach it. It did -- four of the
+#           five were knocked off and the hold broke on the fifth, which is FEEL-1's break rule
+#           working. But they fell 0.62 m and LANDED UPRIGHT (y 0.13, standing), because a row
+#           with nothing under it cannot domino: a box knocked off a shelf falls straight down
+#           instead of toppling into its neighbour.
+#
+# A domino chain needs the row to stand ON something, so the first box goes OVER and its top
+# strikes the next. That is the floor, and the thing that can reach a row on the floor is the
+# avatar's own capsule -- which is P1's third mover and is exactly how a player knocks a low
+# shelf over in this game. The bot walks its own walkway straight through the row carrying its
+# crate; the crate is still in the run for bars 1 and 6.
+$RowY = 0.14                  # a cereal box's half-height: standing on the floor
 $CratePropPath = "SearchRoom/Prop_2"    # CARRY-1's crate at world (36, 0.22, -2)
 $RowZ = -2.0
-$CanX = 44.00
+# EAST OF THE SPAWN, and run 4 is why. PhysBot is pinned to SearchSpawn_3 at (41.5, -2.1) and its
+# first leg is WESTWARD, to the crate at x = 36; a row anywhere on that leg is knocked over on the
+# way out, twenty seconds before the carry that is supposed to knock it. Run 4 measured exactly
+# that -- the first box tilted at t = 2.40 s and bar (1) reported 0.248 m of movement "before
+# anything touched it", which was true of the crate and false of the bot's own shoulder.
+# Starting at 42.30 puts the whole fixture past the spawn (capsule radius ~0.36 m reaches 41.86),
+# so the outbound leg never sees it and the return leg walks the length of it.
+$CanY = 0.06                  # a can's half-height, on its end
+$CanX = 43.70
 
 # The search room is the supermarket seam's +40 x block. Anything outside this envelope has left
 # the room, which is the "cannot clip through walls or the floor" half of the bar.
@@ -94,7 +109,7 @@ for ($i = 0; $i -lt 5; $i++) {
     $x = [math]::Round($BoxX0 + $i * $BoxPitch, 2)
     $seed += "$x,$RowY,$RowZ,box"
 }
-$seed += "$CanX,$RowY,$RowZ,can"
+$seed += "$CanX,$CanY,$RowZ,can"
 $seedArg = ($seed -join ";")
 
 Write-Host "=== physics feel: dominoes fall, cans roll, nothing freaks out ===" -ForegroundColor White
@@ -339,14 +354,30 @@ foreach ($view in $views) {
 # the bar was correct about the number and wrong about the prop. The six seeded props are never
 # held and never thrown, so they are the population the "nothing gets flung" claim is about.
 $fixtureIds = @($BoxIds + $RollCanId)
-$fastest = 0.0; $fastestId = 0
+$fastest = 0.0; $fastestId = 0; $peakAny = 0.0
 foreach ($view in $views) {
     foreach ($s in $view.Samples) {
         foreach ($p in @($s.props)) {
             if ($fixtureIds -notcontains [int]$p.id) { continue }
             if ([int]$p.holder -ne 0) { continue }
             $spd = [double]$p.spd
-            if ($spd -gt $fastest) { $fastest = $spd; $fastestId = [int]$p.id }
+            if ($spd -gt $peakAny) { $peakAny = $spd }
+        }
+    }
+    # HORIZONTAL speed, from consecutive samples, because that is the component P2's clamp
+    # actually bounds. The logged `spd` is the whole magnitude and is dominated by the FALL for
+    # anything knocked off a surface -- run 3 reported 3.78 m/s for a box that had just dropped
+    # 0.62 m, which is 3.5 m/s of gravity and about 1.4 m/s of shove. Sampled at ~5 Hz this
+    # under-reads a peak, and it is the honest measure available without a new log field.
+    foreach ($id in $fixtureIds) {
+        $rows = @(Get-PropRows $view.Samples $id)
+        for ($i = 1; $i -lt $rows.Count; $i++) {
+            $dt = $rows[$i].T - $rows[$i - 1].T
+            if ($dt -le 0) { continue }
+            $dx = $rows[$i].X - $rows[$i - 1].X
+            $dz = $rows[$i].Z - $rows[$i - 1].Z
+            $h = [math]::Sqrt($dx * $dx + $dz * $dz) / $dt
+            if ($h -gt $fastest) { $fastest = $h; $fastestId = $id }
         }
     }
 }
@@ -354,10 +385,10 @@ $clampLines = @($serverText | Select-String -Pattern "^\[phys\] clamp ")
 $restoreLines = @($serverText | Select-String -Pattern "\[reach\] layer2 .*(RestoredLastGood|Stuck)")
 $waitLines = @($serverText | Select-String -Pattern "^\[phys\] rest-wait ")
 $wakeLines = @($serverText | Select-String -Pattern "^\[phys\] wake ")
-Write-Host ("        freakout: fastest unheld prop {0:F2} m/s (prop {1}, bar {2:F1}); {3} clamp line(s); {4} last-good restore(s); {5} rest-wait line(s); {6} wake(s)" -f `
-    $fastest, $fastestId, $MaxPropSpeed, $clampLines.Count, $restoreLines.Count, $waitLines.Count, $wakeLines.Count) -ForegroundColor DarkGray
+Write-Host ("        freakout: fastest unheld prop {0:F2} m/s HORIZONTAL (prop {1}, bar {2:F1}; peak total incl. fall {7:F2}); {3} clamp line(s); {4} last-good restore(s); {5} rest-wait line(s); {6} wake(s)" -f `
+    $fastest, $fastestId, $MaxPropSpeed, $clampLines.Count, $restoreLines.Count, $waitLines.Count, $wakeLines.Count, $peakAny) -ForegroundColor DarkGray
 if ($fastest -gt $MaxPropSpeed) {
-    $failures.Add(("prop $fastestId was seen at {0:F2} m/s with nobody holding it (bar {1:F1}) -- something flung it" -f $fastest, $MaxPropSpeed))
+    $failures.Add(("prop $fastestId was seen travelling {0:F2} m/s HORIZONTALLY with nobody holding it (bar {1:F1}) -- something flung it" -f $fastest, $MaxPropSpeed))
 }
 if ($clampLines.Count -gt $MaxClampLines) {
     $failures.Add("the per-tick clamp bit $($clampLines.Count) time(s) (bar $MaxClampLines) -- the solver is finding energy this packet did not hand it")
@@ -415,7 +446,7 @@ if ($escapes.Count -gt 0) {
 
 # Machine-readable evidence for the handoff and for whoever reads this next, printed
 # unconditionally so a green run still hands over its numbers (FEEL-1's LAGTABLE pattern).
-Write-Host ("PHYS1BARS restWorst={0:F4} fastestUnheld={1:F2} clamps={2} restores={3} wakes={4} waits={5}" -f `
+Write-Host ("PHYS1BARS restWorst={0:F4} fastestUnheldHoriz={1:F2} clamps={2} restores={3} wakes={4} waits={5}" -f `
     $restWorst, $fastest, $clampLines.Count, $restoreLines.Count, $wakeLines.Count, $waitLines.Count)
 
 Write-Host "[4/4] verdict" -ForegroundColor Cyan
