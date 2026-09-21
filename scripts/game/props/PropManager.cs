@@ -294,7 +294,22 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
         // is the common case, it keeps the prop where the player left it, and gating it would
         // regress the defect REACH-1 exists to fix. Only the LAST-GOOD RESTORE waits.
         if (IsRestore(audit.Outcome) && !MayRestoreNow(propId, node))
+        {
+            // BOOK THE COST EVEN THOUGH NOTHING MOVED. The shape queries were issued; leaving
+            // them off RestAuditCount/IntegrityQueryCount would quietly under-report REACH-1's
+            // "one shape query per settle event" costing, which is the number that exercise
+            // exists to protect. What is NOT booked is the CORRECTION: nothing was corrected,
+            // and a `[reach] layer2 ... RestoredLastGood` line for a prop that did not move
+            // would be a lie the next reader greps for.
+            BookAuditCost(propId, audit);
+            // And re-arm the settle counter so the retry is one per SettleTicks (~0.3 s) rather
+            // than one per TICK. Without this the counter stays at its latch value, this method
+            // is called sixty times a second for as long as the prop waits, and a prop a player
+            // is standing next to waits indefinitely by design -- so the gate would turn a rare
+            // correction into a permanent 60 Hz shape query.
+            _looseSettle[propId] = 0;
             return audit;
+        }
         ClearStuckClock(propId);
 
         NoteAudit(propId, audit);
@@ -495,14 +510,24 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
         target.WakeFromContactServer(impulse, atWorld);
     }
 
+    /// <summary>The half of <see cref="NoteAudit"/> that is about the QUERIES an audit issued
+    /// rather than about what it did — split out by PHYS-1 (2026-09-20) so a restore the P3 gate
+    /// refused still pays for the work it actually did. <see cref="LastAuditFor"/> is written here
+    /// too, deliberately: a prop the gate is waiting on is still in the bad pose, and the
+    /// Confirm-time precondition that reads it has to see that.</summary>
+    private void BookAuditCost(int propId, RestAudit.Result audit)
+    {
+        RestAuditCount++;
+        IntegrityQueryCount += audit.Queries;
+        _lastAudit[propId] = audit;
+    }
+
     /// <summary>Books one audit and logs the ones that acted. A passing audit is silent by
     /// design: 150 props settling after a shove would otherwise print 150 lines saying nothing
     /// happened, and the line that matters would be invisible inside them.</summary>
     private void NoteAudit(int propId, RestAudit.Result audit)
     {
-        RestAuditCount++;
-        IntegrityQueryCount += audit.Queries;
-        _lastAudit[propId] = audit;
+        BookAuditCost(propId, audit);
         if (!audit.Corrected)
             return;
         RestCorrectionCount++;
