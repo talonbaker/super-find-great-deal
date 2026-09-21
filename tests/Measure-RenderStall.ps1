@@ -224,8 +224,21 @@ try {
                         # verifying the wrong thing reads exactly like the feature not working.
                         $winPid = 0
                         [void][StallWin]::GetWindowThreadProcessId($hwnd, [ref]$winPid)
-                        $ok = ($fg -eq $winPid) -or ($treePids -contains $fg)
-                        $treePids = @($treePids + $winPid | Sort-Object -Unique)
+                        # RE-WALK THE TREE AT VERIFICATION TIME. The engine child is spawned by
+                        # the console wrapper AFTER the first walk and takes the foreground
+                        # itself, so the pid that ends up focused is routinely one this loop had
+                        # not seen when it raised a window -- measured twice on 2026-09-21, each
+                        # time printing NOT FOCUSED over a correctly focused window. Re-walking
+                        # here, and retrying for a few seconds, is what makes the label evidence.
+                        $ok = $false
+                        $vDeadline = (Get-Date).AddSeconds(8)
+                        while ($true) {
+                            $treePids = @(Get-ProcessTreePids $client.Id) + $winPid | Sort-Object -Unique
+                            $fg = Get-ForegroundPid
+                            if (($fg -eq $winPid) -or ($treePids -contains $fg)) { $ok = $true; break }
+                            if ((Get-Date) -ge $vDeadline) { break }
+                            Start-Sleep -Milliseconds 400
+                        }
                         # THE READ-BACK, NOT THE INTENT (Boot.cs's own rule for window mode).
                         # "We called SetForegroundWindow" and "the window has focus" are
                         # different claims and only the second one is evidence: Windows refuses
