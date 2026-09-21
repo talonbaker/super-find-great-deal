@@ -311,8 +311,22 @@ public partial class Gameplay : Node3D
         // round a reason the CI slab worlds could not boot.
         _hideSeekDriver = new Round.HideSeekDriver { Name = Round.HideSeekDriver.NodeName };
         AddChild(_hideSeekDriver);
-        _hideSeekDriver.Setup(net.Role == NetworkManager.SessionRole.Server,
-            _world as World.SupermarketWorld, _players, Round.HideSeekTuning.Current,
+        // SOLO-1: --solo rides in on the tuning rather than as a second argument, because the
+        // tuning is already the one object the driver, the copy and the board all read (MATCH-1's
+        // rule), and a session-shaped fact that lived anywhere else would be a second place to
+        // disagree about which session this is.
+        bool isServer = net.Role == NetworkManager.SessionRole.Server;
+        if (net.Options.Solo && !isServer)
+        {
+            // Loud rather than silent. The loop runs on the server only, so a tester who put the
+            // flag on their client gets a game that still refuses to start with one player and
+            // nothing anywhere saying why.
+            GD.PushWarning("[round] --solo was given to a CLIENT and does nothing there — "
+                           + "the round runs on the server, so put it on the server/host launch.");
+        }
+        _hideSeekDriver.Setup(isServer,
+            _world as World.SupermarketWorld, _players,
+            Round.HideSeekTuning.Current with { Solo = net.Options.Solo },
             net.Options.RoundScript);
         _hideSeekDriver.ResetRequested += OnRoundResetRequested;
 

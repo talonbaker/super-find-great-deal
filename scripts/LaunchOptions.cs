@@ -834,6 +834,27 @@ public sealed class LaunchOptions
     private readonly List<(string Verb, string Value, double AtSec)> _roundScript = new();
     // --- end ROUND-1 ------------------------------------------------------------------------------
 
+    // --- solo play for testing (SOLO-1, 2026-09-20) -----------------------------------------------
+    /// <summary>
+    /// <c>--solo</c>: <b>a DEV flag</b> (Talon 2026-09-20 — "I would like the ability to play the
+    /// game through, only for testing, with one player"). With it, a round may begin with ONE
+    /// human present and that peer holds both roles in sequence: it hides, confirms, is moved to
+    /// the search room as the seeker, finds its own object, and the burst fires into an empty task
+    /// room. Every edge of the loop runs; nothing is skipped.
+    ///
+    /// <para><b>It belongs on the SERVER.</b> <c>HideSeekLoop</c> runs there and nowhere else, so
+    /// the flag on a client changes nothing — <c>Gameplay</c> says so in a log line rather than
+    /// leaving a tester wondering why their solo game still says TWO PLAYERS ARE NEEDED TO START.
+    /// A listen-host is the server, so the one-process case is covered by the same sentence.</para>
+    ///
+    /// <para><b>With two or more players present it does nothing at all</b>, by construction: the
+    /// loop only deals one peer both slots when the roster holds exactly one. So a dev server left
+    /// with the flag on plays an ordinary two-player game the moment somebody joins, which is what
+    /// keeps this from being a mode.</para>
+    /// </summary>
+    public bool Solo { get; private set; }
+    // --- end SOLO-1 -------------------------------------------------------------------------------
+
     // --- the startle (DOOR-1, 2026-09-19) ---------------------------------------------------------
     /// <summary>
     /// <c>--startle-file &lt;path&gt;</c>: a JSON overlay on <c>StartleTuning</c>, so the burst
@@ -1812,6 +1833,12 @@ public sealed class LaunchOptions
                     options._roundScript.Sort((a, b) => a.AtSec.CompareTo(b.AtSec));
                     break;
                 }
+                // SOLO-1 (2026-09-20). A bare presence flag, for --log-clock's reason one case
+                // down: there is nothing to configure, and every "--x on|off" in this file exists
+                // only where a flag OVERRIDES a default that is already true.
+                case "--solo":
+                    options.Solo = true;
+                    break;
                 // CLOCK-1 (2026-09-19). A bare presence flag on purpose: it turns logging on and
                 // has nothing to configure, and every "--log-clock on|off" in this file exists
                 // only where a flag OVERRIDES a default that is already true.

@@ -1277,12 +1277,32 @@ that walk, and it is the only copy).
 | **7909** | **`Run-HoldingBoardTest.ps1`** (and `Capture-HoldingBoard.ps1`, unregistered) | **HOLD-1** |
 | **7910** | **`Walk-DefinitionOfDone.ps1`** (the §8 walk, unregistered and manual) | **INT-1** |
 | **7911** | **`Run-StockTest.ps1`** (and `Capture-ShopFloor.ps1`, unregistered) | **STOCK-1** |
-| **7912** | *assigned, SOLO-1* | **SOLO-1** |
+| **7912** | **`Run-SoloSmoke.ps1`** (and `Capture-SoloBoard.ps1`, unregistered) | **SOLO-1** |
 | **7913** | **`Run-CarryHoldTest.ps1`** (and `Capture-CarryHold.ps1`, unregistered) | **FEEL-1** (7912 was taken by a live SOLO-1 lane) |
 | **7914** | **`Measure-CameraPacing.ps1`** (unregistered) | **SICK-1** |
-| 7915 | *reserved, no suite -- ART-1 was assigned it and did not run* | *unused* |
-| **7916** | *assigned, PHYS-1* | **PHYS-1** |
+| 7915 | *reserved, unused* -- ART-1 was cancelled 2026-09-20 (Talon sources the art himself) | ART-1 |
+| **7916** | *assigned, suite not yet cut* | **PHYS-1** |
 | **7917** | **`Run-HandsSmoke.ps1`** | **HANDS-1** (assigned in the dispatch, not computed) |
+
+> **Updated by SOLO-1, 2026-09-20 — and THE "NEXT FREE" RULE IS RETIRED FOR THIS WAVE.** It
+> collided a seventh time while this very row was being written: SOLO-1 and FEEL-1 both read
+> "the next free number is 7912" out of this table and both bound it, minutes apart, in
+> worktrees neither could see. **The orchestrator has now assigned the whole RIDE-1 wave in
+> advance** — SOLO-1 **7912**, FEEL-1 **7913**, SICK-1 **7914**, ART-1 **7915**, PHYS-1 **7916**,
+> HANDS-1 **7917** — and those six rows are above whether or not the suite exists yet, because a
+> row that waits for the suite is exactly what makes the number look free.
+>
+> **Do not compute a port from a snapshot of `tests/` while a wave is live. Ask the
+> orchestrator.** That is what REACH-1, TASK-1, BTN-1, SHELF-1, HOLD-1 and STOCK-1 each wrote
+> down, and it is what finally became the standing rule here.
+>
+> **At the merge, KEEP BOTH rows** where two lanes each added their own: these six are one
+> assignment and a merge that took one branch's table drops the other five.
+>
+> **Hold `Enter-SuiteMutex` for the WHOLE of any run that binds a port** (orchestrator, 2026-09-20,
+> after FEEL-1 watched SOLO-1's server and bot come up as it started its own). Two Godot suites at
+> once is inside the two-launch cap and is not a defect; two suites racing for one socket is. Both
+> of SOLO-1's scripts take the lock before the first `Start-Process` and release it in `finally`.
 
 Everything below 7893 is the pre-fork ladder and is unchanged: 7777, 7778, 7788, 7799, 7807,
 7809/7810, 7815, 7816, 7817, 7818, 7821, 7822, 7830, 7831, 7834.
@@ -2146,3 +2166,69 @@ Two of this packet's own instruments were wrong before the feature was, and both
 stayed green under that plant** -- which is the useful half: the capsule projection and the world
 sweep are independent guarantees, so a single plant cannot flatter both, and a red in one says
 which mechanism moved.
+
+## SOLO-1 (2026-09-20): udp/7912, and a launch flag needs a CONTROL rather than an assertion
+
+`tests/Run-SoloSmoke.ps1` claims **udp/7912** and is registered last in `tests/Run-AllTests.ps1`;
+`tests/Capture-SoloBoard.ps1` is unregistered and manual on the same number, which is the pattern
+CLOCK-1 established and every lane since has followed. The row is in the one ladder table above.
+
+### A suite that proves a flag works must also run with the flag OFF
+
+`--solo` lets ONE player start a round. The obvious suite is "launch a server with `--solo`, launch
+one bot, assert the round ran" — and **that suite passes just as happily on a build whose
+two-player gate has simply stopped working.** It is the same shape as the absence-without-a-control
+failures this file already records twice (a headless probe measuring two rigs that correctly did
+nothing; `FootstepAudioTests`' positive control expiring when a constant moved), arriving through a
+launch flag instead.
+
+So `Run-SoloSmoke.ps1` is two server launches: the solo round, and then **the identical single bot
+with the flag removed, which must be refused `NeedTwoPlayers` and must not start a round.** The
+pass is a DIFFERENCE between the two halves rather than an absence in one. It also asserts the
+control server never logged `[round] DEV --solo armed`, which is what separates "the flag is off"
+from "the flag is on and leaking from a static".
+
+A third assertion in the same spirit and worth copying: **the solo half still requires a named
+refusal.** Its script presses Start with the hider's hands empty before pressing it properly, so a
+`--solo` that had relaxed the whole Holding branch rather than one condition goes red on
+`HiderMustHoldAnObject` being absent.
+
+### One peer holding two roles is a teleport hazard, not a scoring one
+
+The part of solo that no phase assertion can see: in a solo session the hider and the seeker are
+the same peer, so `HideSeekDriver`'s Seeking case decides TWO destinations for ONE body. The task
+move lands, the search move is refused inside `RoomTeleport`'s 800 ms per-peer cooldown, and the
+retry queue fetches the player back — **the only player in the game spends most of a second in the
+wrong room, with every phase, card and score assertion green throughout.** The driver skips the
+hider's move when `hider == seeker`, and the suite asserts the negative directly: **`task` is never
+among the rooms the server named.** Generalises to any driver that decides a move per ROLE rather
+than per BODY.
+
+### A test that compares against its own constant is satisfied by any value
+
+Measured while proving SOLO-1's tests could fail. The board's new WAITING cell is asserted in six
+places as `Assert.Equal(HoldingBoardModel.Waiting, cell)` — which is right for a structural check
+and **stayed green with the constant renamed to `"PLANTED"`.** Only the two tests that build the
+sentence out of it (`StatusLine`) noticed. `SoloRoundTests.AThirdPlayersRowReadsWaiting` now spells the
+literal word once, and that is the copy contract; everything else keeps
+using the constant. Same family as HOLD-1's "a guard can be protected by the KEY TYPE" entry
+above: **a mutation that only touches a name proves nothing about a value nobody wrote down.**
+
+### RULING: a round needs TWO ROLES FILLED, not exactly two bodies in the room
+
+**Superseded, 2026-09-20, on Talon's ruling — do not re-add it.** ROUND-1's Holding branch read
+`input.Humans.Length != 2` and refused a Start with "exactly two, not at least two". Talon:
+*"with two or more players, they can wait in the room."* So the gate now asks whether both role
+slots are filled and distinct (or the same peer under `--solo`), and a third or later body holds
+no role and waits.
+
+**What that cost, and what replaced it.** The old rule had a real suite consequence, written down
+in `Capture-HoldingBoard.ps1`'s own header: three windowed lenses in one room produced
+`[round] refused: NeedTwoPlayers - TWO PLAYERS ARE NEEDED TO START (phase=Holding humans=3)` and
+72 seconds of frames that all read HOLDING, and that script's conclusion — "a capture script for
+this game gets two windows, no more" — no longer follows. `NeedTwoPlayers` itself is NOT gone: it
+still fires for fewer than two, which is the case that matters. **The assertion that replaces the
+three-human refusal is the WAITING row**: `Run-HoldingBoardTest.ps1` asserts the third bot's own
+board row reads WAITING and that its START press comes back `NotInThisMatch`
+(measured 2026-09-20: 59 of 59 rows, 2 of 2 presses, 0 `TooFarAway`). A suite that finds a
+three-player Start refused is now reporting a REGRESSION, not a guard.

@@ -120,16 +120,26 @@ public class HideSeekLoopTests
         Assert.Equal(HideSeekRefusal.NeedTwoPlayers, s.Refusal);
     }
 
+    /// <summary>
+    /// <b>SUPERSEDED at SOLO-1 (2026-09-20), and the old assertion is stated here rather than
+    /// deleted quietly.</b> ROUND-1 refused this with <c>NeedTwoPlayers</c> on "exactly two, not
+    /// at least two". That rule cost the game a real behaviour: a third person standing in the
+    /// holding room stopped the round for the two who were playing, and HOLD-1's own capture
+    /// script hit it (72 s of frames all reading HOLDING). Talon's ruling is that they wait
+    /// instead — so the round runs for the two who hold the roles, and the pair is still exactly
+    /// two. <c>SoloRoundTests</c> carries the rest of the waiting-room behaviour.
+    /// </summary>
     [Fact]
-    public void Start_WithThreeHumans_IsAlsoRefused_NeedTwoPlayers()
+    public void Start_WithThreeHumans_RunsForTheTwoWhoHoldTheRoles()
     {
-        // "Exactly two", not "at least two" — the transport still accepts six.
         var three = new HideSeekInput { HumanPeerIds = ImmutableArray.Create(Host, Joiner, 33) };
         HideSeekState s = Tick(Fresh(), three);
         s = Tick(s, three with { HostPressedStart = true, HiderHeldRackProp = true });
 
-        Assert.Equal(HideSeekPhase.Holding, s.Phase);
-        Assert.Equal(HideSeekRefusal.NeedTwoPlayers, s.Refusal);
+        Assert.Equal(HideSeekPhase.Hiding, s.Phase);
+        Assert.Equal(HideSeekRefusal.None, s.Refusal);
+        Assert.Equal(Host, s.HiderPeerId);
+        Assert.Equal(Joiner, s.SeekerPeerId);
     }
 
     [Fact]

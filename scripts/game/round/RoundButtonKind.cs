@@ -88,4 +88,20 @@ public enum PressRefusal : byte
     /// <summary>The server's own reach re-check: the presser's authoritative body is further from
     /// the button than <c>RoundButton.PressRadiusM</c> plus the latency tolerance.</summary>
     TooFarAway = 7,
+
+    /// <summary>
+    /// <b>This player is in the room but not in this match</b> (SOLO-1, 2026-09-20; Talon: "with
+    /// two or more players, they can wait in the room"). A third or later joiner holds neither
+    /// role, so none of the three buttons is theirs to press.
+    ///
+    /// <para><b>It is the BUTTON's, and it is NOT mirrored into
+    /// <see cref="HideSeekRefusal"/></b> — which is the one thing about it worth a paragraph.
+    /// <c>HideSeekLoop</c> never learns who pressed (its <c>HostPressedStart</c> is an OR across
+    /// every fact source, deliberately), so the round could not produce this refusal even if it
+    /// had a name for it; and 5-7 above are already the button's own range, so a round refusal
+    /// numbered into it would be rendered by <see cref="HideSeekText.RefusalSentence"/> as one of
+    /// these sentences on any peer that read it off the wire. <c>SoloRoundTests</c> fences both
+    /// halves of that.</para>
+    /// </summary>
+    NotInThisMatch = 8,
 }

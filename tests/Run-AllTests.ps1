@@ -217,7 +217,19 @@ try {
         # .claude/rules/test-suite.md and not computed from a snapshot of tests/ (INT-0's
         # measured lesson). It takes part in the join-index spawn dealing, which is the other
         # reason it belongs at the end. About a minute.
-        @{ Name = "Stock: shop floor (STOCK-1)"; Script = "Run-StockTest.ps1" }
+        @{ Name = "Stock: shop floor (STOCK-1)"; Script = "Run-StockTest.ps1" },
+
+        # --- SOLO-1 (2026-09-20): one player runs the whole round ---
+        # Last, on the standing rule. TWO server launches on udp/7912 -- its own port, read off
+        # the one ladder table in .claude/rules/test-suite.md rather than computed from a snapshot
+        # of tests/ (INT-0's lesson, seventh application). About two and a half minutes.
+        #
+        # ONE BOT in the first launch and one in the second, which makes it the only suite in this
+        # registry that does not take part in the join-index spawn dealing at all -- and the
+        # second launch is a CONTROL: the same single bot with the flag OFF, which must be refused
+        # NeedTwoPlayers. Without that half, a build whose two-player gate had simply stopped
+        # working would pass the first half exactly as a correct one does.
+        @{ Name = "Round: solo play (SOLO-1)"; Script = "Run-SoloSmoke.ps1" }
 
         # FEEL-1 (2026-09-20), appended last on the same standing rule. A server and three bots
         # on udp/7913 -- 7912 was the ladder's next free number and a SOLO-1 lane in another

@@ -84,7 +84,7 @@ public static class HideSeekLoop
             s = s with { Refusal = HideSeekRefusal.None };
         s = s with { Tick = s.Tick + 1 };
 
-        s = FoldFacts(s, input);
+        s = FoldFacts(s, input, t);
 
         // A hider or a seeker who has left cannot be waited for: the other player would stand in
         // an empty room until a 180 s clock ran out. The round ends where it stands, the survivor
@@ -103,11 +103,21 @@ public static class HideSeekLoop
             {
                 if (!input.HostPressedStart)
                     return s;
-                // Exactly two, not at least two (program §1 item 5): one hider, one seeker. The
-                // transport still accepts six, so this is a refusal with a sentence on it rather
-                // than a cap somewhere in the net stack.
-                if (input.Humans.Length != 2 || s.HiderPeerId == 0 || s.SeekerPeerId == 0)
+                // THE ROUND NEEDS TWO ROLES FILLED, not a room with exactly two people in it
+                // (SOLO-1, Talon 2026-09-20). ROUND-1 read the roster length here — "exactly two,
+                // not at least two" — and the cost was that a THIRD body standing in the holding
+                // room refused the Start for the two who were playing, which is the opposite of
+                // "with two or more players, they can wait in the room". The pair is still
+                // exactly two; FoldFacts is where it is chosen, and everybody else waits.
+                //
+                // Under --solo one peer holds both slots, so hider == seeker is legal there and
+                // nowhere else: the same-id check is what keeps a one-player Start refused on
+                // every shipping launch.
+                if (s.HiderPeerId == 0 || s.SeekerPeerId == 0
+                    || (s.HiderPeerId == s.SeekerPeerId && !t.Solo))
+                {
                     return s with { Refusal = HideSeekRefusal.NeedTwoPlayers };
+                }
                 if (!input.HiderHeldRackProp)
                     return s with { Refusal = HideSeekRefusal.HiderMustHoldAnObject };
                 return EnterHiding(s, t);
@@ -206,6 +216,10 @@ public static class HideSeekLoop
     private static bool IsMidRound(HideSeekPhase phase) =>
         phase is HideSeekPhase.Hiding or HideSeekPhase.Seeking or HideSeekPhase.Together;
 
+    /// <summary>A role holder has gone. <b>Deliberately says nothing about the two ids being
+    /// DIFFERENT</b>: under <c>--solo</c> they are the same peer on purpose (SOLO-1), and an
+    /// invariant written as <c>hider != seeker</c> here would end every solo round on its first
+    /// tick, reported as a disconnect, with nobody having disconnected.</summary>
     private static bool RoleHolderMissing(in HideSeekState s, in HideSeekInput input)
     {
         ImmutableArray<int> humans = input.Humans;
@@ -217,7 +231,8 @@ public static class HideSeekLoop
     // Fact folding — absolute, before any transition is evaluated.
     // ---------------------------------------------------------------------------------------
 
-    private static HideSeekState FoldFacts(HideSeekState s, in HideSeekInput input)
+    private static HideSeekState FoldFacts(HideSeekState s, in HideSeekInput input,
+        in HideSeekTuning t)
     {
         ImmutableArray<int> humans = input.Humans;
 
@@ -237,14 +252,24 @@ public static class HideSeekLoop
         // on the tick after the swap and silently undo it — the same player would hide forever.
         if (s.Phase == HideSeekPhase.Holding)
         {
-            bool valid = hider != 0 && seeker != 0 && hider != seeker
-                && humans.Contains(hider) && humans.Contains(seeker);
+            // SOLO-1: with --solo and exactly one human here, one peer holding BOTH slots is the
+            // valid arrangement rather than a broken one — that is the whole solo model, and
+            // every other branch of this loop then runs untouched. It is gated on the roster
+            // length as well as on the flag so that the moment a second person arrives the pair
+            // below stops being valid and the ordinary two-player deal resumes by itself.
+            bool solo = t.Solo && humans.Length == 1;
+            bool valid = hider != 0 && humans.Contains(hider)
+                && (solo
+                    ? seeker == hider
+                    : seeker != 0 && seeker != hider && humans.Contains(seeker));
             if (!valid)
             {
                 // Program §1 item 5: first round the host hides, the second joiner seeks. The
-                // roster is in JOIN order, so that is just index 0 and index 1.
+                // roster is in JOIN order, so that is just index 0 and index 1 — and with three
+                // or more present that is also which two are IN this match; the rest hold no
+                // role, which is what the board reads as WAITING.
                 hider = humans.Length >= 1 ? humans[0] : 0;
-                seeker = humans.Length >= 2 ? humans[1] : 0;
+                seeker = humans.Length >= 2 ? humans[1] : (solo ? hider : 0);
             }
         }
 
