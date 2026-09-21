@@ -154,7 +154,20 @@ public static class NetProfile
     /// <c>PropReleaseWire.Decode</c> maps an unknown ordinal to <c>None</c> — silence, never a
     /// wrong sound — so a FUTURE peer that appends a fifth verb degrades quietly rather than
     /// playing the wrong material, and that is a property of the decoder rather than a reason to
-    /// skip a bump.</para></summary>
+    /// skip a bump.</para>
+    ///
+    /// <para><b>v16 still stands after the 2026-09-20 ride wave (INT-2, ruling 3).</b> SICK-1,
+    /// FEEL-1, HANDS-1 and SOLO-1 all merged without a bump, and each one is a decision rather
+    /// than an omission: FEEL-1's packet OFFERED it a bump to carry the grab offset and it
+    /// declined, because <c>ApplyPropState</c>'s <c>Held</c> broadcast has always carried the
+    /// prop's transform at the moment of the grab and the <c>Held</c> arm was simply discarding
+    /// it — the fix reads a field that was already on the wire. HANDS-1 is holder-side only and
+    /// puts nothing on any wire. SOLO-1's WAITING row is derived from the two role ids this
+    /// message already carries (<c>SoloRoundTests.AWaitingPlayerIsDerivedFromTheRolesAlreadyOnThe
+    /// Wire</c> pins that). SICK-1 changes when the eye is computed and nothing else. Verified at
+    /// the merge by diffing this file against all four branches: none of them touched it.
+    /// <b>The next lane that widens a message takes 17 and writes its paragraph here.</b></para>
+    /// </summary>
     public const int ProtocolVersion = 16;
 
     /// <summary>Steam lobby scope tag — keeps this title's room codes from colliding with any
