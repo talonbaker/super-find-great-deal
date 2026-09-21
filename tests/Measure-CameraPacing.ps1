@@ -53,9 +53,15 @@
 #>
 [CmdletBinding()]
 param(
-    # 7913. The ladder in tests/ runs ...7897 (FP-1), 7900 (DOOR-1), 7911 (STOCK-1); this
-    # continues it rather than re-using one, so a marathon and this can never share a socket.
-    [int]$Port = 7913,
+    # 7914, HANDED OUT BY THE ORCHESTRATOR (2026-09-20) rather than computed from the ladder in
+    # .claude/rules/test-suite.md. This lane first took 7913 off that table and it was FEEL-1's:
+    # the table is a snapshot, and two lanes computing "the next free port" from one snapshot pick
+    # the same number every time -- the failure this repo has now paid for four times (7896 x3,
+    # 7899 x2, 7912 x2, and this). The bind failure presents as "the server never reported
+    # listening within 30s", which is the same sentence a starved machine produces; the
+    # discriminator is `Couldn't create an ENet host` in the server's .err.log.
+    # Wave assignment: SOLO-1 7912, FEEL-1 7913, SICK-1 7914, ART-1 7915, PHYS-1 7916, HANDS-1 7917.
+    [int]$Port = 7914,
     [double]$DurationSec = 30,
     [double]$TurnDegPerSec = 45,
     [string[]]$Configs = @(
