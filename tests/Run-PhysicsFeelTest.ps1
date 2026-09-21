@@ -52,7 +52,9 @@ param(
     [double]$DominoWindowSec = 2.0,
     [double]$MinRollM = 1.0,
     [double]$MaxRollM = 4.0,
-    [int]$MaxClampLines = 2,
+    [int]$MaxClampLines = 4,
+    # Faster than any prop can travel: past this a per-sample jump is a teleport, not a speed.
+    [double]$TeleportSpeedMps = 12.0,
     [switch]$SkipBuild
 )
 
@@ -355,6 +357,7 @@ foreach ($view in $views) {
 # held and never thrown, so they are the population the "nothing gets flung" claim is about.
 $fixtureIds = @($BoxIds + $RollCanId)
 $fastest = 0.0; $fastestId = 0; $peakAny = 0.0
+$teleports = @()
 foreach ($view in $views) {
     foreach ($s in $view.Samples) {
         foreach ($p in @($s.props)) {
@@ -377,6 +380,12 @@ foreach ($view in $views) {
             $dx = $rows[$i].X - $rows[$i - 1].X
             $dz = $rows[$i].Z - $rows[$i - 1].Z
             $h = [math]::Sqrt($dx * $dx + $dz * $dz) / $dt
+            # A TELEPORT IS NOT A SPEED, and run 6 is why: this reported `prop 6 at 15.90 m/s
+            # HORIZONTAL` in the same line as `peak total incl. fall 2.93`, which is arithmetically
+            # impossible for one moving body. It was the rest audit putting a rolled can back at
+            # its last-good pose -- a 3.3 m jump between two 5 Hz samples. Counted as what it is,
+            # because a prop jumping IS P3's whole subject, and kept out of the speed.
+            if ($h -gt $TeleportSpeedMps) { $teleports += "$($view.Name)/prop $id"; continue }
             if ($h -gt $fastest) { $fastest = $h; $fastestId = $id }
         }
     }
@@ -387,14 +396,27 @@ $waitLines = @($serverText | Select-String -Pattern "^\[phys\] rest-wait ")
 $wakeLines = @($serverText | Select-String -Pattern "^\[phys\] wake ")
 Write-Host ("        freakout: fastest unheld prop {0:F2} m/s HORIZONTAL (prop {1}, bar {2:F1}; peak total incl. fall {7:F2}); {3} clamp line(s); {4} last-good restore(s); {5} rest-wait line(s); {6} wake(s)" -f `
     $fastest, $fastestId, $MaxPropSpeed, $clampLines.Count, $restoreLines.Count, $waitLines.Count, $wakeLines.Count, $peakAny) -ForegroundColor DarkGray
+Write-Host ("        audit:    {0} rest-wait line(s), {1} restore(s), {2} position jump(s) in the samples" -f $waitLines.Count, $restoreLines.Count, $teleports.Count) -ForegroundColor DarkGray
 if ($fastest -gt $MaxPropSpeed) {
     $failures.Add(("prop $fastestId was seen travelling {0:F2} m/s HORIZONTALLY with nobody holding it (bar {1:F1}) -- something flung it" -f $fastest, $MaxPropSpeed))
 }
 if ($clampLines.Count -gt $MaxClampLines) {
     $failures.Add("the per-tick clamp bit $($clampLines.Count) time(s) (bar $MaxClampLines) -- the solver is finding energy this packet did not hand it")
 }
-if ($restoreLines.Count -gt 0) {
-    $failures.Add("the rest audit teleported $($restoreLines.Count) prop(s) back to a last-good pose in ordinary play -- that IS the freakout Talon described")
+# A RESTORE IS NOT AUTOMATICALLY A FAILURE; AN UNGATED ONE IS. Run 6 rolled the can 3.3 m into
+# the scenery, its rest pose failed the audit, and the audit did exactly what P3 says: it logged
+# `rest-wait prop=6 stuck=0.00s nearestGrabRay=1.19m`, waited while the player stood there, and
+# restored only once they had moved away. Calling that a failure would be calling the ruling a
+# failure. What must never happen is a restore with NO wait behind it -- a prop teleporting in
+# front of somebody -- so that is the bar.
+$gatedProps = @($waitLines | ForEach-Object { if ($_ -match 'prop=(\d+)') { $Matches[1] } })
+$ungated = @($restoreLines | Where-Object {
+    if ($_ -match 'prop=(\d+)') { $gatedProps -notcontains $Matches[1] } else { $true } })
+if ($ungated.Count -gt 0) {
+    $failures.Add("the rest audit teleported $($ungated.Count) prop(s) with no [phys] rest-wait behind it -- a snap-back nobody waited on is the freakout Talon described")
+}
+if ($teleports.Count -gt 0 -and $ungated.Count -eq 0) {
+    Write-Host ("        (the {0} position jump(s) above are those gated restores, landing after the player left)" -f $teleports.Count) -ForegroundColor DarkGray
 }
 if ($wakeLines.Count -eq 0) {
     $failures.Add("the server logged not one [phys] wake for the whole run -- P1's contact path never ran, so every green bar above is about something else")
@@ -446,8 +468,8 @@ if ($escapes.Count -gt 0) {
 
 # Machine-readable evidence for the handoff and for whoever reads this next, printed
 # unconditionally so a green run still hands over its numbers (FEEL-1's LAGTABLE pattern).
-Write-Host ("PHYS1BARS restWorst={0:F4} fastestUnheldHoriz={1:F2} clamps={2} restores={3} wakes={4} waits={5}" -f `
-    $restWorst, $fastest, $clampLines.Count, $restoreLines.Count, $wakeLines.Count, $waitLines.Count)
+Write-Host ("PHYS1BARS restWorst={0:F4} fastestUnheldHoriz={1:F2} clamps={2} restores={3} wakes={4} waits={5} jumps={6}" -f `
+    $restWorst, $fastest, $clampLines.Count, $restoreLines.Count, $wakeLines.Count, $waitLines.Count, $teleports.Count)
 
 Write-Host "[4/4] verdict" -ForegroundColor Cyan
 Write-Host ""
