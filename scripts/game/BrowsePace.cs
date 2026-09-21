@@ -41,13 +41,41 @@ public static class BrowsePace
     /// <summary>The shipped top speed, m/s. See the class doc for the derivation.</summary>
     public const float DefaultWalkSpeedMps = 2.4f;
 
+    /// <summary><b>The ramp to top speed, m/s²</b> — 25, raised from the foundation's 9 by INT-2
+    /// (2026-09-20) on SICK-1's finding 2 and the orchestrator's ruling 4.
+    ///
+    /// <para><b>The defect was asymmetry, not speed.</b> SICK-1 measured this body as slow to
+    /// start and quick to stop: <c>MoveSpeed / Acceleration</c> = 3.8 / 9 = <b>0.42 s</b> to reach
+    /// speed against <c>MoveSpeed / Deceleration</c> = 3.8 / 21 = <b>0.18 s</b> to shed it, and a
+    /// body that takes more than twice as long to answer as it does to stop reads as heavier than
+    /// the player expects. At the browse pace the two are now 2.4 / 25 = <b>0.096 s</b> and
+    /// 2.4 / 21 = <b>0.114 s</b> — the ramp is inside the packet's 0.15 s bar and is, for the first
+    /// time, no slower than the stop.</para>
+    ///
+    /// <para><b>It is 25 and not "whatever makes 0.15 s", because the constant is not a function
+    /// of the top speed.</b> Solving 2.4 / a = 0.15 gives 16, which would put the ramp back over
+    /// the stop the moment <c>--walk-speed</c> moved. 25 holds the ordering across the whole
+    /// <c>SanitizeWalkSpeed</c> window: at the knob's own ceiling the ramp is still under a fifth
+    /// of a second.</para>
+    ///
+    /// <para><b>Why here and not in <see cref="MotorTuning.Default"/>.</b> Same reason the top
+    /// speed is here: 9 is MOVE-8's ruling, signed off at a keyboard, and the knob table pins it
+    /// to a sprint-ramp bracket of 7.855-15.75 measured at that value. Moving the default would
+    /// delete a record rather than tune this game, and 25 is outside that bracket by design — the
+    /// supermarket has no sprint at all. <c>Validate</c> passes it: the knob's own bounds are
+    /// [1, 40] and a pin is a statement about the DEFAULT, not a ceiling on what a game may
+    /// apply.</para></summary>
+    public const float BrowseAccelerationMps2 = 25f;
+
     /// <summary>The supermarket's body: the foundation's, with the top speed brought down to a
-    /// browse and sprint made a no-op. Two rows, and no third — the test asserts the whole record
-    /// rather than row by row so a quiet third edit is a red.</summary>
+    /// browse, sprint made a no-op and the ramp made symmetric with the stop. Three rows, and no
+    /// fourth — the test asserts the whole record rather than row by row so a quiet fourth edit
+    /// is a red.</summary>
     public static MotorTuning Tuning(float walkSpeedMps) => MotorTuning.Default with
     {
         MoveSpeed = walkSpeedMps,
         SprintMultiplier = 1f,
+        Acceleration = BrowseAccelerationMps2,
     };
 
     /// <summary>

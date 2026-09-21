@@ -22,16 +22,59 @@ namespace SailNet.Tests;
 public class BrowsePaceTests
 {
     [Fact]
-    public void TheBrowsePace_IsTheFoundationsBody_WithTwoRowsMoved()
+    public void TheBrowsePace_IsTheFoundationsBody_WithThreeRowsMoved()
     {
         MotorTuning browse = BrowsePace.Tuning(BrowsePace.DefaultWalkSpeedMps);
         MotorTuning baseline = MotorTuning.Default;
 
         Assert.Equal(BrowsePace.DefaultWalkSpeedMps, browse.MoveSpeed);
         Assert.Equal(1f, browse.SprintMultiplier);
+        Assert.Equal(BrowsePace.BrowseAccelerationMps2, browse.Acceleration);
         // Everything else is the foundation's, untouched — asserted as the whole record rather
-        // than row by row, so a future edit that quietly moves a third row is a red.
-        Assert.Equal(baseline with { MoveSpeed = browse.MoveSpeed, SprintMultiplier = 1f }, browse);
+        // than row by row, so a future edit that quietly moves a fourth row is a red.
+        Assert.Equal(
+            baseline with
+            {
+                MoveSpeed = browse.MoveSpeed,
+                SprintMultiplier = 1f,
+                Acceleration = BrowsePace.BrowseAccelerationMps2,
+            },
+            browse);
+    }
+
+    /// <summary>
+    /// INT-2 (2026-09-20), ruling 4, on SICK-1's finding 2: <b>the ramp to speed must not be
+    /// slower than the ramp to a stop.</b> SICK-1 measured 0.42 s to reach speed against 0.18 s to
+    /// shed it and called it "a body that is heavier than the player expects"; the packet's bar is
+    /// 0.15 s.
+    ///
+    /// <para>Asserted as the ORDERING as well as the bar, because the bar alone is satisfied by a
+    /// constant tuned for one top speed and <c>--walk-speed</c> moves the top speed. Both ends of
+    /// the override window are checked for that reason.</para>
+    /// </summary>
+    [Theory]
+    [InlineData(2.0f)]
+    [InlineData(2.4f)]
+    [InlineData(2.5f)]
+    public void TheRampToSpeed_IsUnderTheBar_AndNeverSlowerThanTheStop(float walkSpeedMps)
+    {
+        MotorTuning browse = BrowsePace.Tuning(walkSpeedMps);
+        float rampSec = walkSpeedMps / browse.Acceleration;
+        float stopSec = walkSpeedMps / browse.Deceleration;
+
+        Assert.True(rampSec <= 0.15f, $"ramp to speed is {rampSec:F3} s, bar 0.15 s");
+        Assert.True(rampSec <= stopSec,
+            $"ramp {rampSec:F3} s must not be slower than the stop {stopSec:F3} s");
+    }
+
+    /// <summary>The ramp is raised on THIS GAME's tuning and the foundation's signed-off row is
+    /// untouched — MOVE-8's ruling, pinned in the knob table to a sprint-ramp bracket measured at
+    /// 9. A red here means somebody moved the default instead of the game's body.</summary>
+    [Fact]
+    public void TheFoundationsOwnRamp_IsUnmoved()
+    {
+        Assert.Equal(9f, MotorTuning.Default.Acceleration);
+        Assert.NotEqual(MotorTuning.Default.Acceleration, BrowsePace.BrowseAccelerationMps2);
     }
 
     [Fact]
