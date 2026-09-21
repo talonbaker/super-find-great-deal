@@ -57,7 +57,21 @@ param(
     # Don't raise this without re-reading that table: above ~0.48 the ball outruns the bot and the
     # race comes back. Don't drop it far below either, or the ball settles before the bot arrives and
     # the Loose->Held path this suite exists to prove goes untested ("ball had already settled").
-    [double]$ThrowScale = 0.35,
+    #
+    # RE-DERIVED BY FEEL-1 (2026-09-20), 0.35 -> 0.23, because the table above is a RATIO and its
+    # denominator moved. Every line of it is written against "the bot walks ~3.6 m/s"; Talon's
+    # ruling of 2026-09-20 brought the walk down to 2.4 m/s (MpFoundation.Game.BrowsePace) and
+    # deleted sprint, so 0.35 x 7.5 = 2.6 m/s -- which that table calls "slower than the bot from
+    # the first frame" -- became FASTER than the bot, and the race the table exists to abolish
+    # came straight back. Measured, three standalone runs on an idle machine, all three red with
+    # the documented staging string and the bot stranded at (7.28, 7.17) while the ball rolled on
+    # to x = 10.59 and was still rolling when the run ended.
+    #
+    # 0.23 keeps the ratio the table chose rather than picking a new number: 0.35 x (2.4 / 3.6).
+    # The ball leaves at ~1.7 m/s against a 2.4 m/s walk, so the gap only ever closes, which is
+    # the property the whole table is about. <b>Read the ratio, not the constant</b>, if the walk
+    # speed moves again.
+    [double]$ThrowScale = 0.23,
     [switch]$SkipBuild
 )
 
@@ -65,7 +79,19 @@ $ErrorActionPreference = "Stop"
 . "$PSScriptRoot\_Common.ps1"
 
 $BallId = 2 # Ball at (-2.5, 0.5, -2.5) in the propsync roster (PropManager.SpawnInitialProps)
-$HoldRadius = 1.6 # carry anchor sits ~0.5m from avatar centre; generous for lerp lag
+# How far a held ball may sit from its holder's avatar, metres.
+#
+# RE-DERIVED BY FEEL-1 (2026-09-20), 1.6 -> 2.0, for the reason written out in full at
+# Run-CarryNetTest's copy of this same constant: a held prop no longer rides a carry anchor
+# ~0.5 m from the avatar's centre, it rides the VIEW RAY up to CarryHold.HoldMaxBaseM (1.2 m)
+# from an eye at AvatarProportions.PlayerEyeHeightM (0.995 m), so sqrt(1.2^2 + 0.995^2) = 1.56 m
+# is the geometric maximum before the spring has lagged at all. The marathon measured 1.60 m and
+# reported it 80 times -- the bar being wrong rather than the carry being wrong, and the suite
+# passed 3/3 standalone only because 1.60 sits exactly ON the old bar.
+#
+# What this assertion is FOR is unchanged and 2.0 m still catches it: the drift this suite was
+# written for left the ball metres behind its holder and growing.
+$HoldRadius = 2.0
 
 Write-Host "=== regrab: loose->held second-pickup drift regression test ===" -ForegroundColor White
 if (-not $SkipBuild) {

@@ -1004,6 +1004,32 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
         RpcId(1, MethodName.RequestDrop);
     }
 
+    /// <summary>
+    /// Networked client: <b>let go of what this peer is holding, exactly where it is</b>, at rest
+    /// (FEEL-1, 2026-09-20). The hold-break path and nothing else.
+    ///
+    /// <para><b>Why it is neither of the two verbs that already exist.</b> A PLACE can be refused
+    /// — the prop is wedged in whatever stopped it, so placement integrity answers
+    /// <c>Overlapping</c> — which would leave the player holding something the game has decided
+    /// they have lost, and would spend the refusal channel the HUD and three suites read on an
+    /// event nobody asked for. A DROP cannot be refused but applies a toss arc off the holder's
+    /// facing (<see cref="DropForwardSpeed"/> / <see cref="DropUpSpeed"/>), which would FLING the
+    /// object the world just took off you. Where it is, at rest, is the honest outcome: the world
+    /// has it now, and physics takes it from there.</para>
+    ///
+    /// <para><b>A new method, not a changed one</b>, so no <c>ProtocolVersion</c> bump: no
+    /// existing message shape moves and no argument count changes. It rides the same reliable
+    /// channel as the other carry verbs, and a peer of a different build never reaches it —
+    /// mixed versions are refused at the handshake, which is what that gate is for.</para>
+    /// </summary>
+    public void ClientRequestReleaseInPlace()
+    {
+        // Counted as a drop, like a place is: the telemetry column has always meant "the player
+        // stopped carrying something".
+        Telemetry.Telemetry.Instance?.NotePropDropped();
+        RpcId(1, MethodName.RequestReleaseInPlace);
+    }
+
     /// <summary>Networked client: ask the server to throw whatever this peer holds. No local
     /// effect until the server confirms with <see cref="ApplyPropState"/> — throw is
     /// server-confirmed, not predicted, consistent with grab and drop.</summary>
@@ -1094,7 +1120,15 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
             DenyGrab(peer, GrabDenial.Taken); // someone else won the race
             return;
         }
-        Rpc(MethodName.ApplyPropState, propId, (int)PropMode.Held, peer, node.GlobalTransform, (int)PropRelease.None);
+        // node.BODY's transform, not the node's (FEEL-1, 2026-09-20). A NetworkedProp NODE is
+        // placed once at spawn and never moves again -- the physical Carryable child is what
+        // travels, which is why PropManager reads WorldPosition => Body.GlobalPosition
+        // everywhere else. This argument was DISCARDED by ApplyPropState's Held arm until FEEL-1
+        // made it the pose every non-holder peer carries the prop at, so the staleness was
+        // invisible and is now load-bearing. Measured: a witness watching a regrab saw the ball
+        // teleport to its SPAWN corner on the grab and then trail its holder by five metres for
+        // the rest of the run (Run-RegrabTest, "held ball 5.52m from holder").
+        Rpc(MethodName.ApplyPropState, propId, (int)PropMode.Held, peer, node.Body.GlobalTransform, (int)PropRelease.None);
     }
 
     /// <summary>
@@ -1147,6 +1181,23 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
     /// tumbles and settles like the offline path and the server's loose loop (see
     /// _PhysicsProcess) latches it to Resting once it stops moving. No-op if the hand is
     /// empty.</summary>
+    /// <summary>Client -> server: release the sender's held prop where it is, at rest. See
+    /// <see cref="ClientRequestReleaseInPlace"/> for why this is not the drop verb. Same sender
+    /// validation and the same <see cref="ControlDenied"/> gate as every other carry verb.</summary>
+    [Rpc(MultiplayerApi.RpcMode.AnyPeer, TransferMode = MultiplayerPeer.TransferModeEnum.Reliable)]
+    private void RequestReleaseInPlace()
+    {
+        if (!_isServer)
+            return;
+        int peer = Multiplayer.GetRemoteSenderId();
+        if (peer <= 0 || ControlDenied(peer))
+            return;
+        // Zero forward, zero up: Loose exactly where the body already is. PropRelease.Dropped is
+        // the verb on the wire -- the sound a released object makes is the same one whether the
+        // player let go or the world took it, and there is no fifth ordinal worth spending.
+        ReleaseHeldInto(peer, 0f, 0f, PropRelease.Dropped);
+    }
+
     [Rpc(MultiplayerApi.RpcMode.AnyPeer, TransferMode = MultiplayerPeer.TransferModeEnum.Reliable)]
     private void RequestDrop()
     {
@@ -1216,15 +1267,35 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
             return;
         }
 
-        // The hand, not the body: "within reach of where I am holding it" is the rule the verb
-        // describes, and the hand is up to ~0.9 m in front of the body. GrabRangeTolerance is
-        // added for the identical reason it is added to the grab reach — the client measured
-        // against its PREDICTED body and the server is measuring against the authoritative one.
-        Vector3 hand = avatar is SandboxAvatar sa
-            ? sa.CarryAnchorGlobalTransform.Origin
+        // THE EYE, NOT THE CHEST (FEEL-1, 2026-09-20), and the allowance is DERIVED from how far
+        // the holder is allowed to hold the thing in the first place.
+        //
+        // The rule the verb describes has not changed -- "you may set it down where you are
+        // holding it" -- but where that is has. Until FEEL-1 a held prop rode a chest-height
+        // socket, so measuring 0.9 m from the carry anchor was measuring from the object. It now
+        // rides the VIEW RAY at a distance the wheel sets, up to CarryHold.HoldMaxBaseM from the
+        // eye, so the old anchor refuses perfectly honest placements: a player looking down to
+        // set a can on the floor at their feet is ~1.1 m from their own carry anchor and was
+        // denied TooFarToPlace. Measured against the eye, with the ceiling the hold itself
+        // enforces, "as far as you can hold it" and "as far as you can place it" are the same
+        // number by construction rather than by two constants agreeing.
+        //
+        // It is still a REACH and not telekinesis: the sender must already be within GrabRange of
+        // the prop (checked above), the prop's own bulk is the only thing added to the ceiling
+        // (the intended transform names the prop's ORIGIN, while the hold distance measures to
+        // the GRABBED POINT, which can be a bounding radius away from it), and
+        // GrabRangeTolerance is added for the identical reason it is added to the grab reach --
+        // the client measured against its PREDICTED body and the server against the
+        // authoritative one.
+        Vector3 eye = avatar is SandboxAvatar sa
+            ? sa.AimOriginGlobalPosition
             : avatar.GlobalPosition;
-        float placeReach = PlaceReachM + GrabRangeTolerance;
-        if (hand.DistanceSquaredTo(intended.Origin) > placeReach * placeReach)
+        float propRadius = node.Body.BoundingRadiusM;
+        float placeReach = Sandbox.Feel.CarryHold.HoldMaxM(
+            Sandbox.Feel.CarryHold.HoldMinM(
+                avatar is SandboxAvatar prop ? prop.Proportions.CapsuleRadiusM : 0f, propRadius))
+            + propRadius + GrabRangeTolerance;
+        if (eye.DistanceSquaredTo(intended.Origin) > placeReach * placeReach)
         {
             DenyPlace(peer, PlaceDenial.TooFarToPlace);
             return;
@@ -1468,12 +1539,19 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
                 }
                 if (holder != null)
                 {
-                    // The ONE peer whose local player is the holder carries the prop on the feel
-                    // system's spring; everybody else derives it from the holder's anchor exactly
-                    // as before (see NetworkedProp.BindToHolderSpring for why only the holder).
-                    // The host-as-player satisfies this too, which is deliberate: a host's hand is
-                    // not a lesser hand.
-                    node.BindToHolder(holder, springOnThisPeer: holderPeerId == Multiplayer.GetUniqueId());
+                    // The ONE peer whose local player is the holder carries the prop on the ray
+                    // hold (NetworkedProp.BindToHolderRayHold explains why only the holder); every
+                    // other peer holds it at the pose it had RELATIVE TO THE HOLDER at this
+                    // instant. The host-as-player satisfies this too, which is deliberate: a
+                    // host's hand is not a lesser hand.
+                    //
+                    // `transform` is the prop's pose at the grab and FEEL-1 is what made it load-
+                    // bearing on this arm: the Held case used to ignore it entirely, so every
+                    // non-holder peer had to invent a pose (the chest anchor) and disagreed with
+                    // the holder about where the object was. Passing the argument that was
+                    // already on the wire is the whole of that fix -- no new field, no bump.
+                    node.BindToHolder(holder, transform,
+                        springOnThisPeer: holderPeerId == Multiplayer.GetUniqueId());
                     // Telemetry (inert unless this is a real client session): count only THIS
                     // client's own confirmed grab, never a teammate's replicated one — this funnel
                     // runs on every peer via CallLocal, so gating on the local id is what keeps
@@ -1882,7 +1960,8 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
             return;
         if (!_registry.SetHolder(propId, peerId))
             return;
-        Rpc(MethodName.ApplyPropState, propId, (int)PropMode.Held, peerId, node.GlobalTransform,
+        // node.Body's transform, not the node's -- see the note at the live-grab broadcast.
+        Rpc(MethodName.ApplyPropState, propId, (int)PropMode.Held, peerId, node.Body.GlobalTransform,
             (int)PropRelease.None);
     }
 

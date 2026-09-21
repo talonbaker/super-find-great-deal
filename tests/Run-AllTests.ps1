@@ -219,6 +219,16 @@ try {
         # reason it belongs at the end. About a minute.
         @{ Name = "Stock: shop floor (STOCK-1)"; Script = "Run-StockTest.ps1" }
 
+        # FEEL-1 (2026-09-20), appended last on the same standing rule. A server and three bots
+        # on udp/7913 -- 7912 was the ladder's next free number and a SOLO-1 lane in another
+        # worktree was already bound to it when this suite first ran (INT-0's measured lesson,
+        # a fourth time; see this suite's own header and the ladder table). It is the gate on
+        # Talon's number-one complaint after his first ride: a held prop is never inside the
+        # person carrying it, the world stops it instead of letting it pass through, and it
+        # cannot fling anything. It takes part in the join-index spawn dealing, which is the
+        # other reason it belongs at the end. About half a minute.
+        @{ Name = "Carry: hold (FEEL-1)"; Script = "Run-CarryHoldTest.ps1" }
+
         # WHAT WAS REMOVED HERE AT THE FORK (BASE-1, 2026-09-19), so a reader of an old handoff
         # can tell "deleted" from "lost": the bubble-test world, the shared bubble counter and the
         # last-bubble celebration, the TV portal, the Puffin Lab, the watcher's night gate, the

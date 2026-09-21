@@ -417,6 +417,29 @@ public sealed class LaunchOptions
     public IReadOnlyList<(int PropId, int BinSlot)> SortScript => _sortScript;
     private readonly List<(int PropId, int BinSlot)> _sortScript = new();
 
+    /// <summary>--hold-notches &lt;n&gt;: once this bot is holding something, roll the hold
+    /// distance by n wheel notches (positive = further out) and stop. Capture-only -- a bot has
+    /// no mouse -- and it goes through <c>NetworkedProp.ScrollHold</c>, the same method the
+    /// wheel calls. 0 (the default) does nothing.</summary>
+    public int HoldNotches { get; private set; }
+
+    /// <summary>--hold-stress: once this bot is holding something, run
+    /// <c>HoldStressIntentSource</c>'s loop — forward, backward, strafe both ways, two 180s — for
+    /// the rest of the run instead of whatever walk the carry script had left (FEEL-1,
+    /// 2026-09-20). Off by default, so every existing carry suite's pacing is unchanged.</summary>
+    public bool HoldStress { get; private set; }
+
+    /// <summary>--walk-speed &lt;m/s&gt;: this process's top ground speed, overriding
+    /// <c>BrowsePace.DefaultWalkSpeedMps</c> (FEEL-1, 2026-09-20).
+    ///
+    /// <para><b>It is a MOTOR constant, so a session must give every process the same one.</b>
+    /// The owner predicts with it and the server judges with it; two peers holding different
+    /// values disagree about where a body is, which is a desync rather than a difference of
+    /// opinion. A value the knob table would refuse falls back to the shipped default rather
+    /// than being clamped — see <c>BrowsePace.SanitizeWalkSpeed</c> for why refusing is the safe
+    /// direction. Negative (the default) means "the shipped browse pace".</para></summary>
+    public float WalkSpeedMps { get; private set; } = -1f;
+
     /// <summary>--carry-grab-retry &lt;sec&gt;: re-fire a scripted bot's FIRST grab on this cadence
     /// until it is actually holding something. Negative (the default) = the original one-shot
     /// press, so every existing carry suite's pacing is byte-for-byte unchanged.
@@ -1547,6 +1570,17 @@ public sealed class LaunchOptions
                 // the game owns; a display name belongs to whoever typed it.
                 case "--spawn-index":
                     options.SpawnIndexSpec = Next(args, ref i).Trim();
+                    break;
+                case "--hold-notches":
+                    if (int.TryParse(Next(args, ref i), NumberStyles.Integer, CultureInfo.InvariantCulture, out int notches))
+                        options.HoldNotches = notches;
+                    break;
+                case "--hold-stress":
+                    options.HoldStress = true;
+                    break;
+                case "--walk-speed":
+                    if (float.TryParse(Next(args, ref i), NumberStyles.Float, CultureInfo.InvariantCulture, out float walkSpeed))
+                        options.WalkSpeedMps = walkSpeed;
                     break;
                 case "--carry-grab-retry":
                     if (double.TryParse(Next(args, ref i), NumberStyles.Float, CultureInfo.InvariantCulture, out double grabRetry))

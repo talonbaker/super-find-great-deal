@@ -187,20 +187,55 @@ try {
         "--log", $cLog, "--duration", $DurationSec, "--world", "supermarket",
         "--carry-script", "36,0.22,2,1.0,-1", "--carry-grab-retry", "0.6",
         "--carry-target-prop", $PropC,
-        "--carry-walk-to", "46,2.5",
+        # 44.9, NOT the pillar's own centre (FEEL-1, 2026-09-20). A held prop now collides with
+        # the world and is given up if the world holds it off its target for 0.3 s, so a bot that
+        # walks AT the pillar with a crate in front of it loses the crate before its scripted
+        # place ever fires -- measured, one `[carry] hold broken prop=1015 blocked=0.78m` line in
+        # placeC.out.log, and the suite then reported a refusal ordinal of 0 and a prop with no
+        # holder. Standing 0.6 m short of the pillar's -X face leaves the crate clear of it while
+        # the intended transform (the pillar's centre, 1.1 m from the eye) is still well inside
+        # the place reach, so the OVERLAP refusal this phase exists for is what answers.
+        "--carry-walk-to", "44.9,2.5",
         "--carry-place", "46,1,2.5,0,7") "placeC"
     $procs += $botC
     Start-Sleep -Milliseconds 400
 
     # D: through the +X wall. The room's RoomBounds volume ends at world x = 47; a 0.44 m crate
     # centred at 47.35 has every corner past it, so the bounds test refuses before the overlap
-    # test is ever reached — which is the ordering this suite is also pinning.
+    # test is ever reached — which is the ordering this suite is also pinning. (The WALK moved onto the
+    # z = -2.1 walkway at FEEL-1 so the crate is not scraped off along the way; the TARGET stays at
+    # z = -3, because at z = -2.1 it lands inside the wall and the OVERLAP test answers first --
+    # measured, ordinal 4 where this phase exists to see ordinal 5, which is the very ordering it
+    # is pinning.)
     $dLog = Join-Path $script:LogDir "placeD.jsonl"
     $botD = Start-Godot @("--bot", "--address", "127.0.0.1:$Port", "--name", "PlaceBotD",
         "--log", $dLog, "--duration", $DurationSec, "--world", "supermarket",
         "--carry-script", "36,0.22,-2,1.0,-1", "--carry-grab-retry", "0.6",
         "--carry-target-prop", $PropD,
-        "--carry-walk-to", "47,-3",
+        # 45.9 rather than 47, for the reason bot C's walk-to carries in full: a held crate
+        # shoved into the +X wall is given up before the place fires. The intended transform
+        # (47.35, past the room's x = 47 bound) is 1.45 m from the eye, inside the place reach, so
+        # the BOUNDS refusal is still what answers and the ordering this phase pins is unchanged.
+        # z = -2.1, D'S OWN WALKWAY, not z = -3 (FEEL-1, 2026-09-20). HOLD-1's rule -- "walk a
+        # bot along its own walkway, never diagonally" -- has teeth now that a held prop collides
+        # with the world: measured, the crate caught an aisle bay at (39.21, -2.47) while the bot
+        # walked the z = -2.75 diagonal toward -3, the hold was blocked for 0.3 s and given up,
+        # and the bot arrived at its waypoint empty-handed 11 m later. The walkways are at
+        # z = -4.2, -2.1, 0, +2.1, +4.2 and the bays between them; the target moves onto the same
+        # line so the approach is straight down it.
+        #
+        # x = 46.6 rather than 45.4 because ScriptedCarryIntentSource stops 1.2 m SHORT of its
+        # waypoint (ArriveRadius), so the bot comes to rest around x = 45.4 and its eye is then
+        # 1.95 m from the intended transform -- inside the place reach. Aimed AT 45.4 it stopped
+        # at 44.2 and the place was refused TooFarToPlace (ordinal 3) instead of OutsideRoom.
+        "--carry-walk-to", "46.6,-2.1",
+        # Tucked in close for the walk (FEEL-1). --hold-notches rolls the hold distance down to
+        # the band's floor through NetworkedProp.ScrollHold, the same method the wheel calls, so
+        # the crate rides at its minimum safe distance instead of 1.2 m out in front. Eleven
+        # metres down a walkway STOCK-1 filled with floor bins and pallet stacks is exactly the
+        # journey a colliding carry makes difficult, and holding it close is what a player would
+        # do. It is staging, not a bar: the refusal this phase asserts is unaffected.
+        "--hold-notches", "-9",
         "--carry-place", "47.35,1,-3,0,7") "placeD"
     $procs += $botD
 

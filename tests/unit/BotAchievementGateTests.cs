@@ -78,6 +78,10 @@ public class BotAchievementGateTests
         // reaches the profile.
         Assert.False(new TravelFacingIntentSource(new ScriptedDouble()).IsHumanInput);
         Assert.True(new TravelFacingIntentSource(new HumanDouble()).IsHumanInput);
+        // FEEL-1's decorator, same rule: it is only ever given a scripted brain, and it says so
+        // by forwarding rather than by hardcoding false.
+        Assert.False(new HoldStressIntentSource(new ScriptedDouble(), () => false, 0f).IsHumanInput);
+        Assert.True(new HoldStressIntentSource(new HumanDouble(), () => false, 0f).IsHumanInput);
 
         Type[] implementers = typeof(IIntentSource).Assembly
             .GetTypes()
@@ -101,6 +105,12 @@ public class BotAchievementGateTests
             new[]
             {
                 nameof(FirstPersonIntentSource),    // the human source this game ships (FP-1)
+                // FEEL-1's hold-stress brain (2026-09-20) declares IsHumanInput because it is
+                // also a DECORATOR -- it wraps whatever brain walked the bot to its prop -- and
+                // the rule this test enforces is that a decorator must FORWARD rather than
+                // default. It is scripted, so it forwards false, which the instance assertion
+                // below pins the same way the travel-facing one is pinned above.
+                nameof(HoldStressIntentSource),
                 nameof(LocalInputIntentSource),     // the third-person source the dev harnesses keep
                 nameof(TravelFacingIntentSource),   // a decorator: forwards, asserted above
             },

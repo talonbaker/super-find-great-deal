@@ -85,22 +85,16 @@ internal sealed class HumanInputSampler
     /// doctored value can claim is "full stick", which is what holding a key already claims.</para></summary>
     private float _analog;
 
-    /// <summary>BT-7: the double-tap-to-sprint detector. It owns no input of its own — it is fed
-    /// the four <c>move_*</c> levels <see cref="Sample"/> already samples, and its output is
-    /// ORed into the sprint intent. See <see cref="DoubleTapSprint"/> for the state machine and
-    /// for why this costs the protocol nothing.</summary>
-    private readonly DoubleTapSprint _doubleTapSprint = new();
 
     public MoveIntent Sample(ILookAngles look, double delta)
     {
         if (Input.MouseMode != Input.MouseModeEnum.Captured)
         {
             // Release the virtual stick too, or the first frame after a menu closes asks for the
-            // speed the player was travelling at when they opened it. Same reasoning drops the
-            // double-tap latch (BT-7): a sprint that survives a pause menu is a player walking
-            // into a lake while reading a settings screen.
+            // speed the player was travelling at when they opened it. (BT-7's double-tap sprint
+            // latch used to be reset here for the same reason; FEEL-1 removed the latch with the
+            // sprint gear itself — see the note in Sample below.)
             _analog = 0f;
-            _doubleTapSprint.Reset();
             return MoveIntent.None; // mouse released = UI focus, same rule as Player.cs
         }
 
@@ -108,11 +102,15 @@ internal sealed class HumanInputSampler
         float deflection = Mathf.Min(1f, input.Length());
         string walkAction = LocalInputIntentSource.WalkActionName;
         bool walking = InputMap.HasAction(walkAction) && Input.IsActionPressed(walkAction);
-        // BT-7: double-tapping a direction latches sprint, exactly as holding Shift does. Fed the
-        // levels, not the edges — the detector finds its own edges (see DoubleTapSprint).
-        bool doubleTapSprint = _doubleTapSprint.Update(
-            Input.IsActionPressed("move_forward"), Input.IsActionPressed("move_back"),
-            Input.IsActionPressed("move_left"), Input.IsActionPressed("move_right"), (float)delta);
+        // SPRINT IS NOT SAMPLED AT ALL (FEEL-1, 2026-09-20). Talon: "no sprint button; they
+        // won't be moving far enough for it to matter". The `sprint` action is gone from
+        // project.godot, so Input.IsActionPressed("sprint") would push an "unknown action" error
+        // every tick rather than return false — an unbound action and a deleted one are different
+        // things to Godot. BT-7's double-tap latch goes with it for the same reason it existed:
+        // it was a second way to ask for a gear this game no longer has, and leaving the detector
+        // running would keep a hidden sprint state alive on the input side while
+        // BrowsePace.Tuning made it a no-op on the motor side. The DoubleTapSprint TYPE stays —
+        // it is pure, tested, and the next game off this foundation may want it.
 
         // THE GEARS, on the input side. A pad's deflection passes straight through, so the stick
         // maps onto the gears continuously; a keyboard's hard 1.0 is ramped through the virtual
@@ -153,7 +151,10 @@ internal sealed class HumanInputSampler
             // BT-7 ORs the double-tap in HERE, inside the walk-modifier's veto rather than beside
             // it: the gear decision above is about what speed is being asked for, not about which
             // key asked, so a player holding Ctrl gets a walk whichever way they requested sprint.
-            Sprint = (Input.IsActionPressed("sprint") || doubleTapSprint) && !walking,
+            // Always false: see the note above the sampler. Kept as an explicit assignment
+            // rather than dropped from the initialiser so the row is visibly ruled rather than
+            // forgotten.
+            Sprint = false,
             // Aim substrate (WP-L3): "aim" held (right mouse button — project.godot) drives the
             // shared raise-to-aim rig unconditionally; a verb that wants "only while equipped"
             // gates its OWN consumption of it (see MoveIntent.AimRaise's doc comment). Yaw/pitch
