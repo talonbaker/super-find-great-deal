@@ -450,6 +450,16 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
     /// only a counter can support; the suite reads it and the server prints it.</summary>
     public long PropClampCount { get; private set; }
 
+    /// <summary>When each prop was last woken by a contact, in engine milliseconds — the storm
+    /// guard's whole state. Never pruned: one entry per prop that has ever been knocked, which is
+    /// bounded by the world's prop count.</summary>
+    private readonly System.Collections.Generic.Dictionary<int, ulong> _lastWokeMsec = new();
+
+    /// <summary>How long after a wake the same prop refuses another. 800 ms — comfortably past
+    /// the settle latch's ~0.3 s, so a body somebody is leaning on cannot wake-settle-wake, and
+    /// comfortably under the gap between two separate events in a collapse.</summary>
+    private const ulong WakeCooldownMsec = 800;
+
     /// <summary>How many resting props have been woken by a contact this session (P1). Read at
     /// rest by the suite: a wake storm in an untouched room would be 0 here and must stay 0.</summary>
     public long PropWakeCount { get; private set; }
@@ -483,6 +493,23 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
             return;
         if (!_registry.TryGet(target.PropId, out PropState s) || s.Mode != PropMode.Resting)
             return;
+
+        // A SUSTAINED PRESS IS ONE CONTACT, NOT ONE PER SETTLE, and the first live run of
+        // Run-PhysicsFeelTest is why this exists. A bot walked into a crate and stopped there --
+        // SHELF-1 measured that a CharacterBody3D cannot push a RigidBody3D, so it simply leans
+        // on it -- and the server logged NINETY-SEVEN wakes for that one crate over forty
+        // seconds: wake, settle 0.3 s later, wake again, forever. That is a wake storm against
+        // P1's own bar ("0 wakes over 30 s untouched"), it re-zeroes the prop's velocity every
+        // time round (RejoinPhysicsSilently), and it spends a broadcast on each one.
+        //
+        // The cooldown is longer than the settle latch (SettleTicks, ~0.3 s) on purpose: a prop
+        // that has settled and is STILL being leaned on must not immediately re-wake, while a
+        // genuine second hit -- a rolled can arriving at a stack a second after the first one --
+        // is well clear of it.
+        ulong now = Time.GetTicksMsec();
+        if (_lastWokeMsec.TryGetValue(target.PropId, out ulong wokeAt) && now - wokeAt < WakeCooldownMsec)
+            return;
+        _lastWokeMsec[target.PropId] = now;
 
         float targetMass = struck.MassKg > 0f ? struck.MassKg : 1f;
         Vector3 impulse = PropPhysics.ContactImpulse(pushDirection, moverMassKg, targetMass,

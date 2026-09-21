@@ -61,13 +61,27 @@ $ErrorActionPreference = "Stop"
 
 # The row: five boxes, 2 cm of air between them. A cereal box is 0.19 m wide and 0.28 m tall, so
 # a pitch of 0.21 m leaves the gap the packet names and a falling box (0.28 m of reach) still
-# arrives at its neighbour. y = 0.14 stands it on the floor.
+# arrives at its neighbour.
 $BoxPitch = 0.21
 $BoxX0 = 42.00
 $BoxIds = 1..5                 # --seed-test-props assigns ids from 1 in seed order
 $RollCanId = 6
-$CratePropPath = "SearchRoom/Prop_0"    # CARRY-1's crate at world (36, 0.22, 0)
-$CanX = 44.50
+
+# THE ROW STANDS AT SHELF HEIGHT, NOT ON THE FLOOR, and that is the fixture's most important
+# line. MEASURED on the first two runs: FEEL-1 holds a prop on the VIEW RAY, and a bot has no
+# pitch, so a carried crate rides at y 0.45-0.89 -- it passes clean OVER a row of cereal boxes
+# standing on the floor (centre 0.14, top 0.28) and cannot touch them however far it walks.
+# Talon's sentence is about a shelf in the first place ("if they're placing an object on a shelf
+# and accidentally hit a bunch of boxes"), so the fixture is the sentence.
+#
+# A seeded prop is born RESTING = frozen kinematic, so it hangs at whatever height it is seeded
+# at until something wakes it -- which is exactly what a shelved prop IS in this game, and is why
+# no shelf geometry has to be found for it to stand on. When the crate knocks it, it wakes, falls
+# and topples, and bar (3)'s can gets the fall a can knocked off a shelf really has.
+$RowY = 0.62
+$CratePropPath = "SearchRoom/Prop_2"    # CARRY-1's crate at world (36, 0.22, -2)
+$RowZ = -2.0
+$CanX = 44.00
 
 # The search room is the supermarket seam's +40 x block. Anything outside this envelope has left
 # the room, which is the "cannot clip through walls or the floor" half of the bar.
@@ -78,9 +92,9 @@ $RoomMinY = -0.5; $RoomMaxY = 6.0
 $seed = @()
 for ($i = 0; $i -lt 5; $i++) {
     $x = [math]::Round($BoxX0 + $i * $BoxPitch, 2)
-    $seed += "$x,0.14,0,box"
+    $seed += "$x,$RowY,$RowZ,box"
 }
-$seed += "$CanX,0.06,0,can"
+$seed += "$CanX,$RowY,$RowZ,can"
 $seedArg = ($seed -join ";")
 
 Write-Host "=== physics feel: dominoes fall, cans roll, nothing freaks out ===" -ForegroundColor White
@@ -97,7 +111,7 @@ try {
     $serverOut = Join-Path $script:LogDir "physfeel.server.out.log"
     $server = Start-Godot @("--server", "--port", $Port, "--world", "supermarket",
         "--spawn-room", "search",
-        "--spawn-index", "PhysBot=0,WitnessBot=3",
+        "--spawn-index", "PhysBot=3,WitnessBot=1",
         "--seed-test-props", $seedArg) "physfeel.server"
     $procs += $server
     if (-not (Wait-ForLogLine $serverOut "\[server\] listening" 40)) {
@@ -106,14 +120,21 @@ try {
     if (-not (Wait-ForLogLine $serverOut "seed-test-props: seeded 6 test prop" 20)) {
         Write-Fail "the server did not seed all six fixture props; see $serverOut"
     }
-    Write-Host "        server up (pid $($server.Id)), row at x=$BoxX0..$([math]::Round($BoxX0 + 4 * $BoxPitch,2)) z=0, can at x=$CanX"
+    Write-Host "        server up (pid $($server.Id)), row at x=$BoxX0..$([math]::Round($BoxX0 + 4 * $BoxPitch,2)) z=$RowZ y=$RowY, can at x=$CanX"
 
     $CrateProp = Get-AuthoredPropId $serverOut $CratePropPath
     Write-Host "        the carried crate is authored prop $CrateProp (from the server's adoption log)"
 
     Write-Host "[2/4] launching the driver and the witness..." -ForegroundColor Cyan
 
-    # PhysBot: walk to CARRY-1's crate at (36, 0.22, 0) and then STAND THERE FOR TWENTY SECONDS
+    # THE z = -2 WALKWAY, and not the z = 0 one, because CARRY-1's authored crate Prop_3 stands
+    # at (38, 0.22, 0) and SHELF-1 measured that a CharacterBody3D does not push a RigidBody3D.
+    # The bot leaned on it for the whole of two runs at x = 37.70 and never reached the row --
+    # which is a real finding about the level and about P1's limits (see the handoff), and is a
+    # terrible place to stage a measurement about something else. Nothing stands between x = 36
+    # and x = 45 at z = -2: the floor bins are at world x 33.6 / 46.4.
+    #
+    # PhysBot: walk to CARRY-1's crate at (36, 0.22, -2) and then STAND THERE FOR TWENTY SECONDS
     # before grabbing it, which is how bar (1) gets a real untouched window. The packet asks for
     # thirty seconds of a row standing still; twenty is what fits beside the event in one run,
     # and the measurement is the same measurement.
@@ -125,9 +146,9 @@ try {
     $physLog = Join-Path $script:LogDir "physfeel.phys.jsonl"
     $physBot = Start-Godot @("--bot", "--address", "127.0.0.1:$Port", "--name", "PhysBot",
         "--log", $physLog, "--duration", $DurationSec, "--world", "supermarket",
-        "--carry-script", "36,0.22,0,20.0,-1,30", "--carry-grab-retry", "0.6",
+        "--carry-script", "36,0.22,-2,20.0,-1,30", "--carry-grab-retry", "0.6",
         "--carry-target-prop", $CrateProp,
-        "--carry-walk-to", "45.2,0") "physfeel.phys"
+        "--carry-walk-to", "45.2,-2") "physfeel.phys"
     $procs += $physBot
     Start-Sleep -Milliseconds 400
 
