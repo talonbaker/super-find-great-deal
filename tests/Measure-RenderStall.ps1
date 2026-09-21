@@ -83,8 +83,50 @@ public class StallWin {
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll")] public static extern int GetWindowThreadProcessId(IntPtr h, out int pid);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr h, System.Text.StringBuilder s, int max);
+  public delegate bool EnumProc(IntPtr h, IntPtr p);
+  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb, IntPtr p);
+  // THE WINDOW IS NOT THE PROCESS WE STARTED. tests/_Common.ps1 resolves Godot to the _console
+  // wrapper, which spawns the real engine as a CHILD (the wrapper plus its child are ONE Godot
+  // launch, not two). So Process.MainWindowHandle on the object Start-Process returns is always
+  // zero, which is exactly how the first attempt at -Foreground silently measured three
+  // UNFOCUSED rows and labelled them focused. Enumerate every visible top-level window instead
+  // and take the one whose owning pid is in the given set.
+  public static IntPtr FindWindowForPids(int[] pids) {
+    IntPtr found = IntPtr.Zero;
+    EnumWindows(delegate(IntPtr h, IntPtr p) {
+      if (!IsWindowVisible(h)) return true;
+      int wpid; GetWindowThreadProcessId(h, out wpid);
+      foreach (int want in pids) {
+        if (wpid == want) {
+          var sb = new System.Text.StringBuilder(256);
+          GetClassName(h, sb, sb.Capacity);
+          // Godot's game window class is "Engine"; the wrapper's console is "ConsoleWindowClass".
+          if (sb.ToString() != "ConsoleWindowClass") { found = h; return false; }
+        }
+      }
+      return true;
+    }, IntPtr.Zero);
+    return found;
+  }
 }
 "@
+}
+
+# Every pid in the launched process's tree, so the wrapper's engine child is reachable.
+function Get-ProcessTreePids([int]$RootPid) {
+    $all = @($RootPid)
+    $frontier = @($RootPid)
+    while ($frontier.Count -gt 0) {
+        $kids = @(Get-CimInstance Win32_Process -Filter ("ParentProcessId=" + ($frontier -join " OR ParentProcessId=")) -ErrorAction SilentlyContinue |
+                  ForEach-Object { [int]$_.ProcessId })
+        $kids = @($kids | Where-Object { $all -notcontains $_ })
+        if ($kids.Count -eq 0) { break }
+        $all += $kids
+        $frontier = $kids
+    }
+    return $all
 }
 
 function Get-ForegroundPid {
@@ -155,25 +197,33 @@ try {
                 Write-Host "        client up (pid $($client.Id))"
 
                 if ($Foreground) {
-                    # The window does not exist the instant the process does; wait for a handle,
-                    # then raise it. SW_RESTORE first, because a window that opened minimised
-                    # cannot be brought forward.
+                    # The window does not exist the instant the process does; wait for one to
+                    # appear anywhere in the launched tree, then raise it. SW_RESTORE first,
+                    # because a window that opened minimised cannot be brought forward.
+                    $hwnd = [IntPtr]::Zero
+                    $treePids = @()
                     $deadline = (Get-Date).AddSeconds(30)
                     while ((Get-Date) -lt $deadline) {
-                        $client.Refresh()
-                        if ($client.MainWindowHandle -ne [IntPtr]::Zero) { break }
-                        Start-Sleep -Milliseconds 200
+                        $treePids = Get-ProcessTreePids $client.Id
+                        $hwnd = [StallWin]::FindWindowForPids([int[]]$treePids)
+                        if ($hwnd -ne [IntPtr]::Zero) { break }
+                        Start-Sleep -Milliseconds 300
                     }
-                    if ($client.MainWindowHandle -ne [IntPtr]::Zero) {
-                        [void][StallWin]::ShowWindow($client.MainWindowHandle, 9)
-                        [void][StallWin]::SetForegroundWindow($client.MainWindowHandle)
-                        Start-Sleep -Milliseconds 500
+                    if ($hwnd -ne [IntPtr]::Zero) {
+                        [void][StallWin]::ShowWindow($hwnd, 9)
+                        [void][StallWin]::SetForegroundWindow($hwnd)
+                        Start-Sleep -Milliseconds 700
                         $fg = Get-ForegroundPid
-                        Write-Host ("        foreground pid now {0} (client {1}) -- {2}" -f `
-                            $fg, $client.Id, $(if ($fg -eq $client.Id) { "FOCUSED" } else { "NOT focused" })) `
-                            -ForegroundColor $(if ($fg -eq $client.Id) { "Green" } else { "Yellow" })
+                        $ok = $treePids -contains $fg
+                        # THE READ-BACK, NOT THE INTENT (Boot.cs's own rule for window mode).
+                        # "We called SetForegroundWindow" and "the window has focus" are
+                        # different claims and only the second one is evidence: Windows refuses
+                        # the call outright when the caller does not own the foreground.
+                        Write-Host ("        foreground pid now {0}, launched tree {1} -- {2}" -f `
+                            $fg, ($treePids -join ","), $(if ($ok) { "FOCUSED" } else { "NOT FOCUSED" })) `
+                            -ForegroundColor $(if ($ok) { "Green" } else { "Red" })
                     } else {
-                        Write-Host "        no main window handle within 30s -- row is UNFOCUSED" -ForegroundColor Yellow
+                        Write-Host "        no game window in the launched tree within 30s -- row is UNFOCUSED" -ForegroundColor Red
                     }
                 }
 
