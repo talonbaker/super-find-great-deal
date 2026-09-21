@@ -458,11 +458,20 @@ public sealed class LaunchOptions
     public double SeedPropsDropAtSec { get; private set; } = -1;
 
     /// <summary>
-    /// <c>--phys-shove "propId,vx,vy,vz,atSec[;propId,vx,vy,vz,atSec...]"</c>: server-only,
-    /// test-only. <b>A shove the SUITE chooses</b> (PHYS-2, 2026-09-20). That many seconds into
-    /// the session, put prop <c>propId</c> into Loose with velocity <c>(vx, vy, vz)</c> through
-    /// REACH-1's existing <c>PropManager.ServerNudgeLoose</c> — the same registry transition, the
-    /// same broadcast, no second physics path.
+    /// <c>--phys-shove "propId,vx,vy,vz,atSec[,wx,wy,wz][;...]"</c>: server-only, test-only.
+    /// <b>A shove the SUITE chooses</b> (PHYS-2, 2026-09-20). That many seconds into the session,
+    /// put prop <c>propId</c> into Loose with velocity <c>(vx, vy, vz)</c> and angular velocity
+    /// <c>(wx, wy, wz)</c> — zero when omitted — through REACH-1's existing
+    /// <c>PropManager.ServerNudgeLoose</c>: the same registry transition, the same broadcast, no
+    /// second physics path.
+    ///
+    /// <para><b>The SPIN is part of the shove and is not a convenience.</b> The release funnel
+    /// this goes through draws a random tumble of +/-2 rad/s on every axis, which is half of what
+    /// it takes to put a cereal box over — a fixture that let it draw would have a tidy number
+    /// written beside a coin flip. And a can standing on its end does not roll when you push it:
+    /// at tin's 0.25 friction the tipping condition is 0.25 &gt; r/h = 0.58, which is false, so it
+    /// SKIDS — 0.20 m from 1 m/s against a 1 m bar. A rolling can is a can lying on its side, and
+    /// the only way to put one there deterministically is to say so.</para>
     ///
     /// <para><b>Why it exists, measured.</b> <c>Run-PhysicsFeelTest</c> staged its domino row by
     /// walking a bot into it, and PHYS-1 measured the bot delivering peak shoves of <b>0.66, 0.70,
@@ -483,9 +492,15 @@ public sealed class LaunchOptions
     /// <para>An entry with a malformed number or fewer than five fields is DROPPED, by
     /// <c>--seed-test-props</c>' own rule: a shove silently defaulted to zero is a fixture that
     /// stages nothing, and the suite would then report a physics failure about its own
-    /// arguments.</para></summary>
-    public IReadOnlyList<(int PropId, Vector3 Velocity, double AtSec)> PhysShoves => _physShoves;
-    private readonly List<(int PropId, Vector3 Velocity, double AtSec)> _physShoves = new();
+    /// arguments. A malformed or partial SPIN is dropped the same way rather than half-read.</para>
+    ///
+    /// <para>The same prop may appear twice: <c>PropManager.StepPhysShove</c> keys its
+    /// fired-once set on the ENTRY INDEX, so "lay the can on its side, then roll it" is two
+    /// entries and not two flags.</para></summary>
+    public IReadOnlyList<(int PropId, Vector3 Velocity, Vector3 Angular, double AtSec)> PhysShoves
+        => _physShoves;
+    private readonly List<(int PropId, Vector3 Velocity, Vector3 Angular, double AtSec)> _physShoves
+        = new();
 
     /// <summary>--log-sfx: print one <c>[sfx] sfx &lt;name&gt; event=... intensity=... at (...)</c>
     /// line per sound <c>ActorFx</c> actually plays, plus one
@@ -1575,8 +1590,23 @@ public sealed class LaunchOptions
                         {
                             continue;
                         }
+                        // The spin is all three components or none: a partial one is a typo, and
+                        // a typo that quietly became (wx, 0, 0) would stage a different physical
+                        // event under the same command line.
+                        var spin = Vector3.Zero;
+                        if (parts.Length >= 6)
+                        {
+                            if (parts.Length < 8
+                                || !double.TryParse(parts[5], NumberStyles.Float, CultureInfo.InvariantCulture, out double swx)
+                                || !double.TryParse(parts[6], NumberStyles.Float, CultureInfo.InvariantCulture, out double swy)
+                                || !double.TryParse(parts[7], NumberStyles.Float, CultureInfo.InvariantCulture, out double swz))
+                            {
+                                continue;
+                            }
+                            spin = new Vector3((float)swx, (float)swy, (float)swz);
+                        }
                         options._physShoves.Add((shoveId,
-                            new Vector3((float)svx, (float)svy, (float)svz), shoveAt));
+                            new Vector3((float)svx, (float)svy, (float)svz), spin, shoveAt));
                     }
                     break;
                 }

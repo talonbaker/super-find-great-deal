@@ -72,9 +72,19 @@ param(
     # at 1 m/s on the floor travels at least 1 m".
     [double]$RowShoveMps = 2.8,
     [double]$CanShoveMps = 1.0,
+    # THE CAN IS LAID ON ITS SIDE FIRST, AND THAT IS PHYSICS RATHER THAN CONVENIENCE. A can
+    # standing on its end does not roll when you push it: tipping needs friction > r/h_com =
+    # 0.035/0.06 = 0.58 and tin's is 0.25, so it SKIDS -- mu*g = 2.45 m/s^2, i.e. 0.20 m from
+    # 1 m/s against a 1 m bar. --seed-test-props spawns a code-built can upright and carries no
+    # rotation, so the only deterministic way to get a can onto its side is to say so.
+    #
+    # A spin about +X maps the can's +Y axis onto +Z, which is the orientation a can rolling
+    # along X has to have. 6 rad/s carries the 90 degrees in about 0.26 s.
+    [double]$CanLayRadPerSec = 6.0,
     # On the SERVER's clock (the same one --seed-props-drop uses), which leads every bot's by the
     # connect delay. Nothing below correlates the two: see bar (1).
     [double]$RowShoveAtSec = 40,
+    [double]$CanLayAtSec = 44,
     [double]$CanShoveAtSec = 48,
     # How long the row must stand still before the suite strikes it, in the BOT's own clock. The
     # packet asks for thirty seconds; the schedule above buys between twenty-five and thirty-five
@@ -110,7 +120,7 @@ $ShovedBoxId = 1               # the head of the row: the one prop the SUITE mov
 # What the suite gives up by doing this, stated rather than smuggled: the HELD-CRATE and AVATAR
 # arms of P1's wake no longer appear in these bars. They are covered by PropPhysicsTests branch
 # by branch, and PHYS-1's runs 4-7 measured both live (4/5 and 5/5 with the bot's own capsule,
-# recorded in its handoff §6). What these bars now measure is the part that was never repeatable:
+# recorded in its handoff section 6). What these bars now measure is the part that was never repeatable:
 # a known shove in, a five-box chain and a rolling can out.
 #
 # The three earlier fixtures, each of which measured why it could not work:
@@ -164,9 +174,17 @@ for ($i = 0; $i -lt 5; $i++) {
 $seed += "$CanX,$CanY,$RowZ,can"
 $seedArg = ($seed -join ";")
 
-# The two events this run stages, as numbers rather than as a bot's walk. Both are EAST (+x):
-# the row's head into the rest of the row, and the can down the open cross-aisle.
-$shoveArg = "$ShovedBoxId,$RowShoveMps,0,0,$RowShoveAtSec;$RollCanId,$CanShoveMps,0,0,$CanShoveAtSec"
+# The three events this run stages, as numbers rather than as a bot's walk:
+#   1. the row's head, shoved EAST into the rest of the row;
+#   2. the can, tipped onto its side (no velocity, spin about +X only) -- see $CanLayRadPerSec;
+#   3. the can, rolled EAST down the open cross-aisle at the packet's own 1 m/s.
+# The spin on (3) is pure rolling for a 0.035 m radius: v = omega x r, so omega_z = -v/r. Getting
+# it wrong costs a few centimetres of skid and friction then sorts it out; getting it ABSENT
+# costs the whole bar, because a can pushed without spin slides.
+$RollRadPerSec = [math]::Round(-$CanShoveMps / 0.035, 2)
+$shoveArg = ("$ShovedBoxId,$RowShoveMps,0,0,$RowShoveAtSec;" +
+             "$RollCanId,0,0,0,$CanLayAtSec,$CanLayRadPerSec,0,0;" +
+             "$RollCanId,$CanShoveMps,0,0,$CanShoveAtSec,0,0,$RollRadPerSec")
 
 Write-Host "=== physics feel: dominoes fall, cans roll, nothing freaks out ===" -ForegroundColor White
 if (-not $SkipBuild) {
@@ -193,7 +211,7 @@ try {
         Write-Fail "the server did not seed all six fixture props; see $serverOut"
     }
     Write-Host "        server up (pid $($server.Id)), row at x=$BoxX0..$([math]::Round($BoxX0 + 4 * $BoxPitch,2)) z=$RowZ y=$RowY, can at x=$CanX"
-    Write-Host "        the shove is this suite's: row head prop $ShovedBoxId at $RowShoveMps m/s (t=$RowShoveAtSec s), can prop $RollCanId at $CanShoveMps m/s (t=$CanShoveAtSec s), server clock"
+    Write-Host "        the shove is this suite's: row head prop $ShovedBoxId at $RowShoveMps m/s (t=$RowShoveAtSec s); can prop $RollCanId laid down at t=$CanLayAtSec s then rolled at $CanShoveMps m/s / $RollRadPerSec rad/s (t=$CanShoveAtSec s), server clock"
 
     $CrateProp = Get-AuthoredPropId $serverOut $CratePropPath
     Write-Host "        the carried crate is authored prop $CrateProp (from the server's adoption log)"
@@ -323,10 +341,10 @@ if ($heldEver.Count -eq 0) {
 # server prints one line per shove it spends, so that is what is checked, and it is checked before
 # anything is judged.
 $shoveLines = @($serverText | Select-String -Pattern "^\[phys\] shove ")
-if ($shoveLines.Count -lt 2) {
-    Write-Fail ("STAGING: the server logged $($shoveLines.Count) [phys] shove line(s), expected 2 " +
-        "(the row's head and the can). Nothing below is about physics -- the fixture never fired. " +
-        "See $serverOut")
+if ($shoveLines.Count -lt 3) {
+    Write-Fail ("STAGING: the server logged $($shoveLines.Count) [phys] shove line(s), expected 3 " +
+        "(the row's head, the can laid on its side, the can rolled). Nothing below is about " +
+        "physics -- the fixture never fired. See $serverOut")
 }
 foreach ($l in $shoveLines) { Write-Host "        $l" -ForegroundColor DarkGray }
 

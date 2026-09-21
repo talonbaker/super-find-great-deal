@@ -29,12 +29,14 @@ public class PhysShoveOptionTests
     {
         LaunchOptions o = LaunchOptions.Parse(new[] { "--phys-shove", "6,1.0,0,-0.5,12.5" });
 
-        (int propId, Vector3 velocity, double atSec) = Assert.Single(o.PhysShoves);
+        (int propId, Vector3 velocity, Vector3 angular, double atSec) = Assert.Single(o.PhysShoves);
         Assert.Equal(6, propId);
         Assert.Equal(1.0f, velocity.X, 1e-4f);
         Assert.Equal(0f, velocity.Y, 1e-4f);
         Assert.Equal(-0.5f, velocity.Z, 1e-4f);
         Assert.Equal(12.5, atSec, 4);
+        // Omitted spin is ZERO, never the release funnel's random tumble.
+        Assert.Equal(Vector3.Zero, angular);
     }
 
     /// <summary>Several shoves on one line, in order. The row and the can are two separate events
@@ -87,10 +89,39 @@ public class PhysShoveOptionTests
 
         // ...and it does not take the well-formed entry beside it with it.
         LaunchOptions mixed = LaunchOptions.Parse(new[] { "--phys-shove", bad + ";6,1,0,0,12" });
-        (int propId, Vector3 velocity, double atSec) = Assert.Single(mixed.PhysShoves);
+        (int propId, Vector3 velocity, Vector3 angular, double atSec) = Assert.Single(mixed.PhysShoves);
         Assert.Equal(6, propId);
         Assert.Equal(1f, velocity.X, 1e-4f);
         Assert.Equal(12.0, atSec, 4);
+        Assert.Equal(Vector3.Zero, angular);
+    }
+
+    /// <summary>The spin, when it is given, arrives component for component. A can standing on
+    /// its end SKIDS when you push it -- at tin's 0.25 friction the tipping condition 0.25 > r/h
+    /// = 0.58 is false, so 1 m/s buys 0.20 m against a 1 m bar -- and the only deterministic way
+    /// to put a can on its side is to say so in the shove.</summary>
+    [Fact]
+    public void TheSpin_IsReadComponentForComponent()
+    {
+        LaunchOptions o = LaunchOptions.Parse(new[] { "--phys-shove", "6,1,0,0,38,0,0,-28.6" });
+
+        (_, _, Vector3 angular, _) = Assert.Single(o.PhysShoves);
+        Assert.Equal(0f, angular.X, 1e-4f);
+        Assert.Equal(0f, angular.Y, 1e-4f);
+        Assert.Equal(-28.6f, angular.Z, 1e-3f);
+    }
+
+    /// <summary>A PARTIAL spin is dropped rather than half-read. Two of three components is a
+    /// typo, and a typo that quietly became (wx, wy, 0) would stage a different physical event
+    /// under the same command line -- which is the one thing this flag exists to prevent.
+    /// </summary>
+    [Theory]
+    [InlineData("6,1,0,0,38,0")]          // one component
+    [InlineData("6,1,0,0,38,0,0")]        // two
+    [InlineData("6,1,0,0,38,0,spin,0")]   // a word where a component goes
+    public void APartialSpin_DropsTheWholeEntry(string bad)
+    {
+        Assert.Empty(LaunchOptions.Parse(new[] { "--phys-shove", bad }).PhysShoves);
     }
 
     /// <summary>Absent by default, which is what makes this flag free for every launch that is

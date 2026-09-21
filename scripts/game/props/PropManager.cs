@@ -939,22 +939,23 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
         _physShoveClock += delta;
         for (int i = 0; i < shoves.Count; i++)
         {
-            (int propId, Vector3 velocity, double atSec) = shoves[i];
+            (int propId, Vector3 velocity, Vector3 angular, double atSec) = shoves[i];
             // The INDEX is the identity, not the prop id: a fixture is allowed to shove the same
             // prop twice on one run (strike the row, then strike what is left of it), and keying
             // this on the prop would silently swallow the second.
             if (_physShoveClock < atSec || !_physShovesFired.Add(i))
                 continue;
-            // Vector3.Zero, NOT the release funnel's random tumble. See ServerNudgeLoose's
-            // overload: +/-2 rad/s on every axis is half of what it takes to put a cereal box
-            // over, so a shove that drew its own spin would still be a coin flip with a tidy
-            // number written beside it.
-            ServerNudgeLoose(propId, velocity, Vector3.Zero);
+            // The spin the FIXTURE named, never the release funnel's random tumble. See
+            // ServerNudgeLoose's overload: +/-2 rad/s on every axis is half of what it takes to
+            // put a cereal box over, so a shove that drew its own spin would still be a coin flip
+            // with a tidy number written beside it.
+            ServerNudgeLoose(propId, velocity, angular);
             // The line the suite reads: it is the only record of what the fixture actually asked
             // for, and a shove that names a prop id nothing seeded would otherwise be a silent
             // no-op that reads downstream as "the physics did not work".
             GD.Print($"[phys] shove prop={propId} v=({velocity.X:F2}, {velocity.Y:F2}, "
-                + $"{velocity.Z:F2}) |v|={velocity.Length():F2} m/s at t={_physShoveClock:F2}s");
+                + $"{velocity.Z:F2}) |v|={velocity.Length():F2} m/s w=({angular.X:F2}, "
+                + $"{angular.Y:F2}, {angular.Z:F2}) at t={_physShoveClock:F2}s");
         }
     }
 
