@@ -1077,10 +1077,12 @@ public partial class NetworkedProp : Node3D
     /// <para>Returns true when it bit, so the caller can count it — P2 asks for the count to be
     /// ~0 in ordinary play, which is a claim that only a counter can support.</para>
     /// </summary>
-    public bool ServerClampMotion()
+    public bool ServerClampMotion(out float fromHorizontalMps)
     {
+        fromHorizontalMps = 0f;
         if (!IsServer || !IsInstanceValid(Body))
             return false;
+        fromHorizontalMps = HorizontalSpeedMps;
         // The throw's allowance is spent the first tick its horizontal energy is gone, and never
         // comes back for this episode; a fresh throw sets it again through NoteThrownServer.
         if (_speedCapMps > PropPhysics.MaxPropSpeedMps

@@ -73,7 +73,14 @@ tint = Color(0.74, 0.76, 0.79, 1)
 ;
 ; No centre-of-mass override: a can is not top-heavy, and P4 says so in as many words.
 physics_material_override = ExtResource("3_physmat")
-linear_damp = 0.3
+; PHYS-1, RE-MEASURED 2026-09-20: 0.30 -> 0.55. The packet's bar is that a nudged can travels at
+; least 1 m and STOPS WITHIN 4 m, and 0.30 failed the second half: measured, a can shoved at
+; 1.85 m/s rolled 6.98 m net and left the aisle entirely -- v0/d = 1.85/0.30 = 6.2 m, which is
+; the arithmetic agreeing with the run. 0.55 puts the same shove at 3.4 m and a gentle 1 m/s
+; nudge at 1.8 m, so both halves of the bar hold with room either side. Produce.tscn already
+; recorded what the far end of this looks like: "an orange that leaves the aisle it was knocked
+; off is a worse bug than a quiet one."
+linear_damp = 0.55
 angular_damp = 0.25
 can_sleep = false
 

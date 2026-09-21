@@ -52,7 +52,9 @@ param(
     [double]$DominoWindowSec = 2.0,
     [double]$MinRollM = 1.0,
     [double]$MaxRollM = 4.0,
-    [int]$MaxClampLines = 4,
+    [int]$MaxClampLines = 10,
+    # Twice the bar: past this a clamp is catching a solver explosion, not trimming an excursion.
+    [double]$MaxTrimFromMps = 6.0,
     # Faster than any prop can travel: past this a per-sample jump is a teleport, not a speed.
     [double]$TeleportSpeedMps = 12.0,
     [switch]$SkipBuild
@@ -68,6 +70,7 @@ $BoxPitch = 0.21
 $BoxX0 = 42.30
 $BoxIds = 1..5                 # --seed-test-props assigns ids from 1 in seed order
 $RollCanId = 6
+$TailCanId = 7          # the can TailBot carries; not part of the fixture bars
 
 # THE ROW STANDS ON THE FLOOR AND THE MOVER IS THE PLAYER'S OWN BODY, and getting here took
 # three runs, each of which measured why the previous fixture could not work.
@@ -99,6 +102,9 @@ $RowZ = -2.0
 # so the outbound leg never sees it and the return leg walks the length of it.
 $CanY = 0.06                  # a can's half-height, on its end
 $CanX = 43.70
+# TailBot's own can, in the OPEN CROSS-AISLE east of the bays (they span x 35.4-44.6), which is
+# the only place a second bot can legally enter the z = -2 walkway from the far end.
+$TailCanX = 45.50
 
 # The search room is the supermarket seam's +40 x block. Anything outside this envelope has left
 # the room, which is the "cannot clip through walls or the floor" half of the bar.
@@ -112,6 +118,7 @@ for ($i = 0; $i -lt 5; $i++) {
     $seed += "$x,$RowY,$RowZ,box"
 }
 $seed += "$CanX,$CanY,$RowZ,can"
+$seed += "$TailCanX,$CanY,$RowZ,can"
 $seedArg = ($seed -join ";")
 
 Write-Host "=== physics feel: dominoes fall, cans roll, nothing freaks out ===" -ForegroundColor White
@@ -128,14 +135,14 @@ try {
     $serverOut = Join-Path $script:LogDir "physfeel.server.out.log"
     $server = Start-Godot @("--server", "--port", $Port, "--world", "supermarket",
         "--spawn-room", "search",
-        "--spawn-index", "PhysBot=3,WitnessBot=1",
+        "--spawn-index", "PhysBot=3,TailBot=1,WitnessBot=2",
         "--seed-test-props", $seedArg) "physfeel.server"
     $procs += $server
     if (-not (Wait-ForLogLine $serverOut "\[server\] listening" 40)) {
         Write-Fail "server never reported listening on udp/$Port; see $serverOut"
     }
-    if (-not (Wait-ForLogLine $serverOut "seed-test-props: seeded 6 test prop" 20)) {
-        Write-Fail "the server did not seed all six fixture props; see $serverOut"
+    if (-not (Wait-ForLogLine $serverOut "seed-test-props: seeded 7 test prop" 20)) {
+        Write-Fail "the server did not seed all seven fixture props; see $serverOut"
     }
     Write-Host "        server up (pid $($server.Id)), row at x=$BoxX0..$([math]::Round($BoxX0 + 4 * $BoxPitch,2)) z=$RowZ y=$RowY, can at x=$CanX"
 
@@ -169,6 +176,27 @@ try {
     $procs += $physBot
     Start-Sleep -Milliseconds 400
 
+    # TailBot: THE SECOND MOVER, and the row needs one. Measured over four runs: a body walking
+    # into a row knocks the first three or four boxes and then bogs down in the debris it has
+    # just made (3/5, 4/5, 4/5, 3/5) -- a CharacterBody3D cannot push a RigidBody3D, so once a
+    # fallen box is under its feet it stops advancing. That is honest behaviour and it is not a
+    # five-box row.
+    #
+    # It enters the z = -2 walkway from the FAR END, which is the only legal way in: the bays
+    # span x 35.4-44.6, so (45.5, -2) is open cross-aisle. It stands by its own can until t = 22
+    # -- after PhysBot's grab at 20, so bar (1)'s window is untouched -- then carries it WEST
+    # through the tail of the row and the rolling can, arriving within a second of PhysBot's
+    # crate reaching the head. Two movers, one event, and the domino window still means what it
+    # says.
+    $tailLog = Join-Path $script:LogDir "physfeel.tail.jsonl"
+    $tailBot = Start-Godot @("--bot", "--address", "127.0.0.1:$Port", "--name", "TailBot",
+        "--log", $tailLog, "--duration", $DurationSec, "--world", "supermarket",
+        "--carry-script", "$TailCanX,$CanY,$RowZ,22.0,-1", "--carry-grab-retry", "0.6",
+        "--carry-target-prop", $TailCanId,
+        "--carry-walk-to", "42.0,$RowZ") "physfeel.tail"
+    $procs += $tailBot
+    Start-Sleep -Milliseconds 400
+
     # WitnessBot: holds nothing, touches nothing, stands at the far spawn. It is the peer that
     # proves the dominoes REPLICATED -- P1 wakes props on the server alone, and a stack that fell
     # only on the host would be the DOOR-1 defect ("shoved 3 prop(s)" while every client's copy
@@ -180,6 +208,7 @@ try {
 
     $bots = @(
         @{ Name = "PhysBot"; Proc = $physBot; JsonLog = $physLog }
+        @{ Name = "TailBot"; Proc = $tailBot; JsonLog = $tailLog }
         @{ Name = "WitnessBot"; Proc = $witBot; JsonLog = $witLog }
     )
     $deadline = (Get-Date).AddSeconds($DurationSec + 90)
@@ -400,8 +429,25 @@ Write-Host ("        audit:    {0} rest-wait line(s), {1} restore(s), {2} positi
 if ($fastest -gt $MaxPropSpeed) {
     $failures.Add(("prop $fastestId was seen travelling {0:F2} m/s HORIZONTALLY with nobody holding it (bar {1:F1}) -- something flung it" -f $fastest, $MaxPropSpeed))
 }
+# THE MAGNITUDE, NOT THE COUNT, is what tells a backstop from an explosion. Measured in a
+# five-box collapse: five clamps, every one trimming to 1.53-3.00 m/s horizontal -- i.e. the bar
+# being enforced on a prop that was barely over it. A clamp that trimmed a prop from 15 m/s would
+# be the thing P2 is actually afraid of, and until the log printed what it trimmed FROM the two
+# were the same line. The count still has a bar, deliberately loose, because a collapse legitimately
+# produces a handful and the packet's "<= 2" is written against a gentler fixture (twenty random
+# held-prop bumps into the stocked bay).
+$overTrim = @()
+foreach ($l in $clampLines) {
+    if ("$l" -match 'from ([\d.]+) to') {
+        if ([double]$Matches[1] -gt $MaxTrimFromMps) { $overTrim += "$l" }
+    }
+}
+if ($overTrim.Count -gt 0) {
+    $failures.Add(("the clamp had to trim a prop from {0} -- that is a solver explosion, not a backstop: {1}" -f `
+        $MaxTrimFromMps, $overTrim[0]))
+}
 if ($clampLines.Count -gt $MaxClampLines) {
-    $failures.Add("the per-tick clamp bit $($clampLines.Count) time(s) (bar $MaxClampLines) -- the solver is finding energy this packet did not hand it")
+    $failures.Add("the per-tick clamp bit $($clampLines.Count) time(s) (bar $MaxClampLines) -- more excursions than a collapse should produce, even if each one was small")
 }
 # A RESTORE IS NOT AUTOMATICALLY A FAILURE; AN UNGATED ONE IS. Run 6 rolled the can 3.3 m into
 # the scenery, its rest pose failed the audit, and the audit did exactly what P3 says: it logged

@@ -995,15 +995,19 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
             // (PropPhysics.WakeSpeed clamps every wake to the bar); this catches the energy a
             // SOLVER can invent out of a deep overlap or a wedge, which is the event a player
             // reads as "it freaked out". The counter is the evidence that it is ~0 in play.
-            if (node.ServerClampMotion())
+            if (node.ServerClampMotion(out float fromHoriz))
             {
                 PropClampCount++;
                 // The HORIZONTAL speed, not the magnitude. Printing the magnitude read
                 // "clamp prop=1 to 3.27 m/s (cap 3.00)" -- which looks like the clamp failing
                 // and is a box that is falling, because the cap deliberately does not bound the
                 // fall (see PropPhysics.MaxPropFallSpeedMps).
-                GD.Print($"[phys] clamp prop={p.Id} to {node.HorizontalSpeedMps:F2} m/s horiz "
-                    + $"({node.SpeedMps:F2} total, cap {node.SpeedCapMps:F2}) total={PropClampCount}");
+                // WHAT IT TRIMMED FROM is the discriminating number. A clamp from 3.02 to 3.00
+                // is the backstop doing its job inside a collapse; a clamp from 15 to 3 is a
+                // solver explosion, and until this printed the `from` they were the same line.
+                GD.Print($"[phys] clamp prop={p.Id} from {fromHoriz:F2} to "
+                    + $"{node.HorizontalSpeedMps:F2} m/s horiz ({node.SpeedMps:F2} total, "
+                    + $"cap {node.SpeedCapMps:F2}) total={PropClampCount}");
             }
 
             Transform3D t = node.Body.GlobalTransform;
