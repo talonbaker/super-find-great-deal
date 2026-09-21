@@ -28,7 +28,7 @@ public class RoundButtonTests
     /// put both players' START out. See <see cref="RoundButtonRules.LampFacts"/>.</summary>
     private static RoundButtonRules.LampFacts Facts(HideSeekPhase phase, int self,
         bool rack = false, bool target = false, bool synced = true) =>
-        new(synced, phase, self, Hider, Seeker, rack, target);
+        new(synced, phase, self, Hider, Seeker, SelfIsOnTheRoster: true, rack, target);
 
     // =========================================================================================
     // The lamp
@@ -70,9 +70,9 @@ public class RoundButtonTests
     public void StartLamp_DarkWhenARoleIsVacant()
     {
         var noHider = new RoundButtonRules.LampFacts(true, HideSeekPhase.Holding, Seeker,
-            0, Seeker, true, false);
+            0, Seeker, SelfIsOnTheRoster: true, true, false);
         var noSeeker = new RoundButtonRules.LampFacts(true, HideSeekPhase.Holding, Hider,
-            Hider, 0, true, false);
+            Hider, 0, SelfIsOnTheRoster: true, true, false);
         Assert.Equal(RoundLamp.Dark, RoundButtonRules.Lamp(RoundButtonKind.Start, noHider));
         Assert.Equal(RoundLamp.Dark, RoundButtonRules.Lamp(RoundButtonKind.Start, noSeeker));
     }
@@ -125,7 +125,7 @@ public class RoundButtonTests
     public void EveryLamp_IsDarkBeforeTheRoundHasSynced()
     {
         var unsynced = new RoundButtonRules.LampFacts(false, HideSeekPhase.Holding, Hider,
-            Hider, Seeker, true, false);
+            Hider, Seeker, SelfIsOnTheRoster: true, true, false);
         Assert.Equal(RoundLamp.Dark, RoundButtonRules.Lamp(RoundButtonKind.Start, unsynced));
         Assert.Equal(RoundLamp.Dark, RoundButtonRules.Lamp(RoundButtonKind.Confirm, unsynced));
         Assert.Equal(RoundLamp.Dark, RoundButtonRules.Lamp(RoundButtonKind.End, unsynced));

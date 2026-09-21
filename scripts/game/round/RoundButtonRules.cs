@@ -35,6 +35,7 @@ public static class RoundButtonRules
         int SelfPeerId,
         int HiderPeerId,
         int SeekerPeerId,
+        bool SelfIsOnTheRoster,
         bool HiderHoldsRackProp,
         bool HiderHoldsTarget);
 
@@ -152,11 +153,23 @@ public static class RoundButtonRules
         };
     }
 
-    /// <summary>Is the peer reading this lamp one of the two the round is about? (SOLO-1.) A
+    /// <summary>
+    /// Is the peer reading this lamp one of the two the round is about? (SOLO-1.)
+    ///
+    /// <para><b>Two things excuse a peer from the test, and the second one was measured.</b> A
     /// round whose roles are not dealt yet excludes nobody — same guard, same reason, as
-    /// <see cref="Gate"/>'s.</summary>
+    /// <see cref="Gate"/>'s. And <b>a peer that is not on the round's ROSTER is not a waiting
+    /// player, it is nobody</b>: the dedicated server builds the world, so it owns a copy of every
+    /// <c>RoundButton</c> and derives a lamp from its own multiplayer id, which holds no avatar
+    /// and no role. Excluding it turned <c>Run-ButtonsTest.ps1</c> red on "the START lamp never
+    /// went Lit" while every press in the same run behaved correctly.
+    /// <see cref="LampFacts.SelfIsOnTheRoster"/> is the discriminator and it needs no magic id:
+    /// every human the round knows about owns a score row from their first tick
+    /// (<c>HideSeekLoop.FoldFacts</c>) and the server does not.</para>
+    /// </summary>
     private static bool InThisMatch(in LampFacts f) =>
-        f.HiderPeerId == 0 || f.SeekerPeerId == 0
+        !f.SelfIsOnTheRoster
+        || f.HiderPeerId == 0 || f.SeekerPeerId == 0
         || f.SelfPeerId == f.HiderPeerId || f.SelfPeerId == f.SeekerPeerId;
 
     /// <summary>

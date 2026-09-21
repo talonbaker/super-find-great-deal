@@ -221,7 +221,7 @@ public partial class RoundControls : Node
         HideSeekDriver? driver = HideSeekDriver.Instance;
         if (driver is not { Synced: true })
             return new RoundButtonRules.LampFacts(false, HideSeekPhase.Holding, selfPeerId,
-                0, 0, false, false);
+                0, 0, false, false, false);
 
         HideSeekView view = driver.View;
         RoundControls? self = Instance;
@@ -241,6 +241,11 @@ public partial class RoundControls : Node
             SelfPeerId: selfPeerId,
             HiderPeerId: view.HiderPeerId,
             SeekerPeerId: view.SeekerPeerId,
+            // SOLO-1: "is this peer one the ROUND knows about at all". Every human on the wire
+            // owns a score row from their first tick; the dedicated server, which builds the
+            // world and therefore owns a copy of every button, does not -- and it is nobody
+            // rather than a player who is waiting. See RoundButtonRules.InThisMatch.
+            SelfIsOnTheRoster: selfPeerId != 0 && (view.Scores?.ContainsKey(selfPeerId) ?? false),
             HiderHoldsRackProp: rackProp,
             HiderHoldsTarget: holdsTarget);
     }

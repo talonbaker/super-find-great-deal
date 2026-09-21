@@ -562,13 +562,44 @@ public class SoloRoundTests
             Lamp(HideSeekPhase.Holding, Second, rack: true)));
     }
 
+    /// <summary>
+    /// <b>A peer that is not on the round's roster at all is NOT a waiting player</b>, and the
+    /// difference is the dedicated server. It builds the world, so it owns a copy of every
+    /// <c>RoundButton</c> and derives a lamp from its own <c>Multiplayer.GetUniqueId()</c> — which
+    /// is 1, holds no avatar, holds neither role, and is nobody. Excluding it darkened the lamp
+    /// the server logs, which is the line <c>Run-ButtonsTest.ps1</c> reads to prove the affordance
+    /// exists before the press. **Measured**: that suite went red on
+    /// <i>"the START lamp never went Lit"</i> with every press behaving correctly.
+    ///
+    /// <para>The discriminator is on the wire already and needs no id to be special: a human the
+    /// round knows about <b>owns a score row</b> (<c>FoldFacts</c> puts one there at zero on their
+    /// first tick) and the server does not. So "not in this match" means <i>on the roster,
+    /// holding neither role</i> — which is exactly a third player and exactly not a server.</para>
+    /// </summary>
+    [Fact]
+    public void Lamp_APeerThatIsNotOnTheRosterAtAll_IsNotTreatedAsWaiting()
+    {
+        // The dedicated server's own copy: it holds neither role AND has no score row.
+        var server = new RoundButtonRules.LampFacts(true, HideSeekPhase.Holding, SelfPeerId: 1,
+            Alone, Second, SelfIsOnTheRoster: false,
+            HiderHoldsRackProp: true, HiderHoldsTarget: false);
+        Assert.Equal(RoundLamp.Lit, RoundButtonRules.Lamp(RoundButtonKind.Start, server));
+        Assert.Equal(RoundLamp.Lit, RoundButtonRules.Lamp(RoundButtonKind.End,
+            server with { Phase = HideSeekPhase.Together }));
+
+        // The third PLAYER differs in exactly one bit, and is Dark.
+        Assert.Equal(RoundLamp.Dark, RoundButtonRules.Lamp(RoundButtonKind.Start,
+            server with { SelfPeerId = Third, SelfIsOnTheRoster = true }));
+    }
+
     /// <summary>The solo player's START lamp lights, or the only person in the room is told not
     /// to press the only button that does anything.</summary>
     [Fact]
     public void Lamp_StartIsLitForASoloPlayerHoldingBothRoles()
     {
         var solo = new RoundButtonRules.LampFacts(true, HideSeekPhase.Holding, Alone,
-            Alone, Alone, HiderHoldsRackProp: true, HiderHoldsTarget: false);
+            Alone, Alone, SelfIsOnTheRoster: true,
+            HiderHoldsRackProp: true, HiderHoldsTarget: false);
         Assert.Equal(RoundLamp.Lit, RoundButtonRules.Lamp(RoundButtonKind.Start, solo));
         Assert.Equal(RoundLamp.Lit, RoundButtonRules.Lamp(RoundButtonKind.End,
             solo with { Phase = HideSeekPhase.Together }));
@@ -619,7 +650,7 @@ public class SoloRoundTests
 
     private static RoundButtonRules.LampFacts Lamp(HideSeekPhase phase, int self,
         bool rack = false, bool target = false) =>
-        new(true, phase, self, Alone, Second, rack, target);
+        new(true, phase, self, Alone, Second, SelfIsOnTheRoster: true, rack, target);
 
     /// <summary>The state as a client would see it: encoded and folded, so a board assertion is
     /// about what crossed the wire rather than about the server's own struct.</summary>
