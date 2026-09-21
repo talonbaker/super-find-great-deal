@@ -499,7 +499,18 @@ public sealed class LaunchOptions
     /// second copy of the wire contract and would go quietly wrong the first time
     /// <c>PropKind</c> grows. The material-SFX suite seeds forty mixed props in a heap with it;
     /// nobody is going to author forty.</para></summary>
-    public IReadOnlyList<(Vector3 At, MpFoundation.Net.PropKind Kind)> SeedTestProps => _seedTestProps;
+    /// <summary>Each entry: where, what kind, and (PHYS-2, 2026-09-21) how far it is rolled about
+    /// its own X axis in degrees -- <c>90</c> puts a can on its side with its axis along Z, which
+    /// is the only way a fixture can START with a can that rolls along X. Spinning an upright can
+    /// over was measured not to work: friction 0.25 is under r/h = 0.58, so the spin skids the
+    /// base out and the can wobbles and stands (tilt peaked at 1 degree, three runs). Zero for
+    /// every caller that does not say, so nothing older changes.</summary>
+    /// <para>And a sixth: yaw about Y in degrees, so a row of cereal boxes can stand EDGE-ON to
+    /// the direction they are struck. A 0.19 x 0.28 x 0.06 box tips over its 0.19 m width at
+    /// atan(0.095/0.21) = 24 degrees and over its 0.06 m depth at 8 -- the first is a stubby block
+    /// that leans on its neighbour and stops (measured: 52 / 23 / 7 degrees and frozen there), the
+    /// second is a domino.</para></summary>
+    public IReadOnlyList<(Vector3 At, MpFoundation.Net.PropKind Kind, float RollXDeg, float YawYDeg)> SeedTestProps => _seedTestProps;
 
     /// <summary><c>--hands-selftest</c> (HANDS-1): build <c>HandsSelfTest</c> beside the
     /// first-person rig, which it implies. <c>tests/Run-HandsSmoke.ps1</c>'s driver.</summary>
@@ -531,7 +542,7 @@ public sealed class LaunchOptions
     /// error of this many metres into every attached hand, so the smoke's 1 cm bar can be proved
     /// able to fail without editing the shipped code. 0 everywhere else.</summary>
     public float HandsPlantOffsetM { get; private set; }
-    private readonly List<(Vector3 At, MpFoundation.Net.PropKind Kind)> _seedTestProps = new();
+    private readonly List<(Vector3 At, MpFoundation.Net.PropKind Kind, float RollXDeg, float YawYDeg)> _seedTestProps = new();
 
     /// <summary>--seed-props-drop &lt;sec&gt;: server-only, test-only. That many seconds into the
     /// session, release every <c>--seed-test-props</c> prop from Resting into Loose, once, so the
@@ -539,6 +550,51 @@ public sealed class LaunchOptions
     /// otherwise hangs in mid-air forever and why the delay is load-bearing. Negative (the
     /// default) = never, so every suite written before SFX-1 is unaffected.</summary>
     public double SeedPropsDropAtSec { get; private set; } = -1;
+
+    /// <summary>
+    /// <c>--phys-shove "propId,vx,vy,vz,atSec[,wx,wy,wz][;...]"</c>: server-only, test-only.
+    /// <b>A shove the SUITE chooses</b> (PHYS-2, 2026-09-20). That many seconds into the session,
+    /// put prop <c>propId</c> into Loose with velocity <c>(vx, vy, vz)</c> and angular velocity
+    /// <c>(wx, wy, wz)</c> — zero when omitted — through REACH-1's existing
+    /// <c>PropManager.ServerNudgeLoose</c>: the same registry transition, the same broadcast, no
+    /// second physics path.
+    ///
+    /// <para><b>The SPIN is part of the shove and is not a convenience.</b> The release funnel
+    /// this goes through draws a random tumble of +/-2 rad/s on every axis, which is half of what
+    /// it takes to put a cereal box over — a fixture that let it draw would have a tidy number
+    /// written beside a coin flip. And a can standing on its end does not roll when you push it:
+    /// at tin's 0.25 friction the tipping condition is 0.25 &gt; r/h = 0.58, which is false, so it
+    /// SKIDS — 0.20 m from 1 m/s against a 1 m bar. A rolling can is a can lying on its side, and
+    /// the only way to put one there deterministically is to say so.</para>
+    ///
+    /// <para><b>Why it exists, measured.</b> <c>Run-PhysicsFeelTest</c> staged its domino row by
+    /// walking a bot into it, and PHYS-1 measured the bot delivering peak shoves of <b>0.66, 0.70,
+    /// 0.89, 1.18, 2.88 and 3.30 m/s</b> into that fixture across six runs of ONE build, because
+    /// the debris it had just made perturbed its own walk. The length of the chain and the can's
+    /// roll distance were therefore measuring the bot's approach, not the physics: the same build
+    /// produced 2/5, 3/5, 4/5 and 5/5. The packet's own wording asks for a known impulse — "a can
+    /// nudged at 1 m/s" is a claim about a NUMBER — and a fixture cannot make that claim while a
+    /// walking bot chooses the number.</para>
+    ///
+    /// <para><b>A VELOCITY, not an impulse</b>, because that is what <c>ServerNudgeLoose</c>
+    /// takes and what makes the fixture repeatable across prop masses: "the can leaves at 1 m/s"
+    /// is the bar, and it stays 1 m/s if a later packet re-authors the can's mass. The wake
+    /// impulse that P1's contact path computes is untouched by this flag — this is how the FIRST
+    /// body starts moving, and every prop it goes on to knock over is woken by the shipped
+    /// contact path exactly as it would be by a player.</para>
+    ///
+    /// <para>An entry with a malformed number or fewer than five fields is DROPPED, by
+    /// <c>--seed-test-props</c>' own rule: a shove silently defaulted to zero is a fixture that
+    /// stages nothing, and the suite would then report a physics failure about its own
+    /// arguments. A malformed or partial SPIN is dropped the same way rather than half-read.</para>
+    ///
+    /// <para>The same prop may appear twice: <c>PropManager.StepPhysShove</c> keys its
+    /// fired-once set on the ENTRY INDEX, so "lay the can on its side, then roll it" is two
+    /// entries and not two flags.</para></summary>
+    public IReadOnlyList<(int PropId, Vector3 Velocity, Vector3 Angular, double AtSec)> PhysShoves
+        => _physShoves;
+    private readonly List<(int PropId, Vector3 Velocity, Vector3 Angular, double AtSec)> _physShoves
+        = new();
 
     /// <summary>--log-sfx: print one <c>[sfx] sfx &lt;name&gt; event=... intensity=... at (...)</c>
     /// line per sound <c>ActorFx</c> actually plays, plus one
@@ -1724,7 +1780,24 @@ public sealed class LaunchOptions
                             if (!TryParsePropKind(parts[3], out kind))
                                 continue;
                         }
-                        options._seedTestProps.Add((new Vector3((float)sx, (float)sy, (float)sz), kind));
+                        // Optional fifth field: roll about X, degrees. Malformed -> the entry is
+                        // DROPPED like any other malformed field here, not defaulted: a can
+                        // meant to lie down and quietly standing is a fixture that lies.
+                        float rollXDeg = 0f;
+                        if (parts.Length >= 5 && parts[4].Trim().Length > 0)
+                        {
+                            if (!double.TryParse(parts[4], NumberStyles.Float, CultureInfo.InvariantCulture, out double rx))
+                                continue;
+                            rollXDeg = (float)rx;
+                        }
+                        float yawYDeg = 0f;
+                        if (parts.Length >= 6 && parts[5].Trim().Length > 0)
+                        {
+                            if (!double.TryParse(parts[5], NumberStyles.Float, CultureInfo.InvariantCulture, out double yy))
+                                continue;
+                            yawYDeg = (float)yy;
+                        }
+                        options._seedTestProps.Add((new Vector3((float)sx, (float)sy, (float)sz), kind, rollXDeg, yawYDeg));
                     }
                     break;
                 }
@@ -1732,6 +1805,45 @@ public sealed class LaunchOptions
                     if (double.TryParse(Next(args, ref i), NumberStyles.Float, CultureInfo.InvariantCulture, out double dropAt))
                         options.SeedPropsDropAtSec = dropAt;
                     break;
+                case "--phys-shove":
+                {
+                    // "propId,vx,vy,vz,atSec[;...]" -- one shove per entry. A malformed entry is
+                    // DROPPED rather than defaulted, exactly as --seed-test-props drops a
+                    // malformed triple and for the same reason: a shove of (0,0,0) at t=0 is a
+                    // fixture that stages nothing, and the suite would go on to report a physics
+                    // failure about its own command line.
+                    foreach (string entry in Next(args, ref i).Split(';'))
+                    {
+                        string[] parts = entry.Split(',');
+                        if (parts.Length < 5
+                            || !int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out int shoveId)
+                            || !double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out double svx)
+                            || !double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out double svy)
+                            || !double.TryParse(parts[3], NumberStyles.Float, CultureInfo.InvariantCulture, out double svz)
+                            || !double.TryParse(parts[4], NumberStyles.Float, CultureInfo.InvariantCulture, out double shoveAt))
+                        {
+                            continue;
+                        }
+                        // The spin is all three components or none: a partial one is a typo, and
+                        // a typo that quietly became (wx, 0, 0) would stage a different physical
+                        // event under the same command line.
+                        var spin = Vector3.Zero;
+                        if (parts.Length >= 6)
+                        {
+                            if (parts.Length < 8
+                                || !double.TryParse(parts[5], NumberStyles.Float, CultureInfo.InvariantCulture, out double swx)
+                                || !double.TryParse(parts[6], NumberStyles.Float, CultureInfo.InvariantCulture, out double swy)
+                                || !double.TryParse(parts[7], NumberStyles.Float, CultureInfo.InvariantCulture, out double swz))
+                            {
+                                continue;
+                            }
+                            spin = new Vector3((float)swx, (float)swy, (float)swz);
+                        }
+                        options._physShoves.Add((shoveId,
+                            new Vector3((float)svx, (float)svy, (float)svz), spin, shoveAt));
+                    }
+                    break;
+                }
                 case "--log-sfx":
                     options.LogSfx = true;
                     break;

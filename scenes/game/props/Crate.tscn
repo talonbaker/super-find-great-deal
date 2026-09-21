@@ -1,7 +1,8 @@
-[gd_scene load_steps=6 format=3 uid="uid://crate0foundation"]
+[gd_scene load_steps=7 format=3 uid="uid://crate0foundation"]
 
 [ext_resource type="Script" path="res://scripts/game/sandbox/Carryable.cs" id="1_carryable"]
 [ext_resource type="Script" path="res://scripts/game/sandbox/feel/Interactable.cs" id="2_interactable"]
+[ext_resource type="PhysicsMaterial" path="res://assets/physics/wood.tres" id="3_physmat"]
 
 [sub_resource type="BoxMesh" id="BoxMesh_crate"]
 size = Vector3(0.44, 0.44, 0.44)
@@ -45,6 +46,13 @@ emission_energy_multiplier = 0.55
 script = ExtResource("1_carryable")
 kind = 0
 tint = Color(0.87, 0.69, 0.13, 1)
+; PHYS-1 (2026-09-20), ruling P4. The heaviest carryable and the one a player knocks things over
+; WITH, so what matters here is that it keeps its momentum rather than spending it on the floor:
+; friction 0.60 (on the shared PhysicsMaterial), and damping between the can's roll and the box's
+; dead stop. A cube is not top-heavy and gets no centre-of-mass override.
+physics_material_override = ExtResource("3_physmat")
+linear_damp = 0.3
+angular_damp = 1.0
 
 [node name="Visual" type="Node3D" parent="."]
 

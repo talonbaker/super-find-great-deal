@@ -1,7 +1,8 @@
-[gd_scene load_steps=6 format=3 uid="uid://produce0sfgdmvp"]
+[gd_scene load_steps=7 format=3 uid="uid://produce0sfgdmvp"]
 
 [ext_resource type="Script" path="res://scripts/game/sandbox/Carryable.cs" id="1_carryable"]
 [ext_resource type="Script" path="res://scripts/game/sandbox/feel/Interactable.cs" id="2_interactable"]
+[ext_resource type="PhysicsMaterial" path="res://assets/physics/produce.tres" id="3_physmat"]
 
 [sub_resource type="SphereMesh" id="SphereMesh_produce"]
 radius = 0.08
@@ -45,6 +46,14 @@ script = ExtResource("1_carryable")
 kind = 4
 material = 3
 tint = Color(0.92, 0.51, 0.13, 1)
+; PHYS-1 (2026-09-20), ruling P4. The damping above is Produce.tscn's own measured value and is
+; NOT touched -- its header records why (an undamped sphere on a flat floor never stops; one
+; rolled out of the room). What this adds is the contact half: friction 0.90 and `rough`, so an
+; orange grips whatever it lands on instead of being multiplied down by it. See
+; assets/physics/README.md for the whole table and why produce is the only `rough` member.
+;
+; No centre-of-mass override: a sphere has nowhere to put one.
+physics_material_override = ExtResource("3_physmat")
 
 [node name="Visual" type="Node3D" parent="."]
 

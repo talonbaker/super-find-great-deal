@@ -185,7 +185,7 @@ public static class PlacementIntegrity
             if (FirstShapeOf(area)?.Shape is not BoxShape3D box)
                 continue;
             Transform3D boxWorld = area.GlobalTransform * FirstShapeOf(area)!.Transform;
-            if (CornersInside(shapeAt, half, boxWorld, box.Size * 0.5f))
+            if (ExtentsInside(shape, half, shapeAt, boxWorld, box.Size * 0.5f))
                 return Verdict.Ok;
         }
         return new Verdict(PlacementFault.OutsideRoomBounds, 0f,
@@ -195,22 +195,27 @@ public static class PlacementIntegrity
 
     /// <summary>All eight corners of the candidate's local extent, expressed in the bounds box's
     /// own frame, within its half-size plus <see cref="BoundsEpsilonM"/>.</summary>
-    private static bool CornersInside(Transform3D shapeAt, Vector3 half, Transform3D boxWorld, Vector3 boxHalf)
+    private static bool ExtentsInside(Shape3D shape, Vector3 half, Transform3D shapeAt,
+        Transform3D boxWorld, Vector3 boxHalf)
     {
-        Transform3D toBox = boxWorld.AffineInverse();
-        for (int i = 0; i < 8; i++)
+        // The shape's frame expressed in the bounds volume's frame: its centre and its extents
+        // along the volume's own axes. A box's extents are its corner sweep; a round shape's are
+        // its TRUE extents, which do not grow as it rotates about its own axis -- PHYS-2, and
+        // PropPhysics.RoundExtents says what it cost to sweep corners instead.
+        Transform3D inBox = boxWorld.AffineInverse() * shapeAt;
+        Vector3 c = inBox.Origin;
+        Vector3 axis = inBox.Basis.Y.LengthSquared() > 0f ? inBox.Basis.Y.Normalized() : Vector3.Up;
+        Vector3 ext = shape switch
         {
-            var corner = new Vector3(
-                (i & 1) == 0 ? -half.X : half.X,
-                (i & 2) == 0 ? -half.Y : half.Y,
-                (i & 4) == 0 ? -half.Z : half.Z);
-            Vector3 p = toBox * (shapeAt * corner);
-            if (Mathf.Abs(p.X) > boxHalf.X + BoundsEpsilonM
-                || Mathf.Abs(p.Y) > boxHalf.Y + BoundsEpsilonM
-                || Mathf.Abs(p.Z) > boxHalf.Z + BoundsEpsilonM)
-                return false;
-        }
-        return true;
+            SphereShape3D sphere => Vector3.One * sphere.Radius,
+            CylinderShape3D cylinder => PropPhysics.RoundExtents(axis, cylinder.Height * 0.5f, cylinder.Radius, roundEnds: false),
+            CapsuleShape3D capsule => PropPhysics.RoundExtents(axis,
+                Mathf.Max(0f, capsule.Height * 0.5f - capsule.Radius), capsule.Radius, roundEnds: true),
+            _ => PropPhysics.BoxExtents(inBox.Basis, half),
+        };
+        return Mathf.Abs(c.X) + ext.X <= boxHalf.X + BoundsEpsilonM
+            && Mathf.Abs(c.Y) + ext.Y <= boxHalf.Y + BoundsEpsilonM
+            && Mathf.Abs(c.Z) + ext.Z <= boxHalf.Z + BoundsEpsilonM;
     }
 
     /// <summary>

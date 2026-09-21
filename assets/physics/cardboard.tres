@@ -1,0 +1,17 @@
+[gd_resource type="PhysicsMaterial" format=3 uid="uid://physcard0sfgdmvp"]
+
+; PHYS-1 (2026-09-20). A CEREAL BOX -- the highest friction of the four carryables, and the reason
+; is the OTHER half of Talon's sentence: "those boxes should fall over like dominoes."
+;
+; A domino needs its BASE to be held while its top is pushed. At the can's 0.25 a shoved box
+; skates along the board and arrives at its neighbour still upright; at 0.75 the base grips, the
+; push becomes a torque about the leading edge, and the box goes over. The prefab's authored
+; centre of mass (top-heavy, see CerealBox.tscn) is the second half of the same design, and
+; neither works without the other.
+;
+; Zero bounce: cardboard does not.
+[resource]
+friction = 0.75
+rough = false
+bounce = 0.0
+absorbent = false

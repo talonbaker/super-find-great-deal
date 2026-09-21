@@ -124,6 +124,9 @@ public class PropImpactWireTests
         Assert.Equal(1, (int)PropRelease.Dropped);
         Assert.Equal(2, (int)PropRelease.Placed);
         Assert.Equal(3, (int)PropRelease.Thrown);
+        // PHYS-1 (2026-09-20). Appended, never inserted: the four above are the wire
+        // contract and a fifth verb joins at the end or not at all.
+        Assert.Equal(4, (int)PropRelease.Bumped);
     }
 
     [Theory]
@@ -131,6 +134,7 @@ public class PropImpactWireTests
     [InlineData(PropRelease.Dropped)]
     [InlineData(PropRelease.Placed)]
     [InlineData(PropRelease.Thrown)]
+    [InlineData(PropRelease.Bumped)]
     public void ReleaseByte_RoundTripsThroughTheWireAndThroughPropState(PropRelease release)
     {
         // The wire half: encode -> int -> decode.
@@ -158,7 +162,9 @@ public class PropImpactWireTests
     /// nothing.</summary>
     [Theory]
     [InlineData(-1)]
-    [InlineData(4)]
+    // 4 was an unknown ordinal until PHYS-1 spent it on PropRelease.Bumped (2026-09-20);
+    // 5 is the first free one and is what this test is really about.
+    [InlineData(5)]
     [InlineData(255)]
     [InlineData(9999)]
     [InlineData(int.MinValue)]

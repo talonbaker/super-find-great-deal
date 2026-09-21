@@ -283,6 +283,35 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
 
         Transform3D at = node.Body.GlobalTransform;
         RestAudit.Result audit = RestAudit.Audit(node, at, PlaceOverlapToleranceM, DepenetrateMaxM);
+
+        // PHYS-1 (2026-09-20), ruling P3: THE AUDIT NEVER TELEPORTS A PROP THE PLAYER IS LOOKING
+        // AT MOVING. Talon: "I want to know they won't freak out and make other objects jump
+        // around randomly" -- and a prop snapping back to a pose it held ten seconds ago, half a
+        // metre in front of the person who just nudged it, is that sentence exactly, even though
+        // every line of REACH-1 is working as designed.
+        //
+        // DEPENETRATION IS NOT GATED and that is deliberate: pushing a crate 4 cm out of a wall
+        // is the common case, it keeps the prop where the player left it, and gating it would
+        // regress the defect REACH-1 exists to fix. Only the LAST-GOOD RESTORE waits.
+        if (IsRestore(audit.Outcome) && !MayRestoreNow(propId, node))
+        {
+            // BOOK THE COST EVEN THOUGH NOTHING MOVED. The shape queries were issued; leaving
+            // them off RestAuditCount/IntegrityQueryCount would quietly under-report REACH-1's
+            // "one shape query per settle event" costing, which is the number that exercise
+            // exists to protect. What is NOT booked is the CORRECTION: nothing was corrected,
+            // and a `[reach] layer2 ... RestoredLastGood` line for a prop that did not move
+            // would be a lie the next reader greps for.
+            BookAuditCost(propId, audit);
+            // And re-arm the settle counter so the retry is one per SettleTicks (~0.3 s) rather
+            // than one per TICK. Without this the counter stays at its latch value, this method
+            // is called sixty times a second for as long as the prop waits, and a prop a player
+            // is standing next to waits indefinitely by design -- so the gate would turn a rare
+            // correction into a permanent 60 Hz shape query.
+            _looseSettle[propId] = 0;
+            return audit;
+        }
+        ClearStuckClock(propId);
+
         NoteAudit(propId, audit);
         Transform3D settled = audit.Corrected ? audit.To : at;
         _registry.SetResting(propId, settled);
@@ -308,7 +337,25 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
     /// prop being dropped or thrown, and the planted room has no players in it. Server-only, and
     /// the only caller in the tree is the self-test the flag <c>--reach-selftest</c> arms.</para>
     /// </summary>
-    public void ServerNudgeLoose(int propId, Vector3 impulse)
+    public void ServerNudgeLoose(int propId, Vector3 impulse) =>
+        ServerNudgeLoose(propId, impulse, null);
+
+    /// <summary>
+    /// As above, with the tumble NAMED rather than drawn (PHYS-2, 2026-09-20).
+    ///
+    /// <para><b>Why this exists, and it is the difference between a fixture and a coin flip.</b>
+    /// The release funnel this hook goes through draws a random angular velocity of +/-2 rad/s on
+    /// every axis (<c>Carryable.Release(Vector3)</c>) because a discarded object should look
+    /// discarded. A cereal box goes over at about 4 rad/s, so that draw alone decides whether a
+    /// shoved box topples forward, slides, or falls backwards into the thing that pushed it --
+    /// and <c>--phys-shove</c> exists precisely so a domino row stops being measured against
+    /// something random. Passing <see cref="Vector3.Zero"/> is what makes "the row was struck at
+    /// 2.8 m/s" the whole description of the event.</para>
+    ///
+    /// <para><paramref name="angular"/> null is REACH-1's original behaviour to the digit, which
+    /// is what its two callers (the cost probe's shove wave and the planted room) still get.</para>
+    /// </summary>
+    public void ServerNudgeLoose(int propId, Vector3 impulse, Vector3? angular)
     {
         if (!_isServer)
             return;
@@ -324,7 +371,346 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
         // shoved a RESTING prop, which is not one of the four release verbs. The sound this
         // produces is the impact when it lands, which SFX-2's PropImpact event carries.
         Rpc(MethodName.ApplyPropState, propId, (int)PropMode.Loose, 0, at, (int)PropRelease.None);
-        node.BeginLooseServer(impulse);
+        node.BeginLooseServer(impulse, angular);
+        ServerWakeIsland(propId, node);
+    }
+
+    /// <summary>A Resting prop whose world-axis box is within this of a waking prop's wakes with
+    /// it, metres. 0.15 is what a domino row needs: a 0.28 m box passes its balance point at
+    /// 24 degrees and its top-front corner has travelled 0.11 m by then, so the boxes in a row
+    /// that falls are ~0.11 m apart and the next one must be dynamic before that corner lands
+    /// on it. Anything further apart is reached by a contact, which wakes it the ordinary way.
+    /// Measured against boxes at 2 cm (a book stack: the whole row slid 8/6/4/2 cm and nothing
+    /// tilted, which is correct physics for touching boxes) and at 11 cm.</summary>
+    public const float WakeIslandGapM = 0.15f;
+
+    /// <summary>The most props one wake event may wake around itself. A stocked shelf run is
+    /// contiguous at 0.09 m pitch, so without a cap one bump would wake the whole board; sixteen
+    /// is more than any row a player can knock over in one motion and each costs exactly one
+    /// settle audit 0.3 s later.</summary>
+    public const int WakeIslandMax = 16;
+
+    /// <summary>
+    /// <b>A prop that wakes wakes its neighbours, so that what it then hits is a body and not a
+    /// wall</b> (PHYS-2, 2026-09-21).
+    ///
+    /// <para><b>Why the contact wake alone could not make a domino row fall, measured three
+    /// ways.</b> A Resting prop is <c>Freeze = true, Kinematic</c> on every peer — infinite mass
+    /// to the solver. So the first touch between a moving box and its frozen neighbour is
+    /// resolved as box-against-wall in the very step that reports it: the mover is stopped dead,
+    /// the wake then hands the neighbour <c>ContactImpulse</c>'s share of a speed the mover no
+    /// longer has, and the neighbour goes on to do the same to the next. <c>Run-PhysicsFeelTest</c>
+    /// logged it as <c>wake prop=2 at=2.77 -> 1.66</c>, <c>prop=3 1.65 -> 0.99</c>,
+    /// <c>prop=4 0.57 -> 0.34</c>, three runs, byte-identical, not one box past 60 degrees.
+    /// Projecting the pre-step velocity, striking at the leading edge and giving the mover its
+    /// momentum back after the wake (all three are in this tree and each is right on its own)
+    /// moved nothing, because the frozen neighbour still takes the first step of every contact
+    /// and there is no second step: by the time it is dynamic the mover has been stopped.</para>
+    ///
+    /// <para><b>So the neighbours are woken BEFORE they are struck.</b> The moment a prop wakes —
+    /// by a shove, a contact, a held crate or an avatar — every Resting prop within
+    /// <see cref="WakeIslandGapM"/> of it wakes too, with no impulse at all, and the wave runs on
+    /// through their neighbours. A domino row is therefore dynamic end to end when the first box
+    /// arrives, the engine resolves every contact between two real masses at the real contact
+    /// point, and the boxes fall over the way boxes do. A prop that was woken and never touched
+    /// sits still under gravity, crosses the settle latch 0.3 s later and freezes again —
+    /// exactly one rest audit, which is what an island wake costs.</para>
+    ///
+    /// <para><b>What it is not.</b> It is not P1's wake and is not counted as one: it prints
+    /// <c>[phys] wake-island</c> (no space after <c>wake</c>, so the suite's contact-wake count
+    /// does not see it), it spends no impulse, it does not touch the 800 ms contact cooldown,
+    /// and it fires only on a wake event — a room where nothing has been touched sees none, so
+    /// P1's "0 wakes over 30 s untouched" bar is untouched too. The broadcast is
+    /// <see cref="PropRelease.None"/>, the same as a settle: nobody knocked these, so nothing
+    /// clanks.</para>
+    /// </summary>
+    private void ServerWakeIsland(int seedId, NetworkedProp seed)
+    {
+        if (!_isServer || seed.Body == null)
+            return;
+        int woken = 0;
+        _islandQueue.Clear();
+        _islandQueue.Enqueue((seedId, seed.Body.GlobalPosition, WorldExtentsOf(seed.Body)));
+        while (_islandQueue.Count > 0 && woken < WakeIslandMax)
+        {
+            (int fromId, Vector3 at, Vector3 ext) = _islandQueue.Dequeue();
+            foreach (PropState p in _registry.AllValues)
+            {
+                if (woken >= WakeIslandMax)
+                    break;
+                if (p.Id == fromId || p.Mode != PropMode.Resting)
+                    continue;
+                NetworkedProp? node = NodeFor(p.Id);
+                if (node == null || !GodotObject.IsInstanceValid(node) || node.Body == null)
+                    continue;
+                Vector3 there = node.Body.GlobalPosition;
+                Vector3 otherExt = WorldExtentsOf(node.Body);
+                // The gap between the two world-axis boxes: the largest per-axis separation
+                // beyond the sum of the extents, negative when they overlap on every axis.
+                float gap = Mathf.Max(Mathf.Max(
+                    Mathf.Abs(there.X - at.X) - ext.X - otherExt.X,
+                    Mathf.Abs(there.Y - at.Y) - ext.Y - otherExt.Y),
+                    Mathf.Abs(there.Z - at.Z) - ext.Z - otherExt.Z);
+                if (gap > WakeIslandGapM)
+                    continue;
+                Transform3D pose = node.Body.GlobalTransform;
+                if (!_registry.Wake(p.Id, pose))
+                    continue;
+                ClearStuckClock(p.Id);
+                PropIslandWakeCount++;
+                woken++;
+                GD.Print($"[phys] wake-island prop={p.Id} near={fromId} gap={Mathf.Max(0f, gap):F3}m total={PropIslandWakeCount}");
+                Rpc(MethodName.ApplyPropState, p.Id, (int)PropMode.Loose, 0, pose, (int)PropRelease.None);
+                node.WakeFromContactServer(Vector3.Zero, there);
+                _islandQueue.Enqueue((p.Id, there, otherExt));
+            }
+        }
+    }
+
+    /// <summary>A prop's half-extents along the world axes at its current orientation -- the
+    /// same arithmetic the bounds audit uses (<see cref="PropPhysics.BoxExtents"/> on the
+    /// collider's local half-size), so an island is measured on the shapes and not on the
+    /// generous bounding spheres FEEL-1 sized for a hand.</summary>
+    private static Vector3 WorldExtentsOf(Carryable body)
+    {
+        Shape3D? shape = body.GetNodeOrNull<CollisionShape3D>("CollisionShape3D")?.Shape;
+        return shape != null
+            ? PropPhysics.BoxExtents(body.GlobalTransform.Basis, PlacementIntegrity.HalfExtentsOf(shape))
+            : Vector3.One * body.BoundingRadiusM;
+    }
+
+    private readonly System.Collections.Generic.Queue<(int Id, Vector3 At, Vector3 Ext)> _islandQueue = new();
+
+    /// <summary>Island wakes this server has spent, beside <see cref="PropWakeCount"/>. Counted
+    /// separately on purpose: a contact wake is P1's evidence, an island wake is its precondition.</summary>
+    public int PropIslandWakeCount { get; private set; }
+
+    // --- PHYS-1 (P3): the audit's restore, gated -------------------------------------------
+
+    /// <summary>When each prop's current run of unfixable audits began, in engine milliseconds.
+    /// Absent = not stuck. Cleared by any audit that passed or depenetrated, and by the prop
+    /// leaving Loose, so the clock measures one episode rather than a lifetime.</summary>
+    private readonly System.Collections.Generic.Dictionary<int, ulong> _stuckSinceMsec = new();
+
+    /// <summary>The last time each waiting prop printed its <c>[phys] rest-wait</c> line. The
+    /// settle latch re-audits a waiting prop every <see cref="SettleTicks"/> ticks — three times
+    /// a second — and a prop a player is standing next to can wait indefinitely by design, so the
+    /// line is throttled to one a second per prop. Throttled rather than dropped: "the audit
+    /// wanted to move this and did not" is the whole evidence P3 leaves behind.</summary>
+    private readonly System.Collections.Generic.Dictionary<int, ulong> _stuckLoggedMsec = new();
+
+    /// <summary>Outcomes that MOVE the prop somewhere it was not — the ones P3 gates.
+    /// <see cref="RestAudit.Outcome.Stuck"/> is included because it writes the last-good
+    /// transform too; its only difference from a restore is that the pose it restores to is known
+    /// to be bad as well.</summary>
+    private static bool IsRestore(RestAudit.Outcome outcome) =>
+        outcome is RestAudit.Outcome.RestoredLastGood or RestAudit.Outcome.Stuck;
+
+    private void ClearStuckClock(int propId)
+    {
+        _stuckSinceMsec.Remove(propId);
+        _stuckLoggedMsec.Remove(propId);
+    }
+
+    /// <summary>
+    /// <b>P3's two conditions, asked of one prop.</b> Advances this prop's stuck clock, measures
+    /// the nearest avatar's grab ray, and answers whether the restore may happen now.
+    ///
+    /// <para>A refusal leaves the prop exactly as it is — still Loose if it was Loose, so the
+    /// settle latch brings it back here in another <see cref="SettleTicks"/> ticks and it
+    /// restores itself the moment either condition clears. Nothing is dropped and nothing is
+    /// retried by a timer of its own.</para>
+    /// </summary>
+    private bool MayRestoreNow(int propId, NetworkedProp node)
+    {
+        ulong now = Time.GetTicksMsec();
+        if (!_stuckSinceMsec.TryGetValue(propId, out ulong since))
+        {
+            since = now;
+            _stuckSinceMsec[propId] = since;
+        }
+        float stuckSec = (now - since) / 1000f;
+        float nearest = NearestGrabRayM(node.Body.GlobalPosition);
+        if (PropRestGate.MayRestoreLastGood(stuckSec, nearest))
+            return true;
+
+        // One line a second, naming both quantities, because the two reasons to wait want
+        // different responses from whoever reads the log: a clock that is still climbing is the
+        // solver being given its second, and a player 0.4 m away is the design refusing on
+        // purpose.
+        if (!_stuckLoggedMsec.TryGetValue(propId, out ulong lastLog) || now - lastLog >= 1000)
+        {
+            _stuckLoggedMsec[propId] = now;
+            GD.Print($"[phys] rest-wait prop={propId} stuck={stuckSec:F2}s "
+                + $"nearestGrabRay={(float.IsPositiveInfinity(nearest) ? "none" : $"{nearest:F2}m")} "
+                + $"(needs >={PropRestGate.StuckHoldSec:F2}s and >{PropRestGate.PlayerAttentionM:F2}m)");
+        }
+        return false;
+    }
+
+    /// <summary>Distance from <paramref name="point"/> to the closest point on any live avatar's
+    /// grab ray, or <see cref="float.PositiveInfinity"/> when there are no avatars — an empty
+    /// room reads as FAR, never as zero, which is what lets the seeker's room correct itself
+    /// while the hider is elsewhere.
+    ///
+    /// <para>The ray is rebuilt from the avatar's replicated aim (yaw + pitch through
+    /// <c>AimQuery</c>), never from a camera node, for the reason
+    /// <c>SandboxAvatar.AimedSurfaceWithinPlaceReach</c> gives: the server has no camera and the
+    /// aim is the thing that is actually replicated.</para></summary>
+    private static float NearestGrabRayM(Vector3 point)
+    {
+        float nearest = float.PositiveInfinity;
+        foreach (SandboxAvatar a in SandboxAvatar.Live)
+        {
+            if (!GodotObject.IsInstanceValid(a) || !a.IsInsideTree())
+                continue;
+            Vector3 dir = MpFoundation.Game.Aim.AimQuery.DirectionFromYawPitch(a.AimYaw, a.AimPitch);
+            float d = PropRestGate.DistanceToGrabRay(point, a.AimOriginGlobalPosition, dir, GrabRange);
+            if (d < nearest)
+                nearest = d;
+        }
+        return nearest;
+    }
+
+    // --- PHYS-1 (P1): the wake funnel --------------------------------------------------------
+
+    /// <summary>How many times <see cref="ServerClampMotion"/>'s per-tick backstop has reduced a
+    /// prop's velocity this session. P2 asks for this to be ~0 in ordinary play, which is a claim
+    /// only a counter can support; the suite reads it and the server prints it.</summary>
+    public long PropClampCount { get; private set; }
+
+    /// <summary>When each prop was last woken by a contact, in engine milliseconds — the storm
+    /// guard's whole state. Never pruned: one entry per prop that has ever been knocked, which is
+    /// bounded by the world's prop count.</summary>
+    private readonly System.Collections.Generic.Dictionary<int, ulong> _lastWokeMsec = new();
+
+    /// <summary>How long after a wake the same prop refuses another. 800 ms — comfortably past
+    /// the settle latch's ~0.3 s, so a body somebody is leaning on cannot wake-settle-wake, and
+    /// comfortably under the gap between two separate events in a collapse.</summary>
+    private const ulong WakeCooldownMsec = 800;
+
+    /// <summary>Where each prop was when it was last woken. Paired with
+    /// <see cref="_lastWokeMsec"/>: together they answer "has anything come of the last wake",
+    /// which is the question the cooldown is really asking.</summary>
+    private readonly System.Collections.Generic.Dictionary<int, Vector3> _lastWokeAt = new();
+
+    /// <summary>How far a prop must have travelled since its last wake for the next contact to
+    /// count as a new shove rather than the same lean. 5 cm — well past the depenetration slack
+    /// a body resting against another can jitter through, and far under the distance any real
+    /// push moves something.</summary>
+    private const float WakeMovedM = 0.05f;
+
+    /// <summary>How many resting props have been woken by a contact this session (P1). Read at
+    /// rest by the suite: a wake storm in an untouched room would be 0 here and must stay 0.</summary>
+    public long PropWakeCount { get; private set; }
+
+    /// <summary>
+    /// <b>Server-only: something moving touched <paramref name="struck"/> — wake it if it is a
+    /// RESTING networked prop</b> (P1). The single funnel for all three contact sources: the
+    /// holder's own hold sweep, a loose prop's <c>body_entered</c>, and an avatar's slide
+    /// collision.
+    ///
+    /// <para><b>Every decision that is not "was there a contact" lives here</b>, on the server,
+    /// in the class that owns prop authority — the physical body reports the contact and knows
+    /// nothing else. Held props are refused by <c>PropRegistry.Wake</c> itself (waking something
+    /// in a hand would take it off a player without any of the release funnel's broadcasts), and
+    /// a prop that is already Loose needs no wake because it is already simulating: the solver is
+    /// what moves it, and re-waking it would zero the velocity it already has.</para>
+    /// </summary>
+    /// <param name="struck">The body that was hit.</param>
+    /// <param name="moverMassKg">Mass of the thing that hit it. 0 for a kinematic body nobody
+    /// weighed, which <c>PropPhysics.WakeSpeed</c> reads as "the target's equal".</param>
+    /// <param name="approachSpeedMps">Closing speed along the contact normal.</param>
+    /// <param name="pushDirection">Which way the shove goes. Need not be normalised.</param>
+    /// <param name="atWorld">Where the contact happened — the impulse's application point, and
+    /// therefore the lever that makes a box topple rather than slide.</param>
+    public Vector3 ServerBumpProp(Carryable struck, float moverMassKg, float approachSpeedMps,
+        Vector3 pushDirection, Vector3 atWorld)
+    {
+        // RETURNS THE IMPULSE IT SPENT, or zero when nothing woke (PHYS-2, 2026-09-21). The one
+        // caller that needs the number is a Loose prop that has just struck a frozen one and
+        // wants to know how much of its own momentum it should still have -- see
+        // NetworkedProp.ReportBump. The other two callers ignore it, as they did the void.
+        if (!_isServer || !PropPhysics.ShouldWake(approachSpeedMps))
+            return Vector3.Zero;
+        if (!GodotObject.IsInstanceValid(struck) || struck.GetParent() is not NetworkedProp target)
+            return Vector3.Zero;
+        if (!_registry.TryGet(target.PropId, out PropState s) || s.Mode != PropMode.Resting)
+            return Vector3.Zero;
+
+        // A SUSTAINED PRESS IS ONE CONTACT, NOT ONE PER SETTLE, and the first live run of
+        // Run-PhysicsFeelTest is why this exists. A bot walked into a crate and stopped there --
+        // SHELF-1 measured that a CharacterBody3D cannot push a RigidBody3D, so it simply leans
+        // on it -- and the server logged NINETY-SEVEN wakes for that one crate over forty
+        // seconds: wake, settle 0.3 s later, wake again, forever. That is a wake storm against
+        // P1's own bar ("0 wakes over 30 s untouched"), it re-zeroes the prop's velocity every
+        // time round (RejoinPhysicsSilently), and it spends a broadcast on each one.
+        //
+        // The cooldown is longer than the settle latch (SettleTicks, ~0.3 s) on purpose: a prop
+        // that has settled and is STILL being leaned on must not immediately re-wake, while a
+        // genuine second hit -- a rolled can arriving at a stack a second after the first one --
+        // is well clear of it.
+        // ...BUT A LEAN IS ONLY A LEAN WHILE NOTHING IS HAPPENING. The cooldown alone also stops
+        // a player SHOVING A STACK ALONG, which is the verb Talon asked for, and it cost a run
+        // to see: with no cooldown the bot pushed through all five boxes (5/5); with a bare
+        // 800 ms cooldown it reached four and stopped, because the fifth box refused to be woken
+        // again while the bot was still walking into it.
+        //
+        // The discriminating question is not "how long ago" but "did anything come of it". A prop
+        // that was woken and is back at rest WHERE IT WAS is a body somebody is leaning on; a prop
+        // that was woken and has MOVED is a shove that is working, and the next contact is the
+        // next shove. So the cooldown is skipped once the prop has travelled WakeMovedM since its
+        // last wake.
+        ulong now = Time.GetTicksMsec();
+        Vector3 herePos = struck.GlobalPosition;
+        if (_lastWokeMsec.TryGetValue(target.PropId, out ulong wokeAt) && now - wokeAt < WakeCooldownMsec)
+        {
+            bool hasMoved = _lastWokeAt.TryGetValue(target.PropId, out Vector3 wokeFrom)
+                && wokeFrom.DistanceSquaredTo(herePos) > WakeMovedM * WakeMovedM;
+            if (!hasMoved)
+                return Vector3.Zero;
+        }
+        _lastWokeMsec[target.PropId] = now;
+        _lastWokeAt[target.PropId] = herePos;
+
+        float targetMass = struck.MassKg > 0f ? struck.MassKg : 1f;
+        Vector3 impulse = PropPhysics.ContactImpulse(pushDirection, moverMassKg, targetMass,
+            approachSpeedMps);
+        if (impulse.LengthSquared() <= 0f)
+            return Vector3.Zero;
+
+        Transform3D at = struck.GlobalTransform;
+        if (!_registry.Wake(target.PropId, at))
+            return Vector3.Zero;
+        ClearStuckClock(target.PropId);
+        PropWakeCount++;
+        // One line per wake, naming the speed it was woken at against the bar. Wakes are rare by
+        // construction (a resting prop wakes once and is then Loose until it settles), so this is
+        // not a per-tick log; and it is the evidence for BOTH halves of P1 -- that a contact woke
+        // something, and that nothing left with more than the bar. "0 wakes over 30 s untouched"
+        // is a claim the suite makes by counting these.
+        GD.Print($"[phys] wake prop={target.PropId} at={approachSpeedMps:F2} m/s "
+            + $"-> {impulse.Length() / targetMass:F2} m/s total={PropWakeCount}");
+        // PropRelease.Bumped (PHYS-1). Nobody dropped, placed or threw this: it was knocked. The
+        // byte is spent on the same every-peer path every other release verb uses, so the sound
+        // layer can give a knock its own voice without a second message.
+        Rpc(MethodName.ApplyPropState, target.PropId, (int)PropMode.Loose, 0, at,
+            (int)PropRelease.Bumped);
+        target.WakeFromContactServer(impulse, atWorld);
+        ServerWakeIsland(target.PropId, target);
+        return impulse;
+    }
+
+    /// <summary>The half of <see cref="NoteAudit"/> that is about the QUERIES an audit issued
+    /// rather than about what it did — split out by PHYS-1 (2026-09-20) so a restore the P3 gate
+    /// refused still pays for the work it actually did. <see cref="LastAuditFor"/> is written here
+    /// too, deliberately: a prop the gate is waiting on is still in the bad pose, and the
+    /// Confirm-time precondition that reads it has to see that.</summary>
+    private void BookAuditCost(int propId, RestAudit.Result audit)
+    {
+        RestAuditCount++;
+        IntegrityQueryCount += audit.Queries;
+        _lastAudit[propId] = audit;
     }
 
     /// <summary>Books one audit and logs the ones that acted. A passing audit is silent by
@@ -332,9 +718,7 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
     /// happened, and the line that matters would be invisible inside them.</summary>
     private void NoteAudit(int propId, RestAudit.Result audit)
     {
-        RestAuditCount++;
-        IntegrityQueryCount += audit.Queries;
-        _lastAudit[propId] = audit;
+        BookAuditCost(propId, audit);
         if (!audit.Corrected)
             return;
         RestCorrectionCount++;
@@ -351,7 +735,29 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
     // --- Loose-physics tuning (server-only; see the _PhysicsProcess loop below) -----------
     /// <summary>Below this linear speed squared (~0.2 m/s), a Loose prop is considered
     /// candidate-at-rest and starts accumulating settle ticks.</summary>
-    private const float SettleSpeedSq = 0.04f;
+    // PHYS-1 (2026-09-20): written as the square of the named speed rather than as the literal
+    // 0.04f it was, so it and SettleSpinSq below cannot drift apart by hand. The value moves by
+    // 3e-9 and nothing observable depends on a settle threshold to nine decimal places.
+    private const float SettleSpeedSq = SettleSpeedMps * SettleSpeedMps;
+
+    /// <summary><b>The same settle question asked of the spin</b> (PHYS-1, P4, 2026-09-20), rad/s
+    /// squared. Without it a can that is still rolling — or a sphere rocking into a shelf lip at
+    /// almost no linear speed — latches to Resting and freezes kinematic mid-motion on every
+    /// peer, which is precisely the opposite of "cans roll around".
+    ///
+    /// <para><b>Derived from <see cref="SettleSpeedSq"/> through the smallest prop's radius, not
+    /// picked.</b> The linear gate is 0.2 m/s; a can (<c>Carryable.CanRadiusM</c>, 35 mm) rolling
+    /// at 0.2 m/s turns at 0.2/0.035 = 5.71 rad/s, so that is the spin a settling can genuinely
+    /// has and the two gates close at the same physical moment. Anything blunter would either
+    /// freeze a roll or leave a prop that has stopped jittering forever un-latched.</para></summary>
+    private const float SettleSpinSq =
+        (SettleSpeedMps / Carryable.CanRadiusM) * (SettleSpeedMps / Carryable.CanRadiusM);
+
+    /// <summary>The linear settle speed itself, m/s — <see cref="SettleSpeedSq"/>'s root, named so
+    /// <see cref="SettleSpinSq"/> can be written as the arithmetic that derives it rather than as
+    /// a second literal that has to be kept in step by hand.</summary>
+    private const float SettleSpeedMps = 0.2f;
+
     /// <summary>Consecutive slow ticks (~0.3s at 60 Hz) required before latching to Resting —
     /// long enough that a prop resting on an unstable stack or mid-bounce doesn't false-latch.</summary>
     private const int SettleTicks = 18;
@@ -490,9 +896,12 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
         // caller written before it is unchanged.
         if (NetworkManager.Instance?.Options.SeedTestProps is { Count: > 0 } seeded)
         {
-            foreach ((Vector3 at, PropKind kind) in seeded)
+            foreach ((Vector3 at, PropKind kind, float rollXDeg, float yawYDeg) in seeded)
             {
-                NetworkedProp? spawned = ServerSpawn(kind, PlaceAt(at));
+                Transform3D pose = rollXDeg == 0f && yawYDeg == 0f
+                    ? PlaceAt(at)
+                    : new Transform3D(Basis.FromEuler(new Vector3(Mathf.DegToRad(rollXDeg), Mathf.DegToRad(yawYDeg), 0f)), at);
+                NetworkedProp? spawned = ServerSpawn(kind, pose);
                 if (spawned != null)
                     _seededIds.Add(spawned.PropId);
             }
@@ -621,6 +1030,55 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
         GD.Print($"[props] --seed-props-drop: released {dropped} seeded prop(s) into Loose at t={_seededDropClock:F2}s");
     }
 
+    // --- --phys-shove: a shove the SUITE chooses (PHYS-2, 2026-09-20) ------------------------
+    //
+    // WHY THIS HAD TO EXIST, and it is a measurement rather than a preference. PHYS-1 staged
+    // Run-PhysicsFeelTest's domino row by walking a bot into it, and then measured the bot: peak
+    // approach speeds of 0.66, 0.70, 0.89, 1.18, 2.88 and 3.30 m/s into the same fixture across
+    // six runs of ONE build, because the debris the bot had just made perturbed its own walk. The
+    // chain length came out 2/5, 3/5, 4/5, 5/5 on that unchanged build. Every OTHER bar of that
+    // suite was stable to two decimal places across the same runs, which is what identifies the
+    // shove as the variable rather than the physics.
+    //
+    // The clock is the same one --seed-props-drop uses and for the same reason: a shove at spawn
+    // is a shove before any peer is connected, so the event has to be placed inside the session.
+    // Each entry fires EXACTLY ONCE.
+    //
+    // WHAT IT DOES NOT DO. It does not wake anything by contact, does not compute an impulse and
+    // does not touch P1's contact path: it is how the FIRST body starts moving, and every prop
+    // that body goes on to knock over is woken by the shipped contact path exactly as a player's
+    // shove would wake it. So a run's `[phys] wake` lines still count contacts, and bar (4)'s
+    // "at least one wake" still means P1's path ran.
+    private double _physShoveClock;
+    private readonly System.Collections.Generic.HashSet<int> _physShovesFired = new();
+
+    private void StepPhysShove(double delta)
+    {
+        if (NetworkManager.Instance?.Options.PhysShoves is not { Count: > 0 } shoves)
+            return;
+        _physShoveClock += delta;
+        for (int i = 0; i < shoves.Count; i++)
+        {
+            (int propId, Vector3 velocity, Vector3 angular, double atSec) = shoves[i];
+            // The INDEX is the identity, not the prop id: a fixture is allowed to shove the same
+            // prop twice on one run (strike the row, then strike what is left of it), and keying
+            // this on the prop would silently swallow the second.
+            if (_physShoveClock < atSec || !_physShovesFired.Add(i))
+                continue;
+            // The spin the FIXTURE named, never the release funnel's random tumble. See
+            // ServerNudgeLoose's overload: +/-2 rad/s on every axis is half of what it takes to
+            // put a cereal box over, so a shove that drew its own spin would still be a coin flip
+            // with a tidy number written beside it.
+            ServerNudgeLoose(propId, velocity, angular);
+            // The line the suite reads: it is the only record of what the fixture actually asked
+            // for, and a shove that names a prop id nothing seeded would otherwise be a silent
+            // no-op that reads downstream as "the physics did not work".
+            GD.Print($"[phys] shove prop={propId} v=({velocity.X:F2}, {velocity.Y:F2}, "
+                + $"{velocity.Z:F2}) |v|={velocity.Length():F2} m/s w=({angular.X:F2}, "
+                + $"{angular.Y:F2}, {angular.Z:F2}) at t={_physShoveClock:F2}s");
+        }
+    }
+
     /// <summary>Server-only: drives every Loose prop's physics tick. Streams its live transform
     /// to every peer (unreliable — the next tick supersedes a dropped one), latches it to Resting
     /// once it has stayed slow for <see cref="SettleTicks"/> consecutive ticks, and recovers it to
@@ -637,14 +1095,37 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
         // swallowed because nothing is Loose any more on the tick we get round to sending it.
         FlushImpacts();
         StepSeededDrop(delta);
+        StepPhysShove(delta);
         _streamTick++;
         // Reuse a persistent scratch list instead of allocating a fresh List<PropState> every
         // physics tick (60 Hz) - this loop needs a snapshot because a Loose prop settling to
         // Resting mutates the registry mid-iteration, but the snapshot itself doesn't need to be
         // a new heap allocation every single tick (see RISK-AUDIT-2026-07-12.md 2.2). Early-out
         // entirely when nothing is Loose - the common case is zero loose props on most ticks.
+        // PROBE-1 (2026-09-20): ASK THE STORE HOW MANY ARE LOOSE INSTEAD OF COUNTING THEM.
+        //
+        // The walk below is O(every prop in the world) and its own comment above says the common
+        // case is that none of them is loose — so on an asleep room it was paying the whole cost
+        // of the loop to learn there was no loop to run, sixty times a second. Worse than the
+        // iteration: `_registry.All` is an IReadOnlyCollection, so `foreach` over it boxes an
+        // enumerator on the heap every tick and copies each 64-byte PropState struct through the
+        // interface. AllValues is the same collection typed concretely, which gets the
+        // dictionary's struct enumerator and allocates nothing.
+        //
+        // The two Remove calls in the `else` branch are pure cleanup of two dictionaries that can
+        // only ever contain ids that WERE loose, so skipping the walk when nothing is loose
+        // cannot leak: the last prop to leave Loose is cleaned up by the pass that saw it leave.
+        // Belt and braces, both dictionaries are cleared on the zero edge.
+        if (PropCostSwitches.LooseIndex && _registry.LooseCount == 0)
+        {
+            if (_looseSettle.Count > 0)
+                _looseSettle.Clear();
+            if (_lastStreamed.Count > 0)
+                _lastStreamed.Clear();
+            return;
+        }
         _loosePropsScratch.Clear();
-        foreach (PropState p in _registry.All)
+        foreach (PropState p in _registry.AllValues)
         {
             if (p.Mode == PropMode.Loose)
                 _loosePropsScratch.Add(p);
@@ -697,6 +1178,26 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
                 continue;
             }
 
+            // PHYS-1 (P2): THE BACKSTOP, before the transform is sampled so what is streamed is
+            // what the prop is actually doing. The real bound is at the impulse
+            // (PropPhysics.WakeSpeed clamps every wake to the bar); this catches the energy a
+            // SOLVER can invent out of a deep overlap or a wedge, which is the event a player
+            // reads as "it freaked out". The counter is the evidence that it is ~0 in play.
+            if (node.ServerClampMotion(out float fromHoriz))
+            {
+                PropClampCount++;
+                // The HORIZONTAL speed, not the magnitude. Printing the magnitude read
+                // "clamp prop=1 to 3.27 m/s (cap 3.00)" -- which looks like the clamp failing
+                // and is a box that is falling, because the cap deliberately does not bound the
+                // fall (see PropPhysics.MaxPropFallSpeedMps).
+                // WHAT IT TRIMMED FROM is the discriminating number. A clamp from 3.02 to 3.00
+                // is the backstop doing its job inside a collapse; a clamp from 15 to 3 is a
+                // solver explosion, and until this printed the `from` they were the same line.
+                GD.Print($"[phys] clamp prop={p.Id} from {fromHoriz:F2} to "
+                    + $"{node.HorizontalSpeedMps:F2} m/s horiz ({node.SpeedMps:F2} total, "
+                    + $"cap {node.SpeedCapMps:F2}) total={PropClampCount}");
+            }
+
             Transform3D t = node.Body.GlobalTransform;
             _registry.SetLooseTransform(p.Id, t);
             // 30 Hz + skip-unchanged: don't re-broadcast a transform that hasn't meaningfully
@@ -711,7 +1212,20 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
                 _lastStreamed[p.Id] = t;
             }
 
-            if (node.Body.LinearVelocity.LengthSquared() < SettleSpeedSq)
+            // PHYS-1 (P4): A CAN MUST NOT "SLEEP" MID-ROLL.
+            //
+            // The linear gate alone latches a prop that is still visibly turning: a can rolling
+            // the last half-metre of its travel crosses 0.2 m/s well before it stops, and a
+            // sphere or a cylinder settling into a shelf lip rocks in place at almost no linear
+            // speed at all. Latching there freezes it kinematic mid-motion on every peer, which
+            // is the opposite of "cans roll around" and reads as the physics giving up.
+            //
+            // SettleSpinSq is the same question asked of the other degree of freedom, and the
+            // number is derived from the linear one through the smallest prop's radius rather
+            // than picked: a 35 mm can rolling at the linear settle speed turns at 0.2/0.035 =
+            // 5.7 rad/s, so anything at or above that is still a roll.
+            if (node.Body.LinearVelocity.LengthSquared() < SettleSpeedSq
+                && node.Body.AngularVelocity.LengthSquared() < SettleSpinSq)
             {
                 int c = _looseSettle.GetValueOrDefault(p.Id) + 1;
                 _looseSettle[p.Id] = c;
@@ -1478,6 +1992,14 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
         Vector3 impulse = fwd * forwardSpeed + Vector3.Up * upSpeed;
         Transform3D at = node.Body.GlobalTransform;
         _registry.Release(propId, at, release);
+        ClearStuckClock(propId);
+        // PHYS-1 (P2): A THROW IS THE ONE EXCEPTION TO THE BAR, and it is granted by the VERB
+        // rather than inferred from the velocity. CARRY-1's throw leaves the hand at 7.5 m/s
+        // forward and 3.2 m/s up, so a prop judged only by its speed would be clamped in the
+        // first tick of every throw. The allowance lasts exactly as long as the launch energy
+        // does (PropPhysics.ThrowEnergySpent) and covers only the prop that was thrown.
+        if (release == PropRelease.Thrown)
+            node.NoteThrownServer();
         Rpc(MethodName.ApplyPropState, propId, (int)PropMode.Loose, 0, at, (int)release);
         node.BeginLooseServer(impulse);
     }

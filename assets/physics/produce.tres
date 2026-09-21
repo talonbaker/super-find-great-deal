@@ -1,0 +1,18 @@
+[gd_resource type="PhysicsMaterial" format=3 uid="uid://physprod0sfgdmvp"]
+
+; PHYS-1 (2026-09-20). SOFT PRODUCE. The highest friction in the table and the only `rough` one.
+;
+; `rough` makes this friction WIN at a contact rather than combine with the other surface's, and
+; it is set here alone because produce is the one prop whose whole physical character is that it
+; grips whatever it touches -- an orange does not skid on anything. Produce.tscn already damps
+; itself heavily for the measured reason its header gives (an undamped sphere on a flat floor
+; never stops, and one rolled out of the room); this is the same answer at the contact instead of
+; in the air.
+;
+; Zero bounce, and `absorbent` is NOT set: a dropped orange should not bounce, and it also should
+; not suppress the bounce of a can that lands on it.
+[resource]
+friction = 0.9
+rough = true
+bounce = 0.0
+absorbent = false
