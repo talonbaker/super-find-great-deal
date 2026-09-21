@@ -229,6 +229,19 @@ try {
         # other reason it belongs at the end. About half a minute.
         @{ Name = "Carry: hold (FEEL-1)"; Script = "Run-CarryHoldTest.ps1" }
 
+        # HANDS-1 (2026-09-20), appended last on the same standing rule. A headless server and
+        # ONE WINDOWED client on udp/7917 -- ASSIGNED by the orchestrator in the dispatch, never
+        # computed from a snapshot of tests/ (the rule FEEL-1 wrote into the rules file after
+        # this repo paid for the other way four times). It is the SECOND suite in this registry
+        # that needs a desktop session, for FP-1's own reason one system over: the subject is
+        # what the player's own lens draws in front of them, and the hands exist only where that
+        # lens exists. It asserts the hand sits on the grab point to 1 cm every frame, that a
+        # crate takes two hands and a can one, and that pressing a button moves a hand. It takes
+        # part in the join-index spawn dealing, which is the other reason it belongs at the end.
+        # About half a minute. Its positive control (-ProveItCanFail) is a second windowed
+        # session and is deliberately NOT run here.
+        @{ Name = "Hands: reach + grip (HANDS-1)"; Script = "Run-HandsSmoke.ps1" }
+
         # WHAT WAS REMOVED HERE AT THE FORK (BASE-1, 2026-09-19), so a reader of an old handoff
         # can tell "deleted" from "lost": the bubble-test world, the shared bubble counter and the
         # last-bubble celebration, the TV portal, the Puffin Lab, the watcher's night gate, the

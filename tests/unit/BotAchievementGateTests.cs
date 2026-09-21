@@ -43,6 +43,14 @@ public class BotAchievementGateTests
         public bool IsHumanInput => true;
     }
 
+    /// <summary>A stand-in lens for HANDS-1's decorator. It only has to answer two angles; the
+    /// decorator under test never touches anything else on the rig.</summary>
+    private sealed class LookDouble : ILookAngles
+    {
+        public float Yaw => 0.25f;
+        public float Pitch => -0.1f;
+    }
+
     /// <summary>
     /// The default is "not a person", so a new scripted source is excluded without anyone
     /// remembering to exclude it. <b>Carries its own positive control</b>: a source that opts in
@@ -82,6 +90,11 @@ public class BotAchievementGateTests
         // by forwarding rather than by hardcoding false.
         Assert.False(new HoldStressIntentSource(new ScriptedDouble(), () => false, 0f).IsHumanInput);
         Assert.True(new HoldStressIntentSource(new HumanDouble(), () => false, 0f).IsHumanInput);
+        // HANDS-1's decorator (2026-09-20), same rule again: it replaces the aim with a real
+        // lens's and forwards everything else, IsHumanInput included. It is only ever given a
+        // bot brain -- a capture probe's -- so it answers false by forwarding, not by hardcoding.
+        Assert.False(new LensAimIntentSource(new ScriptedDouble(), new LookDouble()).IsHumanInput);
+        Assert.True(new LensAimIntentSource(new HumanDouble(), new LookDouble()).IsHumanInput);
 
         Type[] implementers = typeof(IIntentSource).Assembly
             .GetTypes()
@@ -111,6 +124,10 @@ public class BotAchievementGateTests
                 // default. It is scripted, so it forwards false, which the instance assertion
                 // below pins the same way the travel-facing one is pinned above.
                 nameof(HoldStressIntentSource),
+                // HANDS-1's lens-aim decorator (2026-09-20), here for the same reason: it wraps a
+                // capture probe's brain so the bot's aim follows the lens the probe is steering,
+                // and it declares IsHumanInput only to forward it. Asserted on an instance above.
+                nameof(LensAimIntentSource),
                 nameof(LocalInputIntentSource),     // the third-person source the dev harnesses keep
                 nameof(TravelFacingIntentSource),   // a decorator: forwards, asserted above
             },

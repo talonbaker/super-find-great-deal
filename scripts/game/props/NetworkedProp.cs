@@ -361,6 +361,23 @@ public partial class NetworkedProp : Node3D
     /// <summary>The hold distance right now, metres.</summary>
     public float HoldDistanceM => _holdDistanceM;
 
+    /// <summary><b>Where the holder took hold of this prop, in the PROP's own frame</b>
+    /// (HANDS-1, 2026-09-20). <c>Vector3.Zero</c> on any peer that is not the holder.
+    ///
+    /// <para>Read-only, and the only thing HANDS-1 takes from this file. The grab point is
+    /// already the one fact the hold is built on — <see cref="BindToHolderRayHold"/> records it,
+    /// <c>StepSpring</c> drives the pose from it — and a hand that is not drawn at it is drawn
+    /// somewhere the player did not grab. Local rather than world so it survives every rotation
+    /// the player spins the object through, which is the same reason the hold stores it that
+    /// way.</para></summary>
+    public Vector3 GrabLocal => _spring != null ? _grabLocal : Vector3.Zero;
+
+    /// <summary>...and where that point is in the world this frame. Falls back to the body's own
+    /// position when this peer is not the holder, so a caller always gets a point ON the prop
+    /// rather than the world origin.</summary>
+    public Vector3 GrabPointWorld =>
+        _spring != null && IsInstanceValid(Body) ? Body.GlobalTransform * _grabLocal : WorldPosition;
+
     /// <summary>The wheel: move this prop <paramref name="notches"/> steps further out (positive)
     /// or closer in (negative), clamped to its own band. No-op unless this peer is the holder —
     /// the hold distance is a local view decision, exactly as the hold ROTATION has been since
