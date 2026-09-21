@@ -536,7 +536,6 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
                 // note on PhysicsMaterialPathFor for why a code-built prop has to carry them.
                 LinearDamp = 0.55f;   // re-measured; see Can.tscn
                 AngularDamp = 0.25f;
-                CanSleep = false;
                 break;
             case Shape.Box:
                 mesh = new BoxMesh { Size = BoxSizeM };

@@ -464,6 +464,9 @@ public partial class NetworkedProp : Node3D
         // to a sound today. The release VERB now rides the state change as PropRelease and is
         // announced once, in BeginLoose, where a release actually happens.
         Body.RejoinPhysicsSilently();  // rejoins physics locally, but we immediately pin it below:
+        // PHYS-1: and the episode is over, so the body may sleep again. Given back HERE because
+        // this is the every-peer Resting latch that every route into rest funnels through.
+        Body.CanSleep = true;
         Body.Freeze = true;
         Body.FreezeMode = RigidBody3D.FreezeModeEnum.Kinematic;
         Body.LinearVelocity = Vector3.Zero;
@@ -480,6 +483,7 @@ public partial class NetworkedProp : Node3D
         HolderPeerId = 0;
         _holder = null;
         ClearSpring();
+        Body.CanSleep = false;   // PHYS-1: for the length of the episode; see WakeFromContactServer
         Body.OnThrown(impulse);
     }
 
@@ -1016,6 +1020,13 @@ public partial class NetworkedProp : Node3D
         _holder = null;
         ClearSpring();
         _speedCapMps = PropPhysics.MaxPropSpeedMps;
+        // SLEEP IS SUSPENDED FOR THE LENGTH OF THE EPISODE, NOT AUTHORED ON THE PREFAB, and the
+        // difference is 20 ms of server frame time. MEASURED at rest, 162 props, nothing touched:
+        // with `can_sleep = false` in Can.tscn the server's p95 was 23.080 ms against the base
+        // tree's 2.712 ms, because every can on every shelf stayed in the physics server's active
+        // set forever. What the flag is FOR -- a can must not be put to sleep half way down an
+        // aisle -- is only true while it is rolling, which is exactly this episode.
+        Body.CanSleep = false;
         Body.RejoinPhysicsSilently();
         // QUEUED FOR THE NEXT TICK, NOT APPLIED NOW, AND THE FIRST RUN OF THE SUITE IS WHY.
         //

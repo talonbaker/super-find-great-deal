@@ -126,16 +126,21 @@ public class PropMaterialTableTests
                 $"{other} authors a centre of mass; only the cereal box may be top-heavy");
     }
 
-    /// <summary>A can is the only prop allowed to refuse Godot's sleep, because it is the only one
-    /// whose motion is a long slow roll that the project-wide thresholds would freeze mid-way.
-    /// Everything else sleeps normally, which is what keeps a room of 130 props cheap.</summary>
+    /// <summary><b>Sleep is NOT authored on any prefab</b>, and that is a measurement rather
+    /// than a preference: `can_sleep = false` on the can kept every can on every shelf in the
+    /// physics server's active set, and the server's at-rest p95 went from 2.712 ms to 23.080 ms
+    /// with 162 props nobody had touched. The behaviour it was for -- a can must not be put to
+    /// sleep half way down an aisle -- is only true while it is rolling, so
+    /// <c>NetworkedProp.WakeFromContactServer</c> suspends sleep for the length of the episode
+    /// and <c>Unbind</c> gives it back at the settle.</summary>
     [Fact]
-    public void OnlyTheCanRefusesToSleep()
+    public void NoPrefabAuthorsSleep()
     {
-        Assert.Matches(@"^can_sleep = false$",
-            Regex.Match(Prop("Can.tscn"), @"^can_sleep = .*$", RegexOptions.Multiline).Value);
-        foreach (string other in new[] { "CerealBox.tscn", "Crate.tscn", "Produce.tscn", "Sphere.tscn" })
-            Assert.False(RootHas(Prop(other), "can_sleep"), $"{other} authors can_sleep");
+        foreach (string f in new[]
+                 { "Can.tscn", "DealCan.tscn", "CerealBox.tscn", "DealBox.tscn",
+                   "Crate.tscn", "Produce.tscn", "DealProduce.tscn", "Sphere.tscn" })
+            Assert.False(RootHas(Prop(f), "can_sleep"),
+                $"{f} authors can_sleep; sleep is suspended per episode in code, not per prefab");
     }
 
     /// <summary>Tin is the only voice with any bounce: a can pings off a board, and cardboard,

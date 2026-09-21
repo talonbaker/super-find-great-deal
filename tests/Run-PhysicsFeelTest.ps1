@@ -101,7 +101,7 @@ $RowZ = -2.0
 # Starting at 42.30 puts the whole fixture past the spawn (capsule radius ~0.36 m reaches 41.86),
 # so the outbound leg never sees it and the return leg walks the length of it.
 $CanY = 0.06                  # a can's half-height, on its end
-$CanX = 43.70
+$CanX = 44.60
 # TailBot's own can, in the OPEN CROSS-AISLE east of the bays (they span x 35.4-44.6), which is
 # the only place a second bot can legally enter the z = -2 walkway from the far end.
 $TailCanX = 45.50

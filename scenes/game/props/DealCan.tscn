@@ -88,7 +88,6 @@ physics_material_override = ExtResource("3_physmat")
 ; off is a worse bug than a quiet one."
 linear_damp = 0.55
 angular_damp = 0.25
-can_sleep = false
 
 [node name="Visual" type="Node3D" parent="."]
 

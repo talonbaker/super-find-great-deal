@@ -64,7 +64,8 @@ tint = Color(0.74, 0.76, 0.79, 1)
 ; room. v0/d puts a 1 m/s nudge at about 3.3 m of travel, inside PHYS-1's "at least 1 m, stopped
 ; within 4 m" bar and measured there rather than trusted.
 ;
-; can_sleep = false, and ONLY on the can. Godot's sleep thresholds are project-wide and are tuned
+; SLEEP IS NOT AUTHORED HERE ANY MORE (PHYS-1, re-measured 2026-09-20). Godot's sleep
+; thresholds are project-wide and are tuned
 ; for bodies that have arrived, not for a cylinder rolling slowly down an aisle; a can put to
 ; sleep mid-roll freezes in place in front of the player. The cost is nothing, because a prop is
 ; a live rigid body only while it is Loose, and the server's own settle latch -- which PHYS-1
@@ -82,7 +83,6 @@ physics_material_override = ExtResource("3_physmat")
 ; off is a worse bug than a quiet one."
 linear_damp = 0.55
 angular_damp = 0.25
-can_sleep = false
 
 [node name="Visual" type="Node3D" parent="."]
 
