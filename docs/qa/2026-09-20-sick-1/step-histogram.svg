@@ -1,0 +1,152 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="958" font-family="system-ui,Segoe UI,sans-serif">
+<rect width="980" height="958" fill="#ffffff"/>
+<text x="70" y="30" font-size="17" font-weight="700" fill="#111">SICK-1 - how far the first-person eye moved on each render frame, while walking</text>
+<text x="70" y="50" font-size="12.5" fill="#555">30 s patrol + constant 45 deg/s look turn. The bar at 0 is frames on which the view did not move AT ALL.</text>
+<text x="70" y="84" font-size="14" font-weight="650" fill="#c2410c">--cam-interp 0, vsync off (~2100 fps)</text>
+<text x="70" y="100" font-size="12.5" fill="#333">frames with a FROZEN view: <tspan font-weight="700" font-size="14">96.3%</tspan>  of 39,042 frames</text>
+<rect x="70.0" y="102.0" width="20.8" height="198.0" fill="#111"/>
+<rect x="92.2" y="300.0" width="20.8" height="0.0" fill="#c2410c"/>
+<rect x="114.5" y="299.9" width="20.8" height="0.1" fill="#c2410c"/>
+<rect x="136.8" y="300.0" width="20.8" height="0.0" fill="#c2410c"/>
+<rect x="159.0" y="299.9" width="20.8" height="0.1" fill="#c2410c"/>
+<rect x="181.2" y="299.9" width="20.8" height="0.1" fill="#c2410c"/>
+<rect x="203.5" y="299.9" width="20.8" height="0.1" fill="#c2410c"/>
+<rect x="225.8" y="299.9" width="20.8" height="0.1" fill="#c2410c"/>
+<rect x="248.0" y="299.9" width="20.8" height="0.1" fill="#c2410c"/>
+<rect x="270.2" y="300.0" width="20.8" height="0.0" fill="#c2410c"/>
+<rect x="292.5" y="299.9" width="20.8" height="0.1" fill="#c2410c"/>
+<rect x="314.8" y="299.9" width="20.8" height="0.1" fill="#c2410c"/>
+<rect x="337.0" y="299.9" width="20.8" height="0.1" fill="#c2410c"/>
+<rect x="359.2" y="299.9" width="20.8" height="0.1" fill="#c2410c"/>
+<rect x="381.5" y="299.9" width="20.8" height="0.1" fill="#c2410c"/>
+<rect x="403.8" y="299.9" width="20.8" height="0.1" fill="#c2410c"/>
+<rect x="426.0" y="299.9" width="20.8" height="0.1" fill="#c2410c"/>
+<rect x="448.2" y="299.9" width="20.8" height="0.1" fill="#c2410c"/>
+<rect x="470.5" y="299.9" width="20.8" height="0.1" fill="#c2410c"/>
+<rect x="492.8" y="299.9" width="20.8" height="0.1" fill="#c2410c"/>
+<rect x="515.0" y="300.0" width="20.8" height="0.0" fill="#c2410c"/>
+<rect x="537.2" y="299.9" width="20.8" height="0.1" fill="#c2410c"/>
+<rect x="559.5" y="299.9" width="20.8" height="0.1" fill="#c2410c"/>
+<rect x="581.8" y="300.0" width="20.8" height="0.0" fill="#c2410c"/>
+<rect x="604.0" y="299.9" width="20.8" height="0.1" fill="#c2410c"/>
+<rect x="626.2" y="300.0" width="20.8" height="0.0" fill="#c2410c"/>
+<rect x="648.5" y="299.9" width="20.8" height="0.1" fill="#c2410c"/>
+<rect x="670.8" y="299.9" width="20.8" height="0.1" fill="#c2410c"/>
+<rect x="693.0" y="299.9" width="20.8" height="0.1" fill="#c2410c"/>
+<rect x="715.2" y="299.9" width="20.8" height="0.1" fill="#c2410c"/>
+<rect x="737.5" y="299.9" width="20.8" height="0.1" fill="#c2410c"/>
+<rect x="759.8" y="300.0" width="20.8" height="0.0" fill="#c2410c"/>
+<rect x="782.0" y="299.9" width="20.8" height="0.1" fill="#c2410c"/>
+<rect x="804.2" y="299.9" width="20.8" height="0.1" fill="#c2410c"/>
+<rect x="826.5" y="299.9" width="20.8" height="0.1" fill="#c2410c"/>
+<rect x="848.8" y="299.9" width="20.8" height="0.1" fill="#c2410c"/>
+<rect x="871.0" y="300.0" width="20.8" height="0.0" fill="#c2410c"/>
+<rect x="893.2" y="299.9" width="20.8" height="0.1" fill="#c2410c"/>
+<rect x="915.5" y="299.9" width="20.8" height="0.1" fill="#c2410c"/>
+<rect x="937.8" y="295.1" width="20.8" height="4.9" fill="#c2410c"/>
+<line x1="70" y1="300" x2="960" y2="300" stroke="#999"/>
+<text x="70" y="316" font-size="11" fill="#666" text-anchor="middle">0 mm</text>
+<text x="292" y="316" font-size="11" fill="#666" text-anchor="middle">16 mm</text>
+<text x="515" y="316" font-size="11" fill="#666" text-anchor="middle">32 mm</text>
+<text x="738" y="316" font-size="11" fill="#666" text-anchor="middle">47 mm</text>
+<text x="960" y="316" font-size="11" fill="#666" text-anchor="middle">63 mm</text>
+<text x="70" y="334" font-size="11" fill="#888">per-frame eye movement (mm) -&gt;   the black bar is zero movement</text>
+<text x="70" y="384" font-size="14" font-weight="650" fill="#0369a1">--cam-interp 1, vsync off (~2100 fps)</text>
+<text x="70" y="400" font-size="12.5" fill="#333">frames with a FROZEN view: <tspan font-weight="700" font-size="14">0.0%</tspan>  of 38,223 frames</text>
+<rect x="70.0" y="581.6" width="20.8" height="18.4" fill="#111"/>
+<rect x="92.2" y="584.1" width="20.8" height="15.9" fill="#0369a1"/>
+<rect x="114.5" y="583.5" width="20.8" height="16.5" fill="#0369a1"/>
+<rect x="136.8" y="588.9" width="20.8" height="11.1" fill="#0369a1"/>
+<rect x="159.0" y="581.6" width="20.8" height="18.4" fill="#0369a1"/>
+<rect x="181.2" y="580.4" width="20.8" height="19.6" fill="#0369a1"/>
+<rect x="203.5" y="582.0" width="20.8" height="18.0" fill="#0369a1"/>
+<rect x="225.8" y="581.0" width="20.8" height="19.0" fill="#0369a1"/>
+<rect x="248.0" y="581.4" width="20.8" height="18.6" fill="#0369a1"/>
+<rect x="270.2" y="582.1" width="20.8" height="17.9" fill="#0369a1"/>
+<rect x="292.5" y="581.6" width="20.8" height="18.4" fill="#0369a1"/>
+<rect x="314.8" y="579.0" width="20.8" height="21.0" fill="#0369a1"/>
+<rect x="337.0" y="558.1" width="20.8" height="41.9" fill="#0369a1"/>
+<rect x="359.2" y="402.0" width="20.8" height="198.0" fill="#0369a1"/>
+<rect x="381.5" y="539.5" width="20.8" height="60.5" fill="#0369a1"/>
+<rect x="403.8" y="553.4" width="20.8" height="46.6" fill="#0369a1"/>
+<rect x="426.0" y="594.4" width="20.8" height="5.6" fill="#0369a1"/>
+<rect x="448.2" y="597.1" width="20.8" height="2.9" fill="#0369a1"/>
+<rect x="470.5" y="598.0" width="20.8" height="2.0" fill="#0369a1"/>
+<rect x="492.8" y="598.0" width="20.8" height="2.0" fill="#0369a1"/>
+<rect x="515.0" y="599.1" width="20.8" height="0.9" fill="#0369a1"/>
+<rect x="537.2" y="598.2" width="20.8" height="1.8" fill="#0369a1"/>
+<rect x="559.5" y="598.8" width="20.8" height="1.2" fill="#0369a1"/>
+<rect x="581.8" y="599.5" width="20.8" height="0.5" fill="#0369a1"/>
+<rect x="604.0" y="598.3" width="20.8" height="1.7" fill="#0369a1"/>
+<rect x="626.2" y="599.5" width="20.8" height="0.5" fill="#0369a1"/>
+<rect x="648.5" y="598.3" width="20.8" height="1.7" fill="#0369a1"/>
+<rect x="670.8" y="598.5" width="20.8" height="1.5" fill="#0369a1"/>
+<rect x="693.0" y="598.8" width="20.8" height="1.2" fill="#0369a1"/>
+<rect x="715.2" y="598.8" width="20.8" height="1.2" fill="#0369a1"/>
+<rect x="737.5" y="598.4" width="20.8" height="1.6" fill="#0369a1"/>
+<rect x="759.8" y="598.8" width="20.8" height="1.2" fill="#0369a1"/>
+<rect x="782.0" y="598.6" width="20.8" height="1.4" fill="#0369a1"/>
+<rect x="804.2" y="598.5" width="20.8" height="1.5" fill="#0369a1"/>
+<rect x="826.5" y="598.6" width="20.8" height="1.4" fill="#0369a1"/>
+<rect x="848.8" y="598.1" width="20.8" height="1.9" fill="#0369a1"/>
+<rect x="871.0" y="599.1" width="20.8" height="0.9" fill="#0369a1"/>
+<rect x="893.2" y="598.4" width="20.8" height="1.6" fill="#0369a1"/>
+<rect x="915.5" y="598.9" width="20.8" height="1.1" fill="#0369a1"/>
+<rect x="937.8" y="561.1" width="20.8" height="38.9" fill="#0369a1"/>
+<line x1="70" y1="600" x2="960" y2="600" stroke="#999"/>
+<text x="70" y="616" font-size="11" fill="#666" text-anchor="middle">0 mm</text>
+<text x="292" y="616" font-size="11" fill="#666" text-anchor="middle">1 mm</text>
+<text x="515" y="616" font-size="11" fill="#666" text-anchor="middle">3 mm</text>
+<text x="738" y="616" font-size="11" fill="#666" text-anchor="middle">4 mm</text>
+<text x="960" y="616" font-size="11" fill="#666" text-anchor="middle">5 mm</text>
+<text x="70" y="634" font-size="11" fill="#888">per-frame eye movement (mm) -&gt;   the black bar is zero movement</text>
+<text x="70" y="684" font-size="14" font-weight="650" fill="#a16207">--cam-interp 0, HEADLESS control (145 fps)</text>
+<text x="70" y="700" font-size="12.5" fill="#333">frames with a FROZEN view: <tspan font-weight="700" font-size="14">58.5%</tspan>  of 4,328 frames</text>
+<rect x="70.0" y="702.0" width="20.8" height="198.0" fill="#111"/>
+<rect x="92.2" y="899.8" width="20.8" height="0.2" fill="#a16207"/>
+<rect x="114.5" y="898.8" width="20.8" height="1.2" fill="#a16207"/>
+<rect x="136.8" y="900.0" width="20.8" height="0.0" fill="#a16207"/>
+<rect x="159.0" y="898.7" width="20.8" height="1.3" fill="#a16207"/>
+<rect x="181.2" y="898.8" width="20.8" height="1.2" fill="#a16207"/>
+<rect x="203.5" y="898.7" width="20.8" height="1.3" fill="#a16207"/>
+<rect x="225.8" y="898.7" width="20.8" height="1.3" fill="#a16207"/>
+<rect x="248.0" y="898.8" width="20.8" height="1.2" fill="#a16207"/>
+<rect x="270.2" y="899.9" width="20.8" height="0.1" fill="#a16207"/>
+<rect x="292.5" y="898.7" width="20.8" height="1.3" fill="#a16207"/>
+<rect x="314.8" y="898.8" width="20.8" height="1.2" fill="#a16207"/>
+<rect x="337.0" y="898.5" width="20.8" height="1.5" fill="#a16207"/>
+<rect x="359.2" y="898.7" width="20.8" height="1.3" fill="#a16207"/>
+<rect x="381.5" y="898.8" width="20.8" height="1.2" fill="#a16207"/>
+<rect x="403.8" y="898.6" width="20.8" height="1.4" fill="#a16207"/>
+<rect x="426.0" y="898.8" width="20.8" height="1.2" fill="#a16207"/>
+<rect x="448.2" y="898.7" width="20.8" height="1.3" fill="#a16207"/>
+<rect x="470.5" y="898.6" width="20.8" height="1.4" fill="#a16207"/>
+<rect x="492.8" y="897.6" width="20.8" height="2.4" fill="#a16207"/>
+<rect x="515.0" y="899.8" width="20.8" height="0.2" fill="#a16207"/>
+<rect x="537.2" y="897.4" width="20.8" height="2.6" fill="#a16207"/>
+<rect x="559.5" y="898.8" width="20.8" height="1.2" fill="#a16207"/>
+<rect x="581.8" y="899.8" width="20.8" height="0.2" fill="#a16207"/>
+<rect x="604.0" y="897.4" width="20.8" height="2.6" fill="#a16207"/>
+<rect x="626.2" y="900.0" width="20.8" height="0.0" fill="#a16207"/>
+<rect x="648.5" y="897.4" width="20.8" height="2.6" fill="#a16207"/>
+<rect x="670.8" y="898.6" width="20.8" height="1.4" fill="#a16207"/>
+<rect x="693.0" y="898.7" width="20.8" height="1.3" fill="#a16207"/>
+<rect x="715.2" y="898.7" width="20.8" height="1.3" fill="#a16207"/>
+<rect x="737.5" y="897.4" width="20.8" height="2.6" fill="#a16207"/>
+<rect x="759.8" y="899.8" width="20.8" height="0.2" fill="#a16207"/>
+<rect x="782.0" y="898.5" width="20.8" height="1.5" fill="#a16207"/>
+<rect x="804.2" y="898.8" width="20.8" height="1.2" fill="#a16207"/>
+<rect x="826.5" y="898.6" width="20.8" height="1.4" fill="#a16207"/>
+<rect x="848.8" y="897.4" width="20.8" height="2.6" fill="#a16207"/>
+<rect x="871.0" y="899.8" width="20.8" height="0.2" fill="#a16207"/>
+<rect x="893.2" y="897.4" width="20.8" height="2.6" fill="#a16207"/>
+<rect x="915.5" y="898.6" width="20.8" height="1.4" fill="#a16207"/>
+<rect x="937.8" y="812.6" width="20.8" height="87.4" fill="#a16207"/>
+<line x1="70" y1="900" x2="960" y2="900" stroke="#999"/>
+<text x="70" y="916" font-size="11" fill="#666" text-anchor="middle">0 mm</text>
+<text x="292" y="916" font-size="11" fill="#666" text-anchor="middle">16 mm</text>
+<text x="515" y="916" font-size="11" fill="#666" text-anchor="middle">32 mm</text>
+<text x="738" y="916" font-size="11" fill="#666" text-anchor="middle">47 mm</text>
+<text x="960" y="916" font-size="11" fill="#666" text-anchor="middle">63 mm</text>
+<text x="70" y="934" font-size="11" fill="#888">per-frame eye movement (mm) -&gt;   the black bar is zero movement</text>
+</svg>

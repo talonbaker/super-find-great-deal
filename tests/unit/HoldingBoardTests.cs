@@ -244,12 +244,16 @@ public class HoldingBoardTests
             Assert.Contains(row.Role.Contains("YOU") ? "YOU" : "NEXT", row.Role);
     }
 
+    /// <summary>SOLO-1 (2026-09-20) replaced HOLD-1's em dash here with the word WAITING. A peer
+    /// with neither role is a person standing in the room wondering whether they are in this
+    /// game, and a dash does not answer that; see <see cref="HoldingBoardModel.Waiting"/> and
+    /// <c>SoloRoundTests</c> for the rest of the waiting-room behaviour.</summary>
     [Fact]
-    public void RoleCell_IsAnEmDashForAPeerWithNeitherRole()
+    public void RoleCell_SaysWaitingForAPeerWithNeitherRole()
     {
         HideSeekView view = View(HideSeekPhase.Seeking,
             scores: new Dictionary<int, int> { [Ada] = 1, [Ben] = 1, [Cal] = 0 });
-        Assert.Equal(HoldingBoardModel.NoRole,
+        Assert.Equal(HoldingBoardModel.Waiting,
             HoldingBoardModel.RoleCell(view, Cal, isSelf: true));
     }
 
@@ -260,8 +264,8 @@ public class HoldingBoardTests
     public void RoleCell_NeverMatchesAVacantRole()
     {
         HideSeekView view = View(HideSeekPhase.Seeking, hider: 0, seeker: 0);
-        Assert.Equal(HoldingBoardModel.NoRole, HoldingBoardModel.RoleCell(view, 0, isSelf: true));
-        Assert.Equal(HoldingBoardModel.NoRole, HoldingBoardModel.RoleCell(view, Ada, isSelf: true));
+        Assert.Equal(HoldingBoardModel.Waiting, HoldingBoardModel.RoleCell(view, 0, isSelf: true));
+        Assert.Equal(HoldingBoardModel.Waiting, HoldingBoardModel.RoleCell(view, Ada, isSelf: true));
     }
 
     [Fact]

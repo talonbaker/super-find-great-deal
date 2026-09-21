@@ -120,4 +120,21 @@ public interface IIntentSource
     /// decorator that wraps a human source must forward this rather than take the default.</para>
     /// </summary>
     bool IsHumanInput => false;
+
+    /// <summary>
+    /// <b>Does this source fill <see cref="MoveIntent.AimYaw"/> itself?</b> False for an ordinary
+    /// scripted brain, which reports no look at all and is therefore wrapped in
+    /// <c>TravelFacingIntentSource</c> so a fixture faces the way it is walking (FP-1's knob 58
+    /// note explains why that wrapper exists).
+    ///
+    /// <para><b>True is for a scripted source that DELIBERATELY looks somewhere other than where
+    /// it is going</b> — FEEL-1's hold-stress brain, which has to turn 180 degrees on the spot
+    /// while strafing, because that is the motion that used to put a held crate inside its
+    /// holder. Without this the travel-facing wrapper would overwrite the yaw every tick and the
+    /// suite would be testing a bot that cannot perform the manoeuvre it is named after.</para>
+    ///
+    /// <para>Defaults to false, so nothing that exists today changes and a new brain opts in
+    /// visibly. A human source is never wrapped at all (the wrapper is applied only to
+    /// <c>IsHumanInput: false</c> sources), so this is meaningless for one.</para></summary>
+    bool SuppliesLook => false;
 }

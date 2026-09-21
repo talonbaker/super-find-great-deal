@@ -357,6 +357,14 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
     private bool _everHeld;
     private float _halfHeightM;
 
+    /// <summary><b>The radius of the sphere that contains this prop however it is turned</b>, from
+    /// its own mesh bounds — <c>CarryHold.BoundingRadiusM</c>. Read by the carry to derive this
+    /// prop's minimum hold distance and its clearance from the holder's capsule, which is why it
+    /// is a fact about the BODY and not a constant anywhere else: a can and a crate cannot share
+    /// one, and the whole defect FEEL-1 exists to fix was a carry that behaved as if they
+    /// could.</summary>
+    public float BoundingRadiusM { get; private set; }
+
     public override void _Ready()
     {
         // An explicitly authored Profile wins outright; otherwise the material picks one, and
@@ -438,6 +446,13 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
         // the eye judges "resting on the hands" against, and because the two collider paths do not
         // share a node name. Zero for a prop with no mesh, which LoadLiftM reads as "no lift".
         _halfHeightM = shapeMesh.Mesh is { } loadMesh ? loadMesh.GetAabb().Size.Y * 0.5f : 0f;
+        // ...and the whole bulk, for the carry. Same source as the half-height above and for the
+        // same reason: the mesh is what the eye judges a hold against, and the two collider paths
+        // do not share a node name. A prop with no mesh reads 0, which the carry treats as a
+        // point-sized object rather than as an error.
+        BoundingRadiusM = shapeMesh.Mesh is { } bulkMesh
+            ? Feel.CarryHold.BoundingRadiusM(bulkMesh.GetAabb().Size)
+            : 0f;
 
         // Both paths converge here: whatever emission the material carries at this moment is
         // the prop's resting glow. Authored props keep their .tscn value; the code-built
@@ -603,10 +618,25 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
     {
         _springHeld = true;
         _everHeld = true;
-        // Same order and same reasoning as OnPickedUp: collision dies FIRST, so a prop the holder
-        // is standing on can never push them as it detaches.
+        // LAYER 0, MASK 1 (FEEL-1, 2026-09-20). This used to be mask 0 as well, and that one line
+        // was Talon's whole complaint: "there is still an extreme issue with how items are picked
+        // up: if the player moves, the item clips into their body, which is stupid and feels bad
+        // ... that's why there's physics and collision on the objects." A held prop collided with
+        // NOTHING -- not the holder, not a shelf.
+        //
+        // The two halves are different questions and they get different answers:
+        //   LAYER 0 -- nothing collides WITH the held prop. The holder walks freely, another
+        //              player is not shoved by what you are carrying, and the aim ray still passes
+        //              through it (AimedSurfaceWithinPlaceReach's doc depends on exactly this).
+        //   MASK 1  -- the held prop collides with the WORLD. It is frozen kinematic, so nothing
+        //              is simulated; the mask is what lets NetworkedProp sweep it with
+        //              PhysicsServer3D.BodyTestMotion and stop it against a shelf instead of
+        //              posting it through one.
+        // The holder's own body is handled separately, by projection rather than by collision
+        // (CarryHold.PushOutOfSegment) -- colliding with the holder would let a held crate push
+        // the player around, which is a worse bug than the one being fixed.
         CollisionLayer = 0;
-        CollisionMask = 0;
+        CollisionMask = 1;
         FreezeMode = FreezeModeEnum.Kinematic;
         Freeze = true;
         LinearVelocity = Vector3.Zero;

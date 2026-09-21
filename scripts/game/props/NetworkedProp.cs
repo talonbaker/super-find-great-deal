@@ -57,11 +57,21 @@ public partial class NetworkedProp : Node3D
     /// <summary>The physical prop (mesh + collision + carry entry points). Subclass by Kind.</summary>
     public Carryable Body { get; private set; } = null!;
 
-    // Non-null exactly while server-dictated Held: the lightweight carry binding that chases
-    // the holder's anchor every frame. Never null+attached at once with the offline/local
-    // CarryController path — a NetworkedProp is only ever driven by the server, not by a local
-    // Carry.TryPickUp/Drop.
-    private CarryController? _netHolder;
+    // --- Held, on every peer (FEEL-1, 2026-09-20) -------------------------------------------
+    //
+    // A networked prop is no longer driven by a CarryController anchor chase on ANY peer. That
+    // chase pulled the prop toward a chest-height socket, which is the snap Talon rode into
+    // ("it shouldn't snap to any location") and, with the old CollisionMask = 0, the clip as
+    // well. CarryController stays for the offline feel sandbox, which is the only thing that
+    // still uses it.
+    //
+    // The holder's own peer drives the RAY HOLD (see StepSpring): the grabbed point rides the
+    // view ray at the hold distance the wheel sets. Every other peer — and the server, for a
+    // remote holder — holds the prop at the pose it had RELATIVE TO THE HOLDER at the grab,
+    // which costs no wire at all: ApplyPropState's Held broadcast already carries the prop's
+    // transform at the moment of the grab and until now simply discarded it.
+    private SandboxAvatar? _holder;
+    private Transform3D _holdLocalToHolder = Transform3D.Identity;
 
     // Client-only: the latest streamed Loose transform + whether we're currently following one.
     // The server never sets these — it IS the simulation, not a follower of it.
@@ -75,7 +85,16 @@ public partial class NetworkedProp : Node3D
     // CarryController, exactly as before. The mismatch between the two views is the spring's lag
     // and is documented in the CARRY-1 handoff, measured, rather than hidden.
     private CarrySpring? _spring;
-    private SandboxAvatar? _springHolder;
+
+    // The ray hold's state, on the holder's peer only. All four are recorded ONCE, at the grab,
+    // from where the prop already is (BindToHolderRayHold) -- except the distance, which is the
+    // one thing the wheel moves.
+    private Vector3 _grabLocal;          // the grabbed point, in the prop's own frame
+    private Basis _holdBasisLocal = Basis.Identity;  // its orientation, relative to the holder's yaw
+    private float _holdDistanceM;        // along the view ray, in [_holdMinM, _holdMaxM]
+    private float _holdMinM;             // derived from this prop's bulk and this holder's capsule
+    private float _holdMaxM;
+    private CarryHold.BlockedClock _blocked; // how long the world has had it STUCK (not merely scraping)
 
     /// <summary>How far a full-heft item sags below the hand anchor, metres — the feel system's
     /// own <c>Interactor.CarryDroop</c> default. Here rather than on <see cref="CarrySpring"/>
@@ -163,84 +182,136 @@ public partial class NetworkedProp : Node3D
     /// <summary>Where this prop currently is, for observers/logging. Reads the physical body.</summary>
     public Vector3 WorldPosition => Body?.GlobalPosition ?? GlobalPosition;
 
-    /// <summary>Server-dictated: attach the body to holderAvatar's carry anchor. The body derives
-    /// its transform every frame from the anchor thereafter (local holder = predicted avatar,
-    /// remote holder = interpolated proxy) — zero per-tick streaming while held. The
-    /// <see cref="IsInstanceValid"/> guard closes the freed-holder crash if the holder avatar is
-    /// despawned while still bound (e.g. a disconnect race).</summary>
-    /// <param name="springOnThisPeer">True on the ONE peer whose local player is the holder: the
-    /// prop is then carried by the feel system's critically damped spring
-    /// (<see cref="CarrySpring"/>) instead of by the anchor chase, which is what makes it read as
-    /// held in the hand rather than welded to a socket. Every other peer passes false and is
-    /// unchanged. See <see cref="BindToHolderSpring"/>.</param>
-    public void BindToHolder(Node3D holderAvatar, bool springOnThisPeer = false)
+    /// <summary>
+    /// Server-dictated: this prop is now in <paramref name="holderAvatar"/>'s hands.
+    ///
+    /// <para><paramref name="propAtGrab"/> is the prop's transform at the instant of the grab, as
+    /// the server broadcast it. <b>It used to be discarded on this path and it is now the whole
+    /// mechanism</b>: every peer that is not the holder records the prop's pose RELATIVE TO THE
+    /// HOLDER at that moment and holds it there, so a spectator sees the object where the holder
+    /// is actually carrying it instead of welded to a chest socket — and no new field crosses the
+    /// wire to achieve it. The holder's own peer additionally derives the ray hold from its own
+    /// view (see <see cref="BindToHolderRayHold"/>), which is why the grab offset does not need to
+    /// ride the wire either.</para>
+    ///
+    /// <para>The <see cref="IsInstanceValid"/> guards below close the freed-holder crash if the
+    /// holder avatar is despawned while still bound (a disconnect race).</para>
+    /// </summary>
+    /// <param name="springOnThisPeer">True on the ONE peer whose local player is the holder.</param>
+    public void BindToHolder(Node3D holderAvatar, Transform3D propAtGrab, bool springOnThisPeer = false)
     {
         HolderPeerId = long.TryParse(holderAvatar.Name.ToString(), out long id) ? (int)id : 0;
-        if (springOnThisPeer && holderAvatar is SandboxAvatar springHolder)
-        {
-            BindToHolderSpring(springHolder);
-            return;
-        }
-        // A grab is legal while the prop is still Loose (chasing down a rolling ball is
-        // half the game), so this transition can arrive mid-stream-follow. Stop following
-        // here for the same reason Unbind must: with _looseFollowing left true, the stream
-        // lerp in _PhysicsProcess keeps dragging the body toward the last (now frozen)
-        // loose sample every tick while Carryable's anchor-chase pulls it toward the hand —
-        // the held item visibly drifts away from the holder as they walk
+        // A grab is legal while the prop is still Loose (chasing down a rolling ball is half the
+        // game), so this transition can arrive mid-stream-follow. Stop following here, or the
+        // stream lerp keeps dragging the body toward the last (now frozen) loose sample every tick
+        // underneath the hold — the held item visibly drifts away from the holder as they walk
         // (Run-RegrabTest.ps1 pins this down).
         _looseFollowing = false;
-        _netHolder = new CarryController
+        _holder = holderAvatar as SandboxAvatar;
+        _holdLocalToHolder = _holder != null && IsInstanceValid(_holder)
+            ? _holder.GlobalTransform.AffineInverse() * propAtGrab
+            : Transform3D.Identity;
+        _blocked = new CarryHold.BlockedClock();
+        // Freeze, drop the collision LAYER, keep the world MASK, pop and cue — everything about a
+        // pickup except moving the prop. Nothing snaps: see Carryable.OnPickedUpBySpring.
+        Body.OnPickedUpBySpring();
+        if (springOnThisPeer && _holder != null)
         {
-            AnchorProvider = () => IsInstanceValid(holderAvatar) && holderAvatar is SandboxAvatar a
-                ? a.CarryAnchorGlobalTransform
-                : Body.GlobalTransform,
-        };
-        Body.OnPickedUp(_netHolder); // reuses existing freeze + collision-off + snap-to-anchor
+            BindToHolderRayHold(_holder);
+            return;
+        }
+        // NOT the holder: project this instant, rather than waiting for the first follow tick.
+        // Measured -- the witness saw the crate 0.034 m inside its holder on exactly ONE sample,
+        // the one taken between the Held broadcast landing and the next _PhysicsProcess, because
+        // the pose the grab arrived with was the holder's own and this peer's copy of that body
+        // is an interpolated proxy a few centimetres away from it. One tick is still a tick, and
+        // the bar is zero.
+        if (_holder != null && IsInstanceValid(_holder) && IsInstanceValid(Body))
+        {
+            Transform3D at = _holder.GlobalTransform * _holdLocalToHolder;
+            (Vector3 capA, Vector3 capB, float capR) = HolderCapsule(_holder);
+            Body.GlobalPosition = CarryHold.PushOutOfSegment(
+                at.Origin, capA, capB, capR + Body.BoundingRadiusM + CarryHold.HolderSkinM,
+                at.Origin - _holder.GlobalPosition);
+            Body.GlobalBasis = at.Basis.Orthonormalized();
+        }
     }
 
     /// <summary>
-    /// <b>The holder's own view of what they are carrying</b> (CARRY-1): the feel system's spring,
-    /// driving this prop's frozen kinematic body toward the holder's hand every physics tick.
+    /// <b>The holder's own view of what they are carrying</b> — the ray hold (FEEL-1) driven by
+    /// the feel system's spring (CARRY-1).
     ///
-    /// <para><b>Why the holder alone.</b> A spring is a LOCAL prediction of a server-authoritative
-    /// fact — "peer N holds prop P". Running it on every peer would mean every peer integrating a
-    /// slightly different spring against a slightly different interpolated anchor, so no two
-    /// players would agree where the crate is, for a purely cosmetic gain. Running it on the
-    /// holder alone costs one view-to-view mismatch (the spring's lag, measured in the handoff)
-    /// and buys the one thing the carry was rebuilt for: on the screen of the person holding it,
-    /// the object has weight.</para>
+    /// <para><b>Nothing moves on the grab frame, and that is the ruling.</b> Talon: <i>"it
+    /// shouldn't snap to any location; that's why there's physics and collision on the
+    /// objects."</i> So the hold is described in terms of where the prop ALREADY IS: its centre is
+    /// projected onto the view ray to give the hold distance, the point on that ray is recorded in
+    /// the prop's own frame as the grabbed point, and its orientation is recorded relative to the
+    /// holder's yaw. Feed those three back through <c>CarryHold</c> on the very next tick and you
+    /// get the prop's own transform, exactly — which is what
+    /// <c>CarryHoldTests.OnTheGrabFrame_TheDerivedPoseIsThePropsOwnTransform</c> pins.</para>
     ///
-    /// <para><b>No snap to the anchor, deliberately.</b> <see cref="Carryable.OnPickedUp"/> places
-    /// the prop AT the hand on the grab frame, which is right for a chase that would otherwise
-    /// visibly slide the prop up off the floor. It is wrong for a spring: seeding at the item and
-    /// letting it travel is the documented anti-pop (<see cref="CarrySpring.Seed"/>), and it is
-    /// the one frame in which the grab reads. So this takes the freeze/collision/cue half of the
-    /// pickup (<see cref="Carryable.OnPickedUpBySpring"/>) and leaves the placement to the
-    /// spring.</para>
+    /// <para><b>The ray rather than a raycast hit.</b> The pick is an aim CONE
+    /// (<c>InteractTargeting</c>), not a ray test, so there is no hit point to use — and a bot
+    /// has no camera at all. Projecting the centre onto the ray is defined for every caller,
+    /// needs no physics query on the grab frame, and gives the identical no-snap property.</para>
+    ///
+    /// <para><b>Why only the holder.</b> A spring is a LOCAL prediction of a server-authoritative
+    /// fact. Running it on every peer would have every peer integrating a slightly different
+    /// spring against a slightly different interpolated anchor, so no two players would agree
+    /// where the crate is, for a purely cosmetic gain. CARRY-1's reasoning, unchanged.</para>
     /// </summary>
-    private void BindToHolderSpring(SandboxAvatar holder)
+    private void BindToHolderRayHold(SandboxAvatar holder)
     {
-        _looseFollowing = false;
-        _netHolder = null;
-        _springHolder = holder;
         _spring = new CarrySpring();
-        Body.OnPickedUpBySpring();
-        _spring.Seed(Body.GlobalTransform, HandAnchor());
+        Transform3D prop = Body.GlobalTransform;
+        Vector3 eye = holder.AimOriginGlobalPosition;
+        Vector3 dir = Aim.AimQuery.DirectionFromYawPitch(holder.AimYaw, holder.AimPitch);
+        if (!dir.IsFinite() || dir.LengthSquared() < 1e-6f)
+            dir = -holder.GlobalTransform.Basis.Z;
+        dir = dir.Normalized();
+
+        _holdMinM = CarryHold.HoldMinM(HolderCapsuleRadiusM(holder), Body.BoundingRadiusM);
+        _holdMaxM = CarryHold.HoldMaxM(_holdMinM);
+        _holdDistanceM = CarryHold.ClampHoldDistance(
+            (prop.Origin - eye).Dot(dir), _holdMinM, _holdMaxM);
+        // The grabbed point is kept ON the object: see CarryHold.GrabPointOnProp for the run
+        // where a bot with no pitch produced a 1.2 m lever and every hold broke 0.3 s after the
+        // grab. The hold DISTANCE is then re-derived from that point, so the prop still ends up
+        // exactly where it was whenever the ray really did pass through it.
+        Vector3 onProp = CarryHold.GrabPointOnProp(
+            prop.Origin, CarryHold.HoldPoint(eye, dir, _holdDistanceM), Body.BoundingRadiusM);
+        _holdDistanceM = CarryHold.ClampHoldDistance((onProp - eye).Dot(dir), _holdMinM, _holdMaxM);
+        _grabLocal = CarryHold.GrabLocalFrom(prop, onProp);
+        _holdBasisLocal = CarryHold.HoldBasisLocal(holder.AimYaw, prop.Basis);
+        // The documented anti-pop: seed AT THE ITEM, never at the target. BOTH seeds matter and
+        // the second one was measured the hard way -- without it _springPos starts at the WORLD
+        // ORIGIN, so the first tick's spring races across the map, the speed cap turns that into
+        // a long crawl, and the break-hold clock (which reads the prop's distance from its
+        // target) gives the hold up 0.3 s after every grab. The suite's first run said exactly
+        // that: "hold broken prop=1014 blocked=1.23m for 0.30s", nine samples after the grab.
+        _spring.Seed(prop, prop.Origin);
+        _springPos = prop.Origin;
+        _springVel = Vector3.Zero;
     }
 
-    /// <summary>Where the hand is THIS tick, for the spring: the holder's replicated carry mount,
-    /// raised by the load lift an armful gets, nudged by the item's own hold offset, and dropped
-    /// by the droop its heft earns. Identical in shape to <c>Interactor.HandAnchor</c>; the inputs
-    /// differ because the anchor here is a replicated transform rather than a lab rig.</summary>
-    private Vector3 HandAnchor()
+    /// <summary>Where the grabbed point should be this tick: along the holder's view ray, at the
+    /// hold distance the wheel has set, and never inside the holder (the same projection the
+    /// resolved pose gets, applied to the target as well so the spring is not fighting a target it
+    /// can never reach).</summary>
+    private Vector3 HoldPointNow(SandboxAvatar holder)
     {
-        if (_springHolder == null || !IsInstanceValid(_springHolder))
-            return Body.GlobalPosition;
-        Transform3D mount = Body.EffectiveCarryAnchor(_springHolder.CarryAnchorGlobalTransform);
-        Interactable? it = _feel;
-        Vector3 offset = it?.HoldOffset ?? Vector3.Zero;
-        return mount.Origin + mount.Basis * offset - Vector3.Up * (CarryDroopM * SpringHeft);
+        Vector3 eye = holder.AimOriginGlobalPosition;
+        Vector3 dir = Aim.AimQuery.DirectionFromYawPitch(holder.AimYaw, holder.AimPitch);
+        if (!dir.IsFinite() || dir.LengthSquared() < 1e-6f)
+            dir = -holder.GlobalTransform.Basis.Z;
+        return CarryHold.HoldPoint(eye, dir.Normalized(), _holdDistanceM);
     }
+
+    /// <summary>The holder's collision radius, or the reference body's when the avatar has not
+    /// measured itself yet. Never a literal here: <c>AvatarProportions</c> is the one place a
+    /// body's dimensions are derived, and a second copy is how a mirror goes stale.</summary>
+    private static float HolderCapsuleRadiusM(SandboxAvatar holder) =>
+        holder.Proportions.CapsuleRadiusM;
 
     /// <summary>The feel-system component on this prop's body, if it has one. Every prop in this
     /// game is authored with one (CARRY-1 packet item 6); the null path is the code-built CI
@@ -260,23 +331,121 @@ public partial class NetworkedProp : Node3D
     private float SpringHeft =>
         _spring?.HeftOf(_feel?.HeftKg ?? Body.MassKg) ?? 0f;
 
-    /// <summary>The holder's live spring-vs-anchor gap in metres, or 0 when this peer is not the
-    /// holder. Instrumentation only — BotHarness samples it so the mismatch the handoff reports is
-    /// a measurement rather than an estimate.</summary>
-    public float SpringLagM => _spring != null ? _spring.LagTo(HandAnchor()) : 0f;
+    /// <summary><b>How far the prop is trailing the point the holder is holding it at</b>,
+    /// metres, or 0 on a peer that is not the holder. The spring's steady-state lag, sampled
+    /// rather than estimated — <c>BotHarness</c> logs it and the handoff's lag table is built from
+    /// it. Since FEEL-1 the target is the ray hold rather than a chest anchor, so this is the
+    /// number that has to stay under half of <see cref="HoldMinM"/> at a walk.</summary>
+    public float SpringLagM => _spring != null && _holder != null && IsInstanceValid(_holder)
+        // THE BODY, not the CarrySpring object's own Position. Measured the hard way: the ray
+        // hold integrates the spring's arithmetic against its own state (see SpringTo), so
+        // CarrySpring.Position sits at the value it was SEEDED with for the whole hold and
+        // LagTo against it reported a mean lag of 1.54 m and a peak of 3.34 m for a carry that
+        // was in fact tracking to within a few centimetres. An instrument reading the wrong
+        // field looks exactly like the feature being broken.
+        ? Body.GlobalPosition.DistanceTo(TargetOriginFor(_holder, HoldPointNow(_holder)))
+        : 0f;
 
-    /// <summary>True while this peer is the one carrying this prop on the spring.</summary>
+    /// <summary>True while this peer is the one carrying this prop on the ray hold.</summary>
     public bool SpringActive => _spring != null;
 
-    /// <summary>Drop the holder-side spring. Every transition out of Held runs through here, and
-    /// it must, or the spring keeps writing this body's transform every tick underneath whatever
-    /// the network says is happening to it.</summary>
-    private void ClearSpring()
+    /// <summary>This prop's minimum hold distance and the far end of its scroll band, metres —
+    /// 0 unless this peer is the holder. Read by the wheel (<c>HoldDistanceController</c>) so the
+    /// band it scrolls through is THIS prop's, derived, rather than a constant that is wrong for
+    /// either a can or a crate.</summary>
+    public float HoldMinM => _spring != null ? _holdMinM : 0f;
+
+    /// <inheritdoc cref="HoldMinM"/>
+    public float HoldMaxM => _spring != null ? _holdMaxM : 0f;
+
+    /// <summary>The hold distance right now, metres.</summary>
+    public float HoldDistanceM => _holdDistanceM;
+
+    /// <summary><b>Where the holder took hold of this prop, in the PROP's own frame</b>
+    /// (HANDS-1, 2026-09-20). <c>Vector3.Zero</c> on any peer that is not the holder.
+    ///
+    /// <para>Read-only, and the only thing HANDS-1 takes from this file. The grab point is
+    /// already the one fact the hold is built on — <see cref="BindToHolderRayHold"/> records it,
+    /// <c>StepSpring</c> drives the pose from it — and a hand that is not drawn at it is drawn
+    /// somewhere the player did not grab. Local rather than world so it survives every rotation
+    /// the player spins the object through, which is the same reason the hold stores it that
+    /// way.</para></summary>
+    public Vector3 GrabLocal => _spring != null ? _grabLocal : Vector3.Zero;
+
+    /// <summary>...and where that point is in the world this frame. Falls back to the body's own
+    /// position when this peer is not the holder, so a caller always gets a point ON the prop
+    /// rather than the world origin.</summary>
+    public Vector3 GrabPointWorld =>
+        _spring != null && IsInstanceValid(Body) ? Body.GlobalTransform * _grabLocal : WorldPosition;
+
+    /// <summary>The wheel: move this prop <paramref name="notches"/> steps further out (positive)
+    /// or closer in (negative), clamped to its own band. No-op unless this peer is the holder —
+    /// the hold distance is a local view decision, exactly as the hold ROTATION has been since
+    /// CARRY-1, and it reaches everybody else in the transform a place sends.</summary>
+    public void ScrollHold(int notches)
     {
         if (_spring == null)
             return;
+        _holdDistanceM = CarryHold.Scroll(_holdDistanceM, notches, _holdMinM, _holdMaxM);
+    }
+
+    /// <summary>
+    /// <b>Signed clearance between this held prop and its holder's collision capsule</b>, metres:
+    /// the distance from the prop's centre to the capsule's axis, less the capsule's radius and
+    /// less the prop's own bounding radius. <b>Negative is interpenetration</b> — the prop is
+    /// inside the person carrying it, which is the defect this whole packet exists to end.
+    ///
+    /// <para>Computed on any peer that has both the prop and its holder, so the suite can assert
+    /// it on the holder's own view AND on a witness. A bounding SPHERE rather than the prop's
+    /// AABB, which is the conservative direction: the sphere contains the box at every
+    /// orientation, so a non-negative reading here proves the box is clear too.</para>
+    ///
+    /// <para>0 when this prop is not held, or its holder is not on this peer — an absence, and
+    /// the suite treats it as one rather than as a clearance of zero.</para></summary>
+    public float HolderClearanceM
+    {
+        get
+        {
+            if (_holder == null || !IsInstanceValid(_holder) || !IsInstanceValid(Body))
+                return 0f;
+            (Vector3 a, Vector3 b, float radius) = HolderCapsule(_holder);
+            Vector3 closest = ClosestOnSegment(Body.GlobalPosition, a, b);
+            return Body.GlobalPosition.DistanceTo(closest) - radius - Body.BoundingRadiusM;
+        }
+    }
+
+    /// <summary>The holder's collision capsule as a segment plus a radius, in world space — the
+    /// two cap CENTRES, so a point measured against the segment is measured against the capsule.
+    /// Derived from <c>AvatarProportions</c>, never from literals.</summary>
+    private static (Vector3 A, Vector3 B, float Radius) HolderCapsule(SandboxAvatar holder)
+    {
+        Sandbox.AvatarProportions p = holder.Proportions;
+        float radius = p.CapsuleRadiusM;
+        float half = Mathf.Max(0f, p.CapsuleHeightM * 0.5f - radius);
+        Vector3 centre = holder.GlobalTransform * p.CapsuleCentreLocal;
+        Vector3 up = Vector3.Up * half;
+        return (centre - up, centre + up, radius);
+    }
+
+    private static Vector3 ClosestOnSegment(Vector3 p, Vector3 a, Vector3 b)
+    {
+        Vector3 ab = b - a;
+        float lenSq = ab.LengthSquared();
+        if (lenSq < 1e-10f)
+            return a;
+        return a + ab * Mathf.Clamp((p - a).Dot(ab) / lenSq, 0f, 1f);
+    }
+
+    /// <summary>Drop the hold. Every transition out of Held runs through here, and it must, or the
+    /// hold keeps writing this body's transform every tick underneath whatever the network says is
+    /// happening to it.</summary>
+    private void ClearSpring()
+    {
+        if (_spring == null && _holder == null)
+            return;
         _spring = null;
-        _springHolder = null;
+        _holder = null;
+        _blocked = new CarryHold.BlockedClock();
         Body.ReleaseHoldForNetworkFollow();
     }
 
@@ -290,7 +459,7 @@ public partial class NetworkedProp : Node3D
     public void Unbind(Transform3D restingAt)
     {
         HolderPeerId = 0;
-        _netHolder = null;
+        _holder = null;
         ClearSpring();
         _looseFollowing = false;
         // SILENT (SFX-2). This runs on EVERY peer for every Resting transition — a settle, a
@@ -315,7 +484,7 @@ public partial class NetworkedProp : Node3D
     public void BeginLooseServer(Vector3 impulse)
     {
         HolderPeerId = 0;
-        _netHolder = null;
+        _holder = null;
         ClearSpring();
         Body.OnThrown(impulse);
     }
@@ -327,7 +496,7 @@ public partial class NetworkedProp : Node3D
     public void DropLooseServer()
     {
         HolderPeerId = 0;
-        _netHolder = null;
+        _holder = null;
         ClearSpring();
         Body.RejoinPhysicsSilently();
     }
@@ -348,7 +517,7 @@ public partial class NetworkedProp : Node3D
     public void PlaceLooseServer(Transform3D at)
     {
         HolderPeerId = 0;
-        _netHolder = null;
+        _holder = null;
         ClearSpring();
         Body.GlobalTransform = at;
         Body.OnPlaced();
@@ -365,7 +534,7 @@ public partial class NetworkedProp : Node3D
     public void BeginLoose(Transform3D t, PropRelease release)
     {
         HolderPeerId = 0;
-        _netHolder = null;
+        _holder = null;
         ClearSpring();
         Body.ReleaseHoldForNetworkFollow();
         // SFX-1: THE RELEASE, ANNOUNCED WHERE EVERY PEER CAN HEAR IT.
@@ -446,6 +615,18 @@ public partial class NetworkedProp : Node3D
             StepSpring((float)delta);
             return;
         }
+        // HELD, but by somebody else (and on the server whenever a CLIENT is the holder). The
+        // pose is the one the prop had relative to that holder at the grab, which is what makes a
+        // spectator's view agree with the holder's without a byte on the wire -- see
+        // BindToHolder. Smoothed rather than snapped, because the holder's body is itself an
+        // interpolated proxy here, and projected out of the holder's capsule for exactly the
+        // reason the holder's own view is: an interpolation that lags a turn would otherwise put
+        // the crate inside the person carrying it on everybody else's screen.
+        if (_holder != null)
+        {
+            StepFollowHolder((float)delta);
+            return;
+        }
         // Only a CLIENT following a Loose stream does anything here — the server's own prop
         // IS the simulation (RigidBody3D physics runs on it directly, no follow needed), and a
         // prop that isn't currently Loose has nothing to chase.
@@ -469,26 +650,289 @@ public partial class NetworkedProp : Node3D
         Body.ObservedSpeedMps = delta > 0 ? (Body.GlobalPosition - before).Length() / (float)delta : 0f;
     }
 
-    /// <summary>One holder-side carry tick. The pose the spring trails is the holder's own carry
-    /// mount, turned by whatever the player has spun the item to since they picked it up
-    /// (<see cref="SandboxAvatar.HeldPropLocalRotation"/> — local to the holder, and carried
-    /// across to everyone else only by the transform a PLACE sends), then by the item's authored
-    /// hold rotation.</summary>
+    /// <summary>
+    /// <b>One tick of the holder's own hold.</b> Four things happen, in this order, and each one
+    /// is a different guarantee:
+    ///
+    /// <list type="number">
+    /// <item><b>The target.</b> The grabbed point rides the view ray at the hold distance; the
+    /// prop's origin is wherever it has to be for that to be true at this orientation. The
+    /// orientation follows the holder's YAW and the rotation the player has spun it to, never the
+    /// pitch -- a thing held in front of you does not tumble because you looked down.</item>
+    /// <item><b>The spring.</b> Unchanged from CARRY-1 (a critically damped spring, heft on the
+    /// response dial) except that its response is floored so the lag at a walk stays under half
+    /// of <c>HoldMin</c> -- <c>CarryHold.HoldOmega</c>.</item>
+    /// <item><b>The world.</b> The resolved step is SWEPT with the physics server rather than
+    /// written straight onto the body, so a held crate stops against a shelf instead of passing
+    /// through it. Talon: <i>"that's why there's physics and collision on the objects."</i> If
+    /// the world holds it off its target by more than <c>BreakHoldM</c> for <c>BreakHoldSec</c>,
+    /// the hold is given up -- you shoved it into a shelf and kept walking.</item>
+    /// <item><b>The holder.</b> Whatever is left is projected out of the holder's own capsule.
+    /// This is the HARD guarantee and it is applied to the pose that is actually written, not to
+    /// the target: the distance clamp and the spring floor make it rare, this makes it
+    /// certain.</item>
+    /// </list>
+    ///
+    /// <para>The step is also SPEED-CAPPED (<c>CarryHold.CapStep</c>), so no spring response and
+    /// no frame-time spike can turn a carried crate into a projectile -- Talon: <i>"I want to know
+    /// objects won't freak out and make other objects jump around randomly."</i></para>
+    /// </summary>
     private void StepSpring(float dt)
     {
-        if (_springHolder == null || !IsInstanceValid(_springHolder) || !IsInstanceValid(Body))
+        if (_holder == null || !IsInstanceValid(_holder) || !IsInstanceValid(Body))
         {
             ClearSpring();
             return;
         }
-        Transform3D mount = Body.EffectiveCarryAnchor(_springHolder.CarryAnchorGlobalTransform);
-        Interactable? it = _feel;
-        Basis hold = it != null
-            ? Basis.FromEuler(it.HoldRotationDegrees * (Mathf.Pi / 180.0f))
-            : Basis.Identity;
-        Basis pose = mount.Basis.Orthonormalized() * _springHolder.HeldPropLocalRotation * hold;
-        Body.GlobalTransform = _spring!.Step(dt, HandAnchor(), pose, SpringHeft);
+
+        // 1. the target
+        Vector3 holdPoint = HoldPointNow(_holder);
+        Basis pose = PoseFor(_holder);
+        Vector3 target = CarryHold.PropOriginFor(holdPoint, pose, _grabLocal);
+
+        // 2. the spring
+        float omega = CarryHold.HoldOmega(
+            Mathf.Lerp(_spring!.LightResponse, _spring.HeavyResponse, SpringHeft),
+            _holdMinM, Net.AvatarMotor.MoveSpeed);
+        Vector3 from = Body.GlobalPosition;
+        if (ShouldSeat(target))
+        {
+            // A teleport, a respawn, a room move. Seat the whole hold on the target and start the
+            // spring again from there; easing would drag the prop across the level.
+            _springPos = target;
+            _springVel = Vector3.Zero;
+            _blocked = new CarryHold.BlockedClock();
+            Body.GlobalTransform = new Transform3D(pose, target);
+            return;
+        }
+        Vector3 resolved = SpringTo(target, omega, dt);
+        resolved = CarryHold.CapStep(from, resolved,
+            CarryHold.MaxHoldSpeedMps(Net.AvatarMotor.MoveSpeed), dt);
+
+        // 3. the world
+        Body.GlobalBasis = pose;
+        Vector3 swept = SweepTo(from, resolved);
+
+        // 4. the holder
+        (Vector3 capA, Vector3 capB, float capR) = HolderCapsule(_holder);
+        Vector3 final = CarryHold.PushOutOfSegment(
+            swept, capA, capB, capR + Body.BoundingRadiusM + CarryHold.HolderSkinM,
+            holdPoint - _holder.AimOriginGlobalPosition);
+        Body.GlobalPosition = final;
+        _springPos = final;
+
+        // THE BREAK IS ABOUT THE WORLD, NOT ABOUT THE SPRING, and the difference cost a run.
+        // A hold that is merely lagging -- the speed cap biting through a fast turn, a heavy
+        // crate on a slow response -- is the carry working; a hold the WORLD is sitting on is a
+        // hold the player has lost. So the clock only runs on a tick where the sweep actually hit
+        // something (swept != resolved) AND the prop is past BreakHoldM from its target. Measured
+        // without the first half: every grab broke 0.3 s later, in open floor, with nothing
+        // touching the prop at all.
+        float blocked = final.DistanceTo(target);
+        bool worldIsInTheWay = swept.DistanceSquaredTo(resolved) > 1e-8f;
+        _blocked = CarryHold.StepBlocked(_blocked, blocked, worldIsInTheWay, dt);
+        if (CarryHold.ShouldBreakHold(blocked, _blocked.Seconds)
+            && _holder.OwnerPeerId == Multiplayer.GetUniqueId()
+            && PropManager.Instance is { } mgr)
+        {
+            // The world has had this prop off its target for BreakHoldSec: it has left your
+            // hands. A request, never a local mutation, exactly like every other carry verb.
+            //
+            // A DROP, NOT A PLACE, and that was measured rather than reasoned. A place can be
+            // REFUSED -- the prop is wedged in whatever stopped it, so placement integrity
+            // answers Overlapping -- which leaves the player holding something the game has
+            // decided they have lost, and spends the refusal channel the HUD and three suites
+            // read on an event nobody asked for (Run-PlaceTest reported `ordinal 4` where its
+            // own scripted place expected 5). A drop cannot be refused, which is the right
+            // property for a transition the WORLD forced: an object torn out of your hands is a
+            // drop, not a careful set-down, and the physics that torn it out takes it from here.
+            GD.Print($"[carry] hold broken prop={PropId} blocked={blocked:F2}m for {_blocked.Seconds:F2}s");
+            _blocked = new CarryHold.BlockedClock();
+            // RELEASE IN PLACE, not a drop and not a place. A place can be refused (the prop is
+            // wedged in whatever stopped it) and a drop applies a toss arc off the holder's
+            // facing -- which would fling the object the world just took off you. Where it is,
+            // at rest, is the honest outcome: the world has it now.
+            mgr.ClientRequestReleaseInPlace();
+        }
     }
+
+    /// <summary>This tick's world orientation for the held prop: the holder's yaw, the rotation
+    /// the player has spun it to since the grab (<see cref="SandboxAvatar.HeldPropLocalRotation"/>
+    /// -- local to the holder, and carried to everyone else only by the transform a PLACE sends),
+    /// and the orientation it was grabbed at.
+    ///
+    /// <para>The item's authored hold rotation is deliberately NOT applied any more. It exists to
+    /// seat a prop in a socket at a chosen angle, and there is no socket: the ruling is that the
+    /// object keeps the orientation it was grabbed at.</para></summary>
+    private Basis PoseFor(SandboxAvatar holder) =>
+        CarryHold.PoseBasis(holder.AimYaw, holder.HeldPropLocalRotation, _holdBasisLocal);
+
+    /// <summary>Where the prop's ORIGIN has to be for its grabbed point to sit on
+    /// <paramref name="holdPoint"/> at this tick's orientation.</summary>
+    private Vector3 TargetOriginFor(SandboxAvatar holder, Vector3 holdPoint) =>
+        CarryHold.PropOriginFor(holdPoint, PoseFor(holder), _grabLocal);
+
+    /// <summary>One spring step in POSITION only, at the given response. The orientation is
+    /// written directly -- the hold's orientation is exact by construction and a second slerp
+    /// would add a lag nobody asked for -- so <see cref="CarrySpring.Step"/>'s trailing-tilt arm
+    /// is not used here. Its arithmetic is, through <see cref="CarrySpring.Spring"/>, which is the
+    /// same unconditionally stable closed form.</summary>
+    private Vector3 SpringTo(Vector3 target, float omega, float dt)
+    {
+        Vector3 pos = _springPos;
+        Vector3 vel = _springVel;
+        CarrySpring.Spring(ref pos, ref vel, target, omega, dt);
+        _springVel = vel;
+        return pos;
+    }
+
+    private Vector3 _springPos;
+    private Vector3 _springVel;
+
+    /// <summary>
+    /// Move the held body from <paramref name="from"/> toward <paramref name="to"/> and stop it
+    /// where the world does, returning where it actually got to.
+    ///
+    /// <para><b>A sweep rather than an assignment, and that is the whole of "the objects have
+    /// collision".</b> A frozen kinematic body whose transform is written lands wherever it is
+    /// told, shelf or no shelf; <c>PhysicsServer3D.BodyTestMotion</c> asks the same broadphase the
+    /// simulation uses where the body WOULD have stopped. One query per held prop per tick, and
+    /// there is at most one held prop per player.</para>
+    ///
+    /// <para>The body's own collision MASK is what this reads
+    /// (<c>Carryable.OnPickedUpBySpring</c> sets it to the world layer while held); its LAYER
+    /// stays 0, so nothing is pushed BY the held prop and the query cannot hit the holder.</para>
+    /// </summary>
+    private Vector3 SweepTo(Vector3 from, Vector3 to)
+    {
+        Vector3 motion = to - from;
+        if (motion.LengthSquared() < 1e-10f)
+            return to;
+        var parameters = new PhysicsTestMotionParameters3D
+        {
+            From = new Transform3D(Body.GlobalBasis, from),
+            Motion = motion,
+            RecoveryAsCollision = false,
+        };
+        var result = new PhysicsTestMotionResult3D();
+        return PhysicsServer3D.BodyTestMotion(Body.GetRid(), parameters, result)
+            ? from + result.GetTravel()
+            : to;
+    }
+
+    // SWEEP-AND-SLIDE WAS TRIED HERE AND REVERTED (FEEL-1, 2026-09-20), and it is worth knowing
+    // why before anyone tries it again. The idea is sound and it is what a CharacterBody3D does
+    // for the player's own body: when the sweep is blocked, redirect the remainder along the
+    // contact face so a carried crate drags past a corner instead of jamming on it.
+    //
+    // MEASURED THREE WAYS, and every one costs the guarantee this whole packet is about.
+    // Run-CarryHoldTest's shelf penetration is 0.001 m without it, against a 0.02 m bar:
+    //   two slide iterations, default margin  -> 0.065 m
+    //   the same, margin raised to the game's own overlap tolerance (0.02 m) -> 0.065 m, unmoved
+    //   ONE slide iteration with RecoveryAsCollision TRUE on it (so depenetration counts as a
+    //     collision and the body cannot creep along the face) -> 0.058 m
+    //
+    // The third result is the one that names the cause. If the creep were the solver pushing the
+    // body along a face, counting recovery would have stopped it; it did not. The ROTATION is
+    // written before the sweep and is never itself swept, so sliding sideways moves the box to a
+    // place where its NEW orientation is already inside the pillar, and a translation test has
+    // nothing to say about that. Lateral compliance over an unswept rotation is compliance in the
+    // wrong dimension.
+    //
+    // And it did not even buy what it was for: bot D still wedged (blocked 1.20 m against 1.83 m
+    // before, still zero progress for 0.82 s), so Run-PlaceTest went from 2/3 to 0/3.
+    //
+    // THE NEXT ATTEMPT SHOULD SWEEP THE ROTATION FIRST -- test the pose change as its own motion,
+    // or refuse a rotation that would penetrate and keep last tick's basis -- and only then add
+    // lateral compliance on top. Doing them in that order is the difference between a crate that
+    // drags past a bin and a crate that is half inside one.
+
+    /// <summary>
+    /// <b>One tick of a held prop on a peer that is not the holder</b> -- and on the server
+    /// whenever a client is the holder.
+    ///
+    /// <para>The pose is the one the prop had relative to the holder's body at the grab, replayed
+    /// against wherever that body is now. It needs no wire field (see <see cref="BindToHolder"/>),
+    /// it tracks the holder's turn and their carry geometry, and it agrees with the holder's own
+    /// ray hold to within the spring's lag and the wheel -- the two documented mismatches, the
+    /// same class as the hold ROTATION, which has been local since CARRY-1 and reaches everyone in
+    /// the transform a place sends.</para>
+    ///
+    /// <para>Smoothed rather than snapped because the holder is an interpolated proxy here, and
+    /// projected out of their capsule for the same reason the holder's own view is: the suite
+    /// asserts zero interpenetration on BOTH views, because a crate inside the hider's chest is
+    /// exactly as bad on the seeker's screen as on their own.</para>
+    /// </summary>
+    private void StepFollowHolder(float dt)
+    {
+        if (_holder == null || !IsInstanceValid(_holder) || !IsInstanceValid(Body))
+        {
+            ClearSpring();
+            return;
+        }
+        Transform3D target = _holder.GlobalTransform * _holdLocalToHolder;
+        if (ShouldSeat(target.Origin))
+        {
+            // The holder teleported (see ShouldSeat). The same threshold on every peer, because
+            // it is a fact about how far a holder can travel in a frame rather than about this
+            // prop's hold band.
+            Body.GlobalTransform = target;
+            return;
+        }
+        float w = 1f - Mathf.Exp(-FollowResponse * dt);
+        Vector3 pos = Body.GlobalPosition.Lerp(target.Origin, w);
+        pos = CarryHold.CapStep(Body.GlobalPosition, pos,
+            CarryHold.MaxHoldSpeedMps(Net.AvatarMotor.MoveSpeed), dt);
+        (Vector3 capA, Vector3 capB, float capR) = HolderCapsule(_holder);
+        Body.GlobalPosition = CarryHold.PushOutOfSegment(
+            pos, capA, capB, capR + Body.BoundingRadiusM + CarryHold.HolderSkinM,
+            target.Origin - _holder.GlobalPosition);
+        Body.GlobalBasis = Body.GlobalBasis.Orthonormalized().Slerp(target.Basis.Orthonormalized(), w);
+    }
+
+    /// <summary>
+    /// <b>A hold does not EASE across a room.</b> When the target is further away than any lag
+    /// could honestly put it, the prop is seated on it outright instead of springing toward it.
+    ///
+    /// <para><b>Measured, and it is the room teleport</b> (<c>Run-CarryNetTest</c> phase 3). The
+    /// round moves a holder between rooms; the hold's target moves 40 m in one tick; the spring
+    /// and the speed cap then walked the crate across the map at 4.8 m/s while the witness
+    /// watched it trail its holder by 33 m, then 32, then 31. The old anchor chase never showed
+    /// this because it snapped to the anchor on the grab frame and lerped hard afterwards.</para>
+    ///
+    /// <para>The threshold is derived rather than typed: a lag can only exceed
+    /// <c>HoldMax + BreakHoldM</c> if the world is holding the prop, and the world holding it is
+    /// the case the break rule takes -- so anything past that is a discontinuity, not a lag. The
+    /// measured worst honest lag is 0.809 m against a threshold of 1.8 m.</para></summary>
+    private bool ShouldSeat(Vector3 target) =>
+        Body.GlobalPosition.DistanceSquaredTo(target) > TeleportSeatM * TeleportSeatM;
+
+    /// <summary>
+    /// How far the target must jump before the hold is SEATED on it rather than swept toward it,
+    /// metres.
+    ///
+    /// <para><b>5 m, and the first version of this got it wrong in the direction that matters.</b>
+    /// It was <c>HoldMax + BreakHoldM</c> (1.8 m) on the reasoning that no honest lag can exceed
+    /// that -- true of a lag, and false of a FRAME. Under a loaded 45-suite marathon a physics
+    /// tick can be long enough that the holder moves most of a metre in it, the target jumps past
+    /// 1.8 m, and the seat then teleports the prop onto the target <b>with no sweep at all</b> --
+    /// straight through whatever was in between. Measured: the held crate ended up
+    /// <b>0.183 m inside SearchPillar</b> in a marathon, on a tree where the same suite reported
+    /// 0.001 m three times standalone. That is the packet's own planted fault arriving through a
+    /// door the fix opened.</para>
+    ///
+    /// <para>5 m separates the two cases by two orders of magnitude rather than by a margin: a
+    /// room teleport moves a holder 38-80 m (ROUND-1's measured room separations), while at the
+    /// 2.4 m browse pace a holder covers 5 m only in a frame lasting two full seconds, which is
+    /// not a frame this game survives for other reasons. Everything below it is swept, so the
+    /// world still stops the prop; above it, nothing legitimate is in between anyway, because the
+    /// holder did not travel through the space -- they were moved across it.</para></summary>
+    private const float TeleportSeatM = 5.0f;
+
+    /// <summary>How hard a non-holder's view chases the pose the holder is carrying at, s^-1.
+    /// Fast: this is not a feel spring, it is a correction against an interpolated body, and the
+    /// interpolation has already done the smoothing that matters.</summary>
+    private const float FollowResponse = 25f;
 
     /// <summary><b>This prop just took a contact worth hearing</b> — the body's own handler
     /// calls this instead of playing anything (SFX-2; see <see cref="Carryable.ImpactReporter"/>).

@@ -74,6 +74,26 @@ public readonly record struct HideSeekTuning
     /// </summary>
     public float MatchTallySec { get; init; }
 
+    /// <summary>
+    /// <b>One peer may play both roles in sequence</b> (SOLO-1, <c>--solo</c>; Talon 2026-09-20:
+    /// "I would like the ability to play the game through, only for testing, with one player").
+    ///
+    /// <para><b>A DEV FLAG, never the default</b>, and the only knob in this record that is not a
+    /// number. It lives here rather than on <see cref="HideSeekInput"/> because it is a fact about
+    /// how this SESSION was launched, not about what the server observed on a tick — the same
+    /// distinction that keeps <see cref="MatchRounds"/> out of the input — and because the tuning
+    /// is already threaded into <see cref="HideSeekLoop.Step"/>, so the loop reads it without a
+    /// signature change.</para>
+    ///
+    /// <para><b>What it changes is exactly one thing: who may hold the two roles.</b> With it on
+    /// and ONE human present, that peer is dealt both the hider's and the seeker's slot and every
+    /// edge of the round then runs unmodified — the burst still fires into an empty task room,
+    /// the card still commits, the roles still "swap" to the same person. With TWO or more humans
+    /// present it does nothing at all, so a dev server left with the flag on still plays an
+    /// ordinary game the moment somebody joins.</para>
+    /// </summary>
+    public bool Solo { get; init; }
+
     /// <summary>The packet's numbers, unchanged.</summary>
     public static readonly HideSeekTuning Default = new()
     {

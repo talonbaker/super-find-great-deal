@@ -6,8 +6,10 @@ namespace MpFoundation.Ui;
 /// <summary>
 /// The How-to-Play panel's control table — ONE data table (spec §3 / §8 scenario 6), keyed to
 /// the REAL project.godot input-map action names (verified 2026-08-29: move_forward=W,
-/// move_back=S, move_left=A, move_right=D, jump=Space, sprint=Shift, interact=E, throw=Q,
-/// voice_ptt=V, fire=LMB, aim=RMB), never a
+/// move_back=S, move_left=A, move_right=D, jump=Space, interact=LMB, throw=Q,
+/// voice_ptt=V, fire=LMB, aim=RMB, rotate_held=RMB, hold_closer/hold_farther=wheel; FEEL-1
+/// 2026-09-20 moved interact off E onto the left mouse button and deleted `sprint` outright),
+/// never a
 /// hardcoded letter. Glyphs resolve live from <see cref="InputMap"/> every time the panel opens
 /// — the same technique <c>InteractPrompt.InteractKeyLabel</c> already uses for the world-space
 /// "E" prompt.
@@ -65,7 +67,6 @@ public static class ControlGlyphs
         {
             new Row("Move", new[] { "move_forward", "move_left", "move_back", "move_right" }),
             new Row("Jump", new[] { "jump" }),
-            new Row("Run", new[] { "sprint" }),
         }),
         new("CARRY", new[]
         {
@@ -75,6 +76,10 @@ public static class ControlGlyphs
             // reordered (this table's standing rule).
             new Row("Pick up / put down", new[] { "interact" }),
             new Row("Turn what you're holding", new[] { "rotate_held" }),
+            // FEEL-1 (2026-09-20), Talon's ask in his own words: "I'd like a scroll wheel to move
+            // the object forward and back in space." Appended, never inserted (this table's
+            // standing rule).
+            new Row("Hold it closer / further", new[] { "hold_farther", "hold_closer" }),
             new Row("Throw", new[] { "throw" }),
             // Two-slot carry (2026-08-07). Three rows rather than one because they answer three
             // different questions a player actually asks, and collapsing them would hide the rule

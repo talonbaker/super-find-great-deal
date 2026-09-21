@@ -87,6 +87,58 @@ public sealed class LaunchOptions
     /// next real launch does.</para></summary>
     public bool Windowed { get; private set; }
 
+    // --- SICK-1 (2026-09-20): the comfort flags ----------------------------------------------
+    //
+    // Talon, riding the MVP for the first time: "The game is making me motion sick already."
+    // These five are the A/B surface that answer came with. Their defaults ARE the shipped
+    // build — every one of them is the value the measurement in
+    // docs/agents/handoffs/2026-09-20-SICK-1.md chose — so a launch with none of them given is
+    // the recommended configuration and each flag is how you get the other one back.
+
+    /// <summary><c>--cam-interp 0|1</c>, default <b>1</b>. Interpolate the first-person eye
+    /// between physics ticks instead of moving it once per tick. 0 is the 2026-09-19 build.
+    /// See <see cref="Game.Sandbox.FirstPersonCamera.InterpolateToRenderFrame"/>.
+    /// <b>Default 1</b>, on the measurement in that property's own doc.</summary>
+    public bool CameraInterpolation { get; private set; } = true;
+
+    /// <summary><c>--fov &lt;deg&gt;</c>, default
+    /// <see cref="Game.Sandbox.FirstPersonCamera.DefaultFovDeg"/>. <b>VERTICAL</b> degrees —
+    /// see that constant for why the horizontal number is the one a player means, and what this
+    /// one comes to on each aspect.</summary>
+    public float FovDeg { get; private set; } = Game.Sandbox.FirstPersonCamera.DefaultFovDeg;
+
+    /// <summary><c>--vsync 0|1</c>, default <b>1</b> (the engine default this project has always
+    /// had, restated so it can be turned off for a measurement).</summary>
+    public bool Vsync { get; private set; } = true;
+
+    /// <summary><c>--max-fps &lt;n&gt;</c>, 0 = uncapped (the default). A cap is only a comfort
+    /// setting on a machine where the frame time is not steady; with vsync on it is redundant.</summary>
+    public int MaxFps { get; private set; }
+
+    /// <summary><c>--pacing-log &lt;path&gt;</c>: the SICK-1 per-frame instrument's CSV. Empty
+    /// means no instrument is built at all — see <see cref="Game.Sandbox.CameraPacingProbe"/>.</summary>
+    public string PacingLogPath { get; private set; } = "";
+
+    /// <summary><c>--pacing-sec &lt;s&gt;</c>: how long to record. 30 s is the packet's window.</summary>
+    public double PacingSec { get; private set; } = 30.0;
+
+    /// <summary><c>--pacing-turn &lt;degPerSec&gt;</c>: a constant scripted look turn during the
+    /// recording, so yaw-step variance is measured under the stimulus that produces it.</summary>
+    public float PacingTurnDegPerSec { get; private set; }
+
+    /// <summary><c>--pacing-label &lt;name&gt;</c>: what the summary line calls this run.</summary>
+    public string PacingLabel { get; private set; } = "run";
+
+    /// <summary><c>--goto-patrol x1,z1,x2,z2</c>: ping-pong between two ground points for ever,
+    /// no hold required. See <see cref="Game.Sandbox.ScriptedPatrolIntentSource"/>.</summary>
+    public bool GotoPatrol { get; private set; }
+
+    /// <summary>First patrol end, world ground coordinates.</summary>
+    public Vector3 GotoPatrolA { get; private set; }
+
+    /// <summary>Second patrol end, world ground coordinates.</summary>
+    public Vector3 GotoPatrolB { get; private set; }
+
     /// <summary>--capture-dir &lt;dir&gt; + --capture-at &lt;sec[,sec…]&gt;: a WINDOWED bot saves its
     /// own viewport to &lt;dir&gt;/&lt;name&gt;-&lt;sec&gt;s.png at each listed elapsed time, then carries on to
     /// its normal duration/exit. This is the in-engine capture path for anything only a real
@@ -365,6 +417,29 @@ public sealed class LaunchOptions
     public IReadOnlyList<(int PropId, int BinSlot)> SortScript => _sortScript;
     private readonly List<(int PropId, int BinSlot)> _sortScript = new();
 
+    /// <summary>--hold-notches &lt;n&gt;: once this bot is holding something, roll the hold
+    /// distance by n wheel notches (positive = further out) and stop. Capture-only -- a bot has
+    /// no mouse -- and it goes through <c>NetworkedProp.ScrollHold</c>, the same method the
+    /// wheel calls. 0 (the default) does nothing.</summary>
+    public int HoldNotches { get; private set; }
+
+    /// <summary>--hold-stress: once this bot is holding something, run
+    /// <c>HoldStressIntentSource</c>'s loop — forward, backward, strafe both ways, two 180s — for
+    /// the rest of the run instead of whatever walk the carry script had left (FEEL-1,
+    /// 2026-09-20). Off by default, so every existing carry suite's pacing is unchanged.</summary>
+    public bool HoldStress { get; private set; }
+
+    /// <summary>--walk-speed &lt;m/s&gt;: this process's top ground speed, overriding
+    /// <c>BrowsePace.DefaultWalkSpeedMps</c> (FEEL-1, 2026-09-20).
+    ///
+    /// <para><b>It is a MOTOR constant, so a session must give every process the same one.</b>
+    /// The owner predicts with it and the server judges with it; two peers holding different
+    /// values disagree about where a body is, which is a desync rather than a difference of
+    /// opinion. A value the knob table would refuse falls back to the shipped default rather
+    /// than being clamped — see <c>BrowsePace.SanitizeWalkSpeed</c> for why refusing is the safe
+    /// direction. Negative (the default) means "the shipped browse pace".</para></summary>
+    public float WalkSpeedMps { get; private set; } = -1f;
+
     /// <summary>--carry-grab-retry &lt;sec&gt;: re-fire a scripted bot's FIRST grab on this cadence
     /// until it is actually holding something. Negative (the default) = the original one-shot
     /// press, so every existing carry suite's pacing is byte-for-byte unchanged.
@@ -425,6 +500,37 @@ public sealed class LaunchOptions
     /// <c>PropKind</c> grows. The material-SFX suite seeds forty mixed props in a heap with it;
     /// nobody is going to author forty.</para></summary>
     public IReadOnlyList<(Vector3 At, MpFoundation.Net.PropKind Kind)> SeedTestProps => _seedTestProps;
+
+    /// <summary><c>--hands-selftest</c> (HANDS-1): build <c>HandsSelfTest</c> beside the
+    /// first-person rig, which it implies. <c>tests/Run-HandsSmoke.ps1</c>'s driver.</summary>
+    public bool HandsSelfTest { get; private set; }
+
+    /// <summary><c>--hands-stand x,z</c>: where <c>HandsProbeIntentSource</c> walks the probe and
+    /// stands it. The fixture's three reaches — the can, the crate and the button — are all
+    /// computed from this one point.</summary>
+    public Vector3 HandsStand { get; private set; }
+
+    /// <inheritdoc cref="HandsStand"/>
+    public bool HasHandsStand { get; private set; }
+
+    /// <summary><c>--hands-props "x,y,z;x,y,z"</c>: where the fixture put the objects the probe
+    /// grabs, in order. The probe takes the nearest FREE carryable to each point, so it can never
+    /// pick up a piece of the room instead.</summary>
+    public IReadOnlyList<Vector3> HandsProps => _handsProps;
+
+    private readonly List<Vector3> _handsProps = new();
+
+    /// <summary><c>--hands-capture-dir &lt;dir&gt;</c>: where <c>HandsSelfTest</c> writes its own
+    /// frames. Separate from <c>--capture-dir</c> deliberately — this probe shoots at its OWN
+    /// phase boundaries rather than on the bot harness's elapsed clock, because DOOR-1 measured
+    /// that the offset between a bot's capture clock and the beat it is photographing moved by a
+    /// full second between two runs of one script.</summary>
+    public string HandsCaptureDir { get; private set; } = string.Empty;
+
+    /// <summary><c>--hands-plant-offset &lt;m&gt;</c>: the positive control. Pushes a sideways
+    /// error of this many metres into every attached hand, so the smoke's 1 cm bar can be proved
+    /// able to fail without editing the shipped code. 0 everywhere else.</summary>
+    public float HandsPlantOffsetM { get; private set; }
     private readonly List<(Vector3 At, MpFoundation.Net.PropKind Kind)> _seedTestProps = new();
 
     /// <summary>--seed-props-drop &lt;sec&gt;: server-only, test-only. That many seconds into the
@@ -727,6 +833,27 @@ public sealed class LaunchOptions
     public IReadOnlyList<(string Verb, string Value, double AtSec)> RoundScript => _roundScript;
     private readonly List<(string Verb, string Value, double AtSec)> _roundScript = new();
     // --- end ROUND-1 ------------------------------------------------------------------------------
+
+    // --- solo play for testing (SOLO-1, 2026-09-20) -----------------------------------------------
+    /// <summary>
+    /// <c>--solo</c>: <b>a DEV flag</b> (Talon 2026-09-20 — "I would like the ability to play the
+    /// game through, only for testing, with one player"). With it, a round may begin with ONE
+    /// human present and that peer holds both roles in sequence: it hides, confirms, is moved to
+    /// the search room as the seeker, finds its own object, and the burst fires into an empty task
+    /// room. Every edge of the loop runs; nothing is skipped.
+    ///
+    /// <para><b>It belongs on the SERVER.</b> <c>HideSeekLoop</c> runs there and nowhere else, so
+    /// the flag on a client changes nothing — <c>Gameplay</c> says so in a log line rather than
+    /// leaving a tester wondering why their solo game still says TWO PLAYERS ARE NEEDED TO START.
+    /// A listen-host is the server, so the one-process case is covered by the same sentence.</para>
+    ///
+    /// <para><b>With two or more players present it does nothing at all</b>, by construction: the
+    /// loop only deals one peer both slots when the roster holds exactly one. So a dev server left
+    /// with the flag on plays an ordinary two-player game the moment somebody joins, which is what
+    /// keeps this from being a mode.</para>
+    /// </summary>
+    public bool Solo { get; private set; }
+    // --- end SOLO-1 -------------------------------------------------------------------------------
 
     // --- the startle (DOOR-1, 2026-09-19) ---------------------------------------------------------
     /// <summary>
@@ -1068,6 +1195,62 @@ public sealed class LaunchOptions
                 case "--first-person-selftest":
                     options.FirstPersonSelfTest = true;
                     break;
+                case "--hands-selftest":
+                    // Implies --first-person-cam: the hands hang off the first-person LENS, so a
+                    // run without one has nothing to measure. Same shape --rotate-look-selftest
+                    // uses one case below, and for the same reason.
+                    options.HandsSelfTest = true;
+                    options.FirstPersonCam = true;
+                    break;
+                case "--hands-stand":
+                {
+                    // "x,z" -- the ONE standing spot the hands fixture is staged around. A
+                    // malformed pair is DROPPED rather than defaulted to the origin, the rule
+                    // --seed-test-props states: a probe silently standing at (0,0) is a fixture
+                    // in the wrong room that then fails on its subject instead of its arguments.
+                    string[] st = Next(args, ref i).Split(',');
+                    if (st.Length >= 2
+                        && float.TryParse(st[0], NumberStyles.Float, CultureInfo.InvariantCulture, out float hx)
+                        && float.TryParse(st[1], NumberStyles.Float, CultureInfo.InvariantCulture, out float hz))
+                    {
+                        options.HandsStand = new Vector3(hx, 0f, hz);
+                        options.HasHandsStand = true;
+                    }
+                    break;
+                }
+                case "--hands-props":
+                {
+                    // "x,y,z;x,y,z" -- WHERE the fixture put the two objects the probe is about.
+                    // Named by position rather than by prop id because an authored prop's id is a
+                    // function of every other prop's node NAME (HOLD-1: three renumberings in two
+                    // days), and picked explicitly rather than as "the smallest/largest thing in
+                    // reach" because the search room's own floor bins are free carryables too --
+                    // measured on this suite's first run, where "largest in reach" came back with
+                    // Stock/Bin_0 at 1.37 m instead of the seeded crate.
+                    foreach (string triple in Next(args, ref i).Split(';',
+                                 StringSplitOptions.RemoveEmptyEntries))
+                    {
+                        string[] hp = triple.Split(',');
+                        if (hp.Length >= 3
+                            && float.TryParse(hp[0], NumberStyles.Float, CultureInfo.InvariantCulture, out float px)
+                            && float.TryParse(hp[1], NumberStyles.Float, CultureInfo.InvariantCulture, out float py)
+                            && float.TryParse(hp[2], NumberStyles.Float, CultureInfo.InvariantCulture, out float pz))
+                        {
+                            options._handsProps.Add(new Vector3(px, py, pz));
+                        }
+                    }
+                    break;
+                }
+                case "--hands-capture-dir":
+                    options.HandsCaptureDir = Next(args, ref i).Trim();
+                    break;
+                case "--hands-plant-offset":
+                    if (float.TryParse(Next(args, ref i), NumberStyles.Float,
+                            CultureInfo.InvariantCulture, out float handsPlant))
+                    {
+                        options.HandsPlantOffsetM = handsPlant;
+                    }
+                    break;
                 case "--rotate-look-selftest":
                     options.RotateLookSelfTest = true;
                     options.FirstPersonCam = true;
@@ -1095,6 +1278,52 @@ public sealed class LaunchOptions
                 }
                 case "--windowed":
                     options.Windowed = true;
+                    break;
+
+                // --- SICK-1 (2026-09-20): the comfort flags -------------------------------
+                //
+                // Every one of these exists so Talon can A/B on his own machine WITHOUT a
+                // rebuild, which is the packet's requirement and the reason none of them is a
+                // settings-menu row yet: a knob nobody has ridden does not deserve a UI.
+                case "--cam-interp":
+                    options.CameraInterpolation = ParseOnOff(Next(args, ref i),
+                        options.CameraInterpolation);
+                    break;
+                case "--fov":
+                {
+                    // Clamped, not validated-and-refused: the flag exists to be swept by hand
+                    // during an A/B, and a typo that would make the lens unusable should land on
+                    // the nearest usable lens rather than end the launch. The bounds are the two
+                    // ends of what the arithmetic in FirstPersonCamera.DefaultFovDeg keeps sane:
+                    // 50 deg vertical is 83 deg horizontal on 16:9, 110 is 140.
+                    if (double.TryParse(Next(args, ref i), NumberStyles.Float,
+                            CultureInfo.InvariantCulture, out double fovDeg))
+                        options.FovDeg = Mathf.Clamp((float)fovDeg, 50f, 110f);
+                    break;
+                }
+                case "--vsync":
+                    options.Vsync = ParseOnOff(Next(args, ref i), true);
+                    break;
+                case "--max-fps":
+                    if (int.TryParse(Next(args, ref i), NumberStyles.Integer,
+                            CultureInfo.InvariantCulture, out int maxFps) && maxFps >= 0)
+                        options.MaxFps = maxFps;
+                    break;
+                case "--pacing-log":
+                    options.PacingLogPath = Next(args, ref i);
+                    break;
+                case "--pacing-sec":
+                    if (double.TryParse(Next(args, ref i), NumberStyles.Float,
+                            CultureInfo.InvariantCulture, out double pacingSec) && pacingSec > 0)
+                        options.PacingSec = pacingSec;
+                    break;
+                case "--pacing-turn":
+                    if (double.TryParse(Next(args, ref i), NumberStyles.Float,
+                            CultureInfo.InvariantCulture, out double turnDeg))
+                        options.PacingTurnDegPerSec = (float)turnDeg;
+                    break;
+                case "--pacing-label":
+                    options.PacingLabel = Next(args, ref i);
                     break;
                 case "--capture-dir":
                     options.CaptureDir = Next(args, ref i);
@@ -1450,6 +1679,17 @@ public sealed class LaunchOptions
                 case "--spawn-index":
                     options.SpawnIndexSpec = Next(args, ref i).Trim();
                     break;
+                case "--hold-notches":
+                    if (int.TryParse(Next(args, ref i), NumberStyles.Integer, CultureInfo.InvariantCulture, out int notches))
+                        options.HoldNotches = notches;
+                    break;
+                case "--hold-stress":
+                    options.HoldStress = true;
+                    break;
+                case "--walk-speed":
+                    if (float.TryParse(Next(args, ref i), NumberStyles.Float, CultureInfo.InvariantCulture, out float walkSpeed))
+                        options.WalkSpeedMps = walkSpeed;
+                    break;
                 case "--carry-grab-retry":
                     if (double.TryParse(Next(args, ref i), NumberStyles.Float, CultureInfo.InvariantCulture, out double grabRetry))
                         options.CarryGrabRetrySec = grabRetry;
@@ -1593,6 +1833,12 @@ public sealed class LaunchOptions
                     options._roundScript.Sort((a, b) => a.AtSec.CompareTo(b.AtSec));
                     break;
                 }
+                // SOLO-1 (2026-09-20). A bare presence flag, for --log-clock's reason one case
+                // down: there is nothing to configure, and every "--x on|off" in this file exists
+                // only where a flag OVERRIDES a default that is already true.
+                case "--solo":
+                    options.Solo = true;
+                    break;
                 // CLOCK-1 (2026-09-19). A bare presence flag on purpose: it turns logging on and
                 // has nothing to configure, and every "--log-clock on|off" in this file exists
                 // only where a flag OVERRIDES a default that is already true.
@@ -1746,6 +1992,25 @@ public sealed class LaunchOptions
                 case "--goto-sprint":
                     options.GotoSprint = true;
                     break;
+                case "--goto-patrol":
+                {
+                    // x1,z1,x2,z2 — the SAME shape as --carry-patrol, on purpose: two ground
+                    // points, ping-pong for ever, no hold required. SICK-1's frame-pacing runs
+                    // need a body that is still walking thirty seconds in. See
+                    // ScriptedPatrolIntentSource.
+                    string[] parts = Next(args, ref i).Split(',');
+                    if (parts.Length >= 4
+                        && double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out double gpx1)
+                        && double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out double gpz1)
+                        && double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out double gpx2)
+                        && double.TryParse(parts[3], NumberStyles.Float, CultureInfo.InvariantCulture, out double gpz2))
+                    {
+                        options.GotoPatrol = true;
+                        options.GotoPatrolA = new Vector3((float)gpx1, 0f, (float)gpz1);
+                        options.GotoPatrolB = new Vector3((float)gpx2, 0f, (float)gpz2);
+                    }
+                    break;
+                }
                 // --- end --goto ------------------------------------------------------------
             }
         }
@@ -1816,6 +2081,17 @@ public sealed class LaunchOptions
         i++;
         return i < args.Length ? args[i] : "";
     }
+
+    /// <summary><c>0|1</c> (also <c>off|on</c>, <c>false|true</c>) for the SICK-1 comfort flags.
+    /// An unparseable value returns <paramref name="fallback"/>, which for every one of them is
+    /// the shipped default — so <c>--cam-interp</c> with a fat-fingered argument gives the
+    /// default build rather than silently the other one.</summary>
+    private static bool ParseOnOff(string value, bool fallback) => value.Trim().ToLowerInvariant() switch
+    {
+        "0" or "off" or "false" or "no" => false,
+        "1" or "on" or "true" or "yes" => true,
+        _ => fallback,
+    };
 
     /// <summary><c>--seed-test-props</c>'s optional kind field, by NAME (SFX-1). Case- and
     /// whitespace-insensitive, and it fails rather than defaulting — see the parse site for why

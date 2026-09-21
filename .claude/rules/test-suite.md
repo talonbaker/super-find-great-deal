@@ -71,7 +71,10 @@ paths:
   dated section at the end of this file), and **`Carry: place + integrity`** and
   **`Round: buttons + drop-off bin`** (INT-1, 2026-09-19 — the placed pose is 0.008 m / 0.00 deg
   standalone and tens of mm / tens of deg when it reds; the buttons red says `TooFarAway` where
-  `NotNow` was staged. Both have their own dated section below).
+  `NotNow` was staged. Both have their own dated section below). And **`Carry: hold (FEEL-1)`**
+  (INT-2, 2026-09-20/21 — 2 clean passes in 4 runs, and **both reds carry a STAGING line the suite
+  writes itself**; one of them also trips the penetration bar, on a hold so short the suite says it
+  has nothing to measure. Read the HELD-SAMPLE COUNT first. Its own dated section below).
 
 ## Every test on this branch shares one clock, so no test can see a two-clock bug (HONK-1, 2026-09-04)
 
@@ -1277,6 +1280,32 @@ that walk, and it is the only copy).
 | **7909** | **`Run-HoldingBoardTest.ps1`** (and `Capture-HoldingBoard.ps1`, unregistered) | **HOLD-1** |
 | **7910** | **`Walk-DefinitionOfDone.ps1`** (the §8 walk, unregistered and manual) | **INT-1** |
 | **7911** | **`Run-StockTest.ps1`** (and `Capture-ShopFloor.ps1`, unregistered) | **STOCK-1** |
+| **7912** | **`Run-SoloSmoke.ps1`** (and `Capture-SoloBoard.ps1`, unregistered) | **SOLO-1** |
+| **7913** | **`Run-CarryHoldTest.ps1`** (and `Capture-CarryHold.ps1`, unregistered) | **FEEL-1** (7912 was taken by a live SOLO-1 lane) |
+| **7914** | **`Measure-CameraPacing.ps1`** (unregistered) | **SICK-1** |
+| 7915 | *reserved, unused* -- ART-1 was cancelled 2026-09-20 (Talon sources the art himself) | ART-1 |
+| **7916** | *assigned, suite not yet cut* | **PHYS-1** |
+| **7917** | **`Run-HandsSmoke.ps1`** | **HANDS-1** (assigned in the dispatch, not computed) |
+
+> **Updated by SOLO-1, 2026-09-20 — and THE "NEXT FREE" RULE IS RETIRED FOR THIS WAVE.** It
+> collided a seventh time while this very row was being written: SOLO-1 and FEEL-1 both read
+> "the next free number is 7912" out of this table and both bound it, minutes apart, in
+> worktrees neither could see. **The orchestrator has now assigned the whole RIDE-1 wave in
+> advance** — SOLO-1 **7912**, FEEL-1 **7913**, SICK-1 **7914**, ART-1 **7915**, PHYS-1 **7916**,
+> HANDS-1 **7917** — and those six rows are above whether or not the suite exists yet, because a
+> row that waits for the suite is exactly what makes the number look free.
+>
+> **Do not compute a port from a snapshot of `tests/` while a wave is live. Ask the
+> orchestrator.** That is what REACH-1, TASK-1, BTN-1, SHELF-1, HOLD-1 and STOCK-1 each wrote
+> down, and it is what finally became the standing rule here.
+>
+> **At the merge, KEEP BOTH rows** where two lanes each added their own: these six are one
+> assignment and a merge that took one branch's table drops the other five.
+>
+> **Hold `Enter-SuiteMutex` for the WHOLE of any run that binds a port** (orchestrator, 2026-09-20,
+> after FEEL-1 watched SOLO-1's server and bot come up as it started its own). Two Godot suites at
+> once is inside the two-launch cap and is not a defect; two suites racing for one socket is. Both
+> of SOLO-1's scripts take the lock before the first `Start-Process` and release it in `finally`.
 
 Everything below 7893 is the pre-fork ladder and is unchanged: 7777, 7778, 7788, 7799, 7807,
 7809/7810, 7815, 7816, 7817, 7818, 7821, 7822, 7830, 7831, 7834.
@@ -1981,3 +2010,424 @@ come within 10 mm of a facing, and
 0.175 m pitch for a 0.16 m sphere, a 0.02 m clearance empties both NEIGHBOURS of every facing as
 well and leaves an end-cap with 2 of 14 cells standing -- barer than SHELF-1 left it. The quantity
 that matters is penetration, and any positive clearance is already zero penetration.
+
+
+## PORTS ARE NOW ASSIGNED, NOT COMPUTED -- and the fifth collision is why (SICK-1, 2026-09-20)
+
+**Stop computing "the next free port" from the table above. Ask the orchestrator.** The table is a
+SNAPSHOT, and every lane in a live wave reads the same snapshot, so two lanes pick the same number
+every time. The tally this rule has now cost: **7896 three times** (INT-0), **7899 twice**
+(DOOR-1/VOICE-1), **7910 once** (REVIEW-1's correction), **7912 twice** (2026-09-20), and **7913
+once** -- this lane, which read the table correctly, took the next free number, and collided with
+FEEL-1. The wave assignment is in the table above; a row is claimed when the orchestrator hands it
+out, not when a suite lands on `origin`.
+
+**The failure sentence is ambiguous and the discriminator is one grep.** A port collision presents
+as `the server never reported listening within 30s`, which is byte-identical to what a starved
+machine and a wedged server produce. Read the server's `.err.log`: `Couldn't create an ENet host`
+with `err=CantCreate` is the bind, and nothing else is.
+
+## A HEADLESS RUN CANNOT SEE A RENDERING STALL, and this one is 535 ms (SICK-1, measured 2026-09-20)
+
+**Every performance number in `tests/` except `Run-FirstPersonTest`'s is measured on a `--headless`
+process, and a headless process does not render.** SHELF-1 said this about `pms` and STOCK-1
+restated it after 2 212 MultiMesh instances landed on the GPU and the headless column went DOWN.
+Here is the measurement that gives it a magnitude, and it is large.
+
+Same build, same bot, same 30 s patrol, one windowed run and one headless:
+
+| | windowed (1280x720) | headless |
+|---|---|---|
+| dt p50 | 16.65 ms (60.0 fps) | 6.90 ms (145 fps) |
+| dt max | **535-1014 ms** | **50.6 ms** |
+| frames over 20 ms | 90-95 of ~1 640 (**5.6%**) | 7 of 4 328 (**0.16%**) |
+| stalls over 100 ms | **17-18 per 36 s**, all ~535 ms, ~1-2 s apart | **none** |
+
+**Each stall costs exactly 0.507 m of world movement, and that number names the mechanism**:
+0.507 m is eight physics ticks of walking, and `physics/common/max_physics_steps_per_frame`
+defaults to **8**. On a 535 ms frame the engine simulates 133 ms of world and the rest is simply
+lost -- the world lurches half a metre and the clock skips.
+
+**Ruled out by measurement, not by argument:** vsync (`--vsync 0` did not remove it, `dt_max`
+533 ms at ~2 100 fps); first-use shader compilation (it recurs at the same rate on a warm cache,
+run after run); the bot harness and its 20 KB 5 Hz JSONL (the headless bot writes the identical
+sample at the identical rate and has no stalls, and ~1 Hz does not match 5 Hz); machine contention
+alone (present with two foreign Godot processes on the machine and again with eight).
+**NOT identified.** One hypothesis for whoever picks it up: `Win32_VideoController` reports two
+adapters on this machine, an RTX 4070 and an Intel UHD 770, and the display's resolution and
+refresh are reported against the **Intel** one -- a cross-adapter presentation path is a known
+source of half-second stalls. That is a hypothesis; it has not been measured.
+
+**The reusable rule: a headless green is not evidence about frame time, and a headless frame-time
+number is not a smaller version of the windowed one -- it is a different quantity.** Any packet
+that claims a performance result a player will feel needs a windowed row, and
+`tests/Measure-CameraPacing.ps1` is a rig that produces one.
+
+## `powershell -File` collapses a comma-separated array argument into ONE string (SICK-1, 2026-09-20)
+
+Windows PowerShell 5.1, and it fails silently rather than throwing. Measured:
+
+```
+powershell -File tests/Measure-CameraPacing.ps1 -Configs "a:--x 0","b:--x 1","c:--x 2"
+```
+
+ran **one** configuration whose label was `a` and whose flags were
+`--x 0,b:--x 1,c:--x 2` -- every flag from every later element appended to the first, so the LAST
+value of each repeated flag won and the run silently measured a configuration nobody asked for.
+Nothing warns; the script's own echo of its arguments is what showed it. `-File` hands the script
+raw command-line tokens and does no array binding; **`-Command "& '<path>' -Configs @('a','b')"`
+does.**
+
+Same family as the `$Args`-is-an-automatic-variable trap (REACH-1) and the `@($list)`-on-a-
+`List[object]` throw (TASK-1): **a PowerShell parameter that silently receives the wrong thing is
+this repo's most expensive recurring bug shape.** Echo what a script actually received before
+trusting a run that used an array or a typed parameter.
+
+## FEEL-1 (2026-09-20): udp/7913, a port collision that had already happened, and how ports are handed out now
+
+### PORTS ARE ASSIGNED BY THE ORCHESTRATOR IN THE DISPATCH. A LANE NEVER COMPUTES "NEXT FREE".
+
+That is the rule now, stated once, and everything below it is why. The ladder table in the
+REACH-1 section is a RECORD of what has been claimed, not a source of free numbers: by the time
+you read it, another lane branched off the same base has read it too.
+
+**`tests/Run-CarryHoldTest.ps1` claims udp/7913.** It was written for **7912** -- the number the
+one ladder table said was next -- and on its first real run the server printed:
+
+```
+ERROR: Couldn't create an ENet host.
+[server] failed to start server port=7912 transport=enet err=CantCreate
+```
+
+`netstat` named the holder, and it was not a stale socket and not a wedged process of this
+lane's: a **SOLO-1 lane in `C:\repos\sfgd-solo1`** was live on 7912 at that moment
+(`--server --port 7912 --world supermarket --solo --round-script ...`, plus its `SoloA` bot).
+Two lanes, one base, one table, the same next-free number. **That is the fourth time this repo
+has paid for it** (three lanes on 7896, two on 7899, INT-1's 7910 taken while three sentences
+said it was free, and now this), and the previous three entries each said "the orchestrator
+should hand the numbers out" without the rule ever being written as a rule. It is written now.
+
+**Assigned for this wave** (orchestrator, 2026-09-20): SOLO-1 **7912**, FEEL-1 **7913**,
+SICK-1 **7914**, ART-1 **7915**, PHYS-1 **7916**, HANDS-1 **7917**; PROBE-1 stays on 7908.
+Add your row to the ladder table when your suite lands; do not compute one.
+
+> **HANDS-1 added its row, 2026-09-20.** **udp/7917**, `tests/Run-HandsSmoke.ps1`, registered
+> last in `Run-AllTests.ps1`. It was handed out in the dispatch and never grepped for, which is
+> the rule above being followed rather than re-learned: SICK-1 (7914) and PHYS-1 (7916) were live
+> in their own worktrees while this lane ran and neither of their suites exists on this branch,
+> so a grep here would have produced 7914. **FEEL-1's own 7913 row is added to the table at the
+> same time** -- it was recorded in that lane's handoff and in its suite header but never in the
+> table, and REVIEW-1's entry above says in as many words that *a handoff is not the ladder*.
+> **This suite is the SECOND that needs a desktop session** (FP-1's is the first); see the
+> FP-1 entry above for what that costs a headless shell.
+
+**Neither lane touched the other's processes**, and the discriminator that settled it in one
+command is worth copying: `netstat -ano | grep <port>` gives a PID, and
+`Get-CimInstance Win32_Process -Filter "ProcessId=<pid>"` gives its **command line**, which names
+the worktree. That separates "another lane is live on my port" (move) from "a straggler of mine
+is wedged" (stop it, by PID) from "a stale socket" (re-run) without guessing, and without going
+anywhere near `taskkill /IM`.
+
+### `Carry: drift (hold+walk)`'s quantity MOVED, and it is not drift
+
+CARRY-1's entry above records that this suite's caps survived the carry spring "by luck rather
+than by design", and warns: *"anyone who moves the carry anchor behind or beside the body puts
+the whole lag straight into `bd` and should expect to re-measure these caps."* FEEL-1 moved the
+anchor -- a held prop now rides the VIEW RAY in front of the eye instead of a chest mount plus an
+armful lift -- so here is the re-measurement, same fixture, same flags:
+
+| | mean `bd` | peak `bd` | growth | n |
+|---|---|---|---|---|
+| before (INT-1 / REVIEW-1's tree) | 1.010 m | 1.063 m | 0.000 m | 83 |
+| **after FEEL-1** | **0.894 m** | **0.902 m** | **0.001 m** | 83 |
+
+**The caps were NOT changed** (`MeanMax` 1.15, `PeakMax` 1.45): the number went DOWN, because the
+armful lift that used to raise a crate above the carry mount is gone with the socket. A
+`Carry: drift` red whose mean has moved back UP toward 1.0 is now the interesting one.
+
+### A suite can measure the wrong thing and call the feature broken
+
+Two of this packet's own instruments were wrong before the feature was, and both cost a run:
+
+- **The shelf beat asserted that a `[carry] hold broken` line appeared.** Measured, the held
+  crate stopped dead with its face ON the pillar (centre x = 45.28 against a face at 45.50 --
+  0.22 m, exactly its own half-width) and the BOT wedged at the same instant, so the hold never
+  ran the 0.6 m past its target that the break rule needs. The sweep had done its entire job and
+  the suite reported "a held prop that nothing can stop". It asserts the **penetration** now --
+  the quantity the beat is about, and the one a planted `CollisionMask = 0` moves: 0.001 m green
+  against 0.214 m planted.
+- **The lag table read `CarrySpring.Position`** while the ray hold integrates the spring's
+  arithmetic against its own state, so the field sat at its seed for the whole hold and reported
+  a mean lag of **1.54 m and a peak of 3.34 m** for a carry that was in fact tracking to within
+  0.22 m. **An instrument reading the wrong field looks exactly like the feature being broken**,
+  and the tell was that the number did not change when the behaviour did.
+
+### The plant that proved the new suite, and what stayed green under it
+
+`CollisionMask = 0` put back into `Carryable.OnPickedUpBySpring`: the shelf beat goes from
+0.001 m to **0.214 m of penetration** (the crate half inside a 1 m pillar). **Both clip bars
+stayed green under that plant** -- which is the useful half: the capsule projection and the world
+sweep are independent guarantees, so a single plant cannot flatter both, and a red in one says
+which mechanism moved.
+
+## SOLO-1 (2026-09-20): udp/7912, and a launch flag needs a CONTROL rather than an assertion
+
+`tests/Run-SoloSmoke.ps1` claims **udp/7912** and is registered last in `tests/Run-AllTests.ps1`;
+`tests/Capture-SoloBoard.ps1` is unregistered and manual on the same number, which is the pattern
+CLOCK-1 established and every lane since has followed. The row is in the one ladder table above.
+
+### A suite that proves a flag works must also run with the flag OFF
+
+`--solo` lets ONE player start a round. The obvious suite is "launch a server with `--solo`, launch
+one bot, assert the round ran" — and **that suite passes just as happily on a build whose
+two-player gate has simply stopped working.** It is the same shape as the absence-without-a-control
+failures this file already records twice (a headless probe measuring two rigs that correctly did
+nothing; `FootstepAudioTests`' positive control expiring when a constant moved), arriving through a
+launch flag instead.
+
+So `Run-SoloSmoke.ps1` is two server launches: the solo round, and then **the identical single bot
+with the flag removed, which must be refused `NeedTwoPlayers` and must not start a round.** The
+pass is a DIFFERENCE between the two halves rather than an absence in one. It also asserts the
+control server never logged `[round] DEV --solo armed`, which is what separates "the flag is off"
+from "the flag is on and leaking from a static".
+
+A third assertion in the same spirit and worth copying: **the solo half still requires a named
+refusal.** Its script presses Start with the hider's hands empty before pressing it properly, so a
+`--solo` that had relaxed the whole Holding branch rather than one condition goes red on
+`HiderMustHoldAnObject` being absent.
+
+### One peer holding two roles is a teleport hazard, not a scoring one
+
+The part of solo that no phase assertion can see: in a solo session the hider and the seeker are
+the same peer, so `HideSeekDriver`'s Seeking case decides TWO destinations for ONE body. The task
+move lands, the search move is refused inside `RoomTeleport`'s 800 ms per-peer cooldown, and the
+retry queue fetches the player back — **the only player in the game spends most of a second in the
+wrong room, with every phase, card and score assertion green throughout.** The driver skips the
+hider's move when `hider == seeker`, and the suite asserts the negative directly: **`task` is never
+among the rooms the server named.** Generalises to any driver that decides a move per ROLE rather
+than per BODY.
+
+### A test that compares against its own constant is satisfied by any value
+
+Measured while proving SOLO-1's tests could fail. The board's new WAITING cell is asserted in six
+places as `Assert.Equal(HoldingBoardModel.Waiting, cell)` — which is right for a structural check
+and **stayed green with the constant renamed to `"PLANTED"`.** Only the two tests that build the
+sentence out of it (`StatusLine`) noticed. `SoloRoundTests.AThirdPlayersRowReadsWaiting` now spells the
+literal word once, and that is the copy contract; everything else keeps
+using the constant. Same family as HOLD-1's "a guard can be protected by the KEY TYPE" entry
+above: **a mutation that only touches a name proves nothing about a value nobody wrote down.**
+
+### RULING: a round needs TWO ROLES FILLED, not exactly two bodies in the room
+
+**Superseded, 2026-09-20, on Talon's ruling — do not re-add it.** ROUND-1's Holding branch read
+`input.Humans.Length != 2` and refused a Start with "exactly two, not at least two". Talon:
+*"with two or more players, they can wait in the room."* So the gate now asks whether both role
+slots are filled and distinct (or the same peer under `--solo`), and a third or later body holds
+no role and waits.
+
+**What that cost, and what replaced it.** The old rule had a real suite consequence, written down
+in `Capture-HoldingBoard.ps1`'s own header: three windowed lenses in one room produced
+`[round] refused: NeedTwoPlayers - TWO PLAYERS ARE NEEDED TO START (phase=Holding humans=3)` and
+72 seconds of frames that all read HOLDING, and that script's conclusion — "a capture script for
+this game gets two windows, no more" — no longer follows. `NeedTwoPlayers` itself is NOT gone: it
+still fires for fewer than two, which is the case that matters. **The assertion that replaces the
+three-human refusal is the WAITING row**: `Run-HoldingBoardTest.ps1` asserts the third bot's own
+board row reads WAITING and that its START press comes back `NotInThisMatch`
+(measured 2026-09-20: 59 of 59 rows, 2 of 2 presses, 0 `TooFarAway`). A suite that finds a
+three-player Start refused is now reporting a REGRESSION, not a guard.
+
+
+## INT-2 (2026-09-20): a KNOWN RED that is accepted, a port red that is Talon's own server, and a constant A/B'd rather than argued
+
+The ride wave (SICK-1, FEEL-1, HANDS-1, SOLO-1) merged here. Three things measured at the merge
+that the next reader needs.
+
+### `Carry: place + integrity` bot D is an ACCEPTED KNOWN RED, not a flake and not a regression
+
+**Do not re-diagnose this one and do not restage it.** `Run-PlaceTest` fails about two runs in six
+with exactly these two lines, and they are one failure wearing two hats:
+
+```
+  - bot D: newest place refusal was ordinal 0, expected 5 - outside the room bounds (OutsideRoom)
+  - bot D: prop 1016 holder=0 in the final sample, expected <peer> - a REFUSED place must never
+    cost the player what they were carrying
+```
+
+The discriminator is one line in the bot's own log, and it is the tell that this is the known red
+rather than something new:
+
+```
+[carry] hold broken prop=1016 blocked=1.83m for 0.82s
+```
+
+D walks eleven metres down a dressed walkway, its crate wedges on a floor bin, the break rule
+correctly gives the prop up, and the scripted place then fires with nothing in its hands — so no
+refusal is ever recorded (ordinal 0 is `None`, which is "no press was refused", not "a press was
+refused with reason 0"). **A press that is never made is never refused** (TASK-1 §3.3), one more
+time. The full explanation, the two levers tried and the reason the second one was reverted is
+`docs/agents/handoffs/2026-09-20-FEEL-1.md` §10d. The real fix is a rotation-aware sweep before
+lateral compliance and it is a packet of its own (SWEEP-1); the numbers are Talon's to move and the
+ride card asks him the question directly.
+
+**A red here that does NOT carry that `hold broken prop=1016` line is a different animal and wants
+a real diagnosis.**
+
+### The 2026-09-20 A/B: `Acceleration` 9 — 25 did not cost the carry anything
+
+Ruling 4 raised the ramp to walk speed (`BrowsePace.BrowseAccelerationMps2`, not
+`MotorTuning.Default` — see that constant's own doc). `Run-CarryHoldTest`'s hold lag looked three
+times worse than FEEL-1's branch figure afterwards, so it was **A/B'd against the same four merges
+without the constant** (a detached worktree at the pre-ruling-4 tip, built there, both suites run
+back to back under one mutex acquire) rather than attributed:
+
+| | ruling 4, `Acceleration` 25 | base, `Acceleration` 9 |
+|---|---|---|
+| `Run-CarryHoldTest` hold lag mean / peak | 0.761 m / **2.460 m** | 0.494 m / **2.852 m** |
+| `'hold broken'` lines in that suite | **0** | **1** |
+| `Run-PlaceTest` failures | **2** (bot D alone) | **4** (bot D **plus bot A's place landing 4.200 m and 35.00 deg off**) |
+| `Run-PlaceTest` spring-vs-anchor mean / peak | **0.508 m** / 1.831 m | 1.238 m / 1.889 m |
+
+**Every column is the same or better WITH the faster ramp**, so the elevated lag is not the
+constant — it belongs to the merged tree or the loaded box, and both arms sit far above FEEL-1's
+own 0.223 m / 0.809 m branch measurement. Bot D reds on both arms, which is the other half of what
+the A/B settled: the known red above is not ruling 4's doing either.
+
+**The reusable half: when a merge ruling moves a constant and a suite's quantity moves with it,
+build the same tree without the ruling and run the suite there.** It costs one worktree and two
+suite runs, and it is the difference between a handoff that says "probably the constant" and one
+that says which way the number actually went. `Run-CarryDriftTest` is the control that says the
+same thing from the other side: mean 0.876 / peak 0.898 / growth 0.001 (n=82) against FEEL-1's
+0.894 / 0.902 / 0.001 — a sustained hold-and-walk is steady state, so the ramp cannot show there,
+and it does not.
+
+### `Netcode: replication` reds on udp/7777 because Talon's own idle server is on it
+
+Measured 2026-09-20, and it will happen again. The suite binds **7777** by default, and a dedicated
+server Talon left running from an earlier session holds it:
+
+```
+ERROR: Couldn't create an ENet host.
+[server] failed to start server port=7777 transport=enet err=CantCreate
+```
+
+**Discriminate, do not chase, and do not kill it.** FEEL-1's two-command discriminator names the
+holder without guessing: `netstat -ano | grep 7777` gives a pid, and
+`Get-CimInstance Win32_Process -Filter "ProcessId=<pid>"` gives its command line. Here it read
+`--headless --path . -- --server --port 7777`, started hours before the wave, from the REPO ROOT
+rather than any `sfgd-*` worktree — which is what says it is the human's and not a lane's
+straggler. It is not ours to stop.
+
+**The suite itself is fine, and proving that takes one flag**: `-Port 7915` (the ladder's reserved
+row) on the identical two-bot run gives
+`PASS: 2 bots, 4 observer/subject pairs checked, max position error 0.000m (tolerance 0.75m)`.
+A marathon cannot pass that port in, so **a marathon red on `Netcode: replication` whose server log
+says `err=CantCreate` is UNVERIFIED, exactly like a mutex timeout** — not a red and not a pass.
+Re-run that one suite standalone on 7915 and report THAT.
+
+### `Carry: hold (FEEL-1)` is load-flaky, and its red SAYS SO in its own words (INT-2, measured 2026-09-20/21)
+
+New suite, new row on the flake list, and it is the easiest red in this repo to classify because
+the suite classifies itself. Under a 47-suite marathon:
+
+```
+  - STAGING: ShelfBot's crate never got closer than 1.034 m to the pillar face -- the shelf beat
+    never happened, so a penetration of 0 proves nothing.
+```
+
+**Read that sentence before anything else.** Every bar that is about the FEATURE was green in the
+same run — holder clearance worst 0.0500 m with **0 ticks inside the holder**, witness worst
+0.0428 m with 0 ticks inside, nothing flung, 0.00 m/s on the fastest never-held prop. The only
+thing that failed is the suite's own refusal to score a beat that did not stage, which is
+FEEL-1 building in the lesson SFX-1 and CELEBRATE-1 both paid for: *a bar that passes because
+nothing happened is worse than a red.*
+
+**Four runs on the merged tree, and the column to read first is HELD SAMPLES:**
+
+| run | held samples | closest approach | penetration | verdict |
+|---|---|---|---|---|
+| standalone, idle | **37** | 0.219 m | 0.002 m | **PASS** |
+| standalone, idle (pre-ruling-4 tree, same four merges) | **37** | 0.218 m | 0.002 m | **PASS** |
+| inside the 47-suite marathon | 37 | **1.034 m** | 0.000 m | **FAIL — pure staging** |
+| standalone, idle | **4** | 0.060 m | **0.160 m** | **FAIL — staging + the world** |
+
+**Both reds carry a `STAGING:` line the suite writes about itself**, and they are different
+staging failures:
+
+- **The marathon one is the bot's WALK.** *"ShelfBot's crate never got closer than 1.034 m to the
+  pillar face — the shelf beat never happened, so a penetration of 0 proves nothing."* Same shape
+  as `Carry: regrab-while-loose` (four confirmations), `Carry: place + integrity` and `Round:
+  buttons + drop-off bin`: a scripted bot under load does not reach its mark.
+- **The standalone one is the GRAB.** *"HoldBot held prop 1014 for only 4 sample(s) on its own
+  view; the clip bar has nothing to measure (did the grab land?)"* — against 37 on a healthy run.
+  That run **also** reported `THE WORLD: the held crate went 0.160 m INSIDE SearchPillar`, which is
+  the string FEEL-1's planted `CollisionMask = 0` control produces (it plants 0.214 m).
+
+**Do not read that 0.160 m as a clean sweep failure and do not wave it away either.** It is
+measured over a four-sample hold that the suite, in the two lines above it, says is unmeasurable:
+the grab landed with the crate already against the pillar, so there was never a swept approach to
+stop. What it does show is a real edge — **a grab that lands on a prop already intersecting
+geometry can leave it there**, because the sweep guards the per-tick STEP and nothing re-audits the
+pose at bind time. That is adjacent to the rotation-aware sweep FEEL-1 section 10d hands to SWEEP-1,
+and it is the second piece of evidence for that packet.
+
+**So the discriminator, in order:** held samples (4 vs 37) says whether anything was measured at
+all; then closest approach (1.034 m vs 0.06-0.22 m) says whether the bot got there; and only a red
+with **~37 held samples, a closest approach under 0.3 m and a penetration over the bar** is the
+sweep itself failing and wants a real diagnosis. None of the four runs here is that.
+
+### `Sfx: material voices` has a SECOND red now, and it is the fixture table going stale again (INT-2, 2026-09-21)
+
+Standalone on the merged tree, three runs: **PASS, PASS, FAIL**, which is the 2-in-3 rate REVIEW-1
+recorded (it measured 4 of 6). But the third red is **not** the documented staging one:
+
+```
+  - crossed wires: CardThud (a card sound) played from prop Bin_4, which is not card
+```
+
+All three drivers picked up and sounded correctly on that run — tin, cardboard and produce each
+logged a pickup and an impact. **`Bin_4` is one of STOCK-1's six AUTHORED floor bins**
+(`Stock/Bin_0..5` in `SearchRoom.tscn`), not a seeded fixture prop, and the check's `$legalFor`
+table lists only the seeded ids:
+
+```
+$legalFor = @{ "Tin" = @(CanId, StackLowId, StackHighId, PlaceCanId)
+               "Card" = @(BoxId, BoxFallId); "Produce" = @(ProduceId, ProduceFallId) }
+```
+
+**The suite's own comment predicted this, one prop early:** *"THE TABLE IS THE FIXTURE, AND IT WENT
+STALE THE MOMENT SFX-2 ADDED AN EIGHTH PROP."* A cardboard bin making a card sound is the game
+being RIGHT; the table simply cannot express "an authored prop of the correct material is also
+legal", so any authored prop that ever gets knocked hard enough to sound reds this check.
+
+**Why it started showing up now, stated rather than guessed:** FEEL-1 gave a held prop the world
+collision mask, so a carried crate now actually strikes the authored scenery it used to pass
+through. Nothing in this wave touched material resolution, and the sound that played was the
+correct one for the body that made it.
+
+**It is a FIXTURE defect, not a game defect, and it was deliberately not fixed at a merge gate** —
+widening `$legalFor` to admit authored props means teaching it every authored body's material, and
+a table that listed too many ids "would have quietly stopped defending anything", which is the
+exact failure mode its own comment warns about. It wants the lane that owns the suite.
+
+### `Voice: intercom by room` cannot survive the machine SLEEPING mid-suite, and the tell is a wall-clock window
+
+Measured 2026-09-21, and recorded because it is a third class of non-result alongside a mutex
+timeout and a port collision. The box suspended for **twelve hours** in the middle of this suite
+(the log directory dates it to the second: the last pre-sleep write and the first post-sleep write
+are eleven and a half hours apart, inside one suite's files). The marathon row reads FAIL:
+
+```
+  - the listener received only 0 packets in the final 6s at 41.9 m -- the gate is culling the intercom
+```
+
+**That is a WALL-CLOCK traffic window on a process that was frozen**, so it measured a silence the
+build did not produce. The proof it is not a regression is in the same run: all four routing
+verdicts were correct (`pa`/`pa` cross-room, `proximity`/`proximity` same room), which is REVIEW-1's
+recorded quantity exactly — the routing table, the thing the suite is actually about, was right
+the whole time.
+
+**A suspend is not a flake and not a red, the same way a mutex timeout is neither.** Check
+`tests/logs/` mtimes when a marathon spans a suspicious amount of wall time: an eleven-hour gap
+*inside one suite's own files* names the suite to re-run, and the suites on either side of it are
+unaffected because each one is its own processes reading its own logs.
+

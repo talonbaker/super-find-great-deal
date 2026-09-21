@@ -34,6 +34,16 @@ public partial class Boot : Node
         GraphicsSettings.Load();
         GraphicsSettings.Apply(net.IsHeadless);
 
+        // THIS GAME'S BODY, before any world is built and before any peer connects (FEEL-1,
+        // 2026-09-20). MotorTuning.TryApply refuses while a session is live — correctly, since a
+        // motor constant that moves mid-session is a desync generator — so the only place it can
+        // go is here, on the one path every process (server, client, bot) passes through.
+        // BrowsePace.ApplyAtBoot explains why the supermarket states its own speed rather than
+        // editing the foundation's ruled default.
+        Game.BrowsePace.ApplyAtBoot(options.WalkSpeedMps < 0f
+            ? Game.BrowsePace.DefaultWalkSpeedMps
+            : options.WalkSpeedMps);
+
         // --graphics wins over the settings file, deliberately and last: the parity law (plan
         // §5.2) is only demonstrable if two peers can be made to disagree about their rendering
         // and still agree about their gameplay; see LaunchOptions.GraphicsTier. The printed line is

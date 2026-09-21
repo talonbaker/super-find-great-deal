@@ -192,8 +192,11 @@ public partial class HoldingBoard : Node3D
                 _rowBasePixelSize, HoldingBoardLayout.RowChars);
         }
 
-        int overflow = HoldingBoardModel.Overflow(view);
-        SetLine(_overflow, ref _lastOverflow, overflow > 0 ? $"+{overflow} MORE" : "",
+        // The small line under the rows: who could not be shown, and who is not in this match
+        // (SOLO-1 folded the waiting count into HOLD-1's overflow line rather than taking a
+        // second label -- a new Label3D here would be a node this prefab's .tscn does not
+        // declare, which SupermarketWorldSelfTest's packed-vs-live count exists to catch).
+        SetLine(_overflow, ref _lastOverflow, HoldingBoardModel.StatusLine(view),
             _headerBasePixelSize, HoldingBoardLayout.SmallChars);
 
         SetLine(_footer, ref _lastFooter, HideSeekText.BoardFooter(view, nameOf, tuning),

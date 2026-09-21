@@ -103,6 +103,7 @@ public partial class BotHarness : Node
         MaybeCapture();
         MaybeCaptureAtTick();
         MaybePlace();
+        MaybeScrollHold();
         MaybePress();
         if (MaybeFinishAfterHolding())
             return;
@@ -174,6 +175,34 @@ public partial class BotHarness : Node
     }
 
     private double _placeStartedSec = -1;
+
+    // --hold-notches: applied once, the first tick this bot is actually holding something.
+    private bool _notchesApplied;
+
+    /// <summary>
+    /// <b>The scripted WHEEL</b> (FEEL-1, <c>tests/Capture-CarryHold.ps1</c>): once this bot is
+    /// holding something, roll the hold distance by <c>--hold-notches</c> and stop.
+    ///
+    /// <para>It calls <see cref="NetworkedProp.ScrollHold"/> — the same method
+    /// <c>HoldDistanceController</c> calls on a wheel event — so a capture of "the same can, held
+    /// close and held far" is a photograph of the shipped verb rather than of a pose a harness
+    /// invented. A bot has no mouse, which is the only reason a flag exists at all.</para>
+    ///
+    /// <para>Once, and only once: the band is clamped, so repeating would silently pin the
+    /// distance at one end and a capture would stop being evidence about the wheel.</para>
+    /// </summary>
+    private void MaybeScrollHold()
+    {
+        if (_options.HoldNotches == 0 || _notchesApplied || _propManager == null)
+            return;
+        NetworkedProp? held = _propManager.FindHeldBy((int)Multiplayer.GetUniqueId());
+        if (held == null || !held.SpringActive)
+            return;
+        _notchesApplied = true;
+        held.ScrollHold(_options.HoldNotches);
+        GD.Print($"[bot] {_options.DisplayName} scrolled the hold by {_options.HoldNotches} notch(es) "
+                 + $"to {held.HoldDistanceM:F3} m (band {held.HoldMinM:F3}..{held.HoldMaxM:F3})");
+    }
 
     // --press: index of the next scheduled press. Marks arrive sorted ascending from
     // LaunchOptions, so one cursor is enough — the same shape --capture-at uses.
@@ -476,8 +505,18 @@ public partial class BotHarness : Node
             // The holder-side spring's live gap from the hand it is chasing (0 on every peer that
             // is not the holder). This is the spring-vs-anchor mismatch the CARRY-1 handoff
             // reports, sampled rather than estimated — see NetworkedProp.SpringLagM.
+            // FEEL-1: the two numbers Talon's ride verdict turned into gates.
+            //   Cap = signed clearance between the held prop and its HOLDER'S CAPSULE. Negative
+            //         is the prop inside the person carrying it -- "the item clips into their
+            //         body, which is stupid and feels bad" -- and Run-CarryHoldTest asserts it
+            //         never goes negative, on the holder's own view AND on a witness.
+            //   Spd = how fast this prop is observed to be moving, from whichever source this
+            //         peer has (a simulating body's own velocity, or the loose stream's observed
+            //         speed on a peer that is only watching). The domino bar reads it: a held
+            //         crate driven into a stack must not fling anything.
             props.Add(new PropSample(prop.PropId, (int)prop.Kind, prop.HolderPeerId, pp.X, pp.Y, pp.Z, off, bd,
-                q.X, q.Y, q.Z, q.W, prop.SpringLagM));
+                q.X, q.Y, q.Z, q.W, prop.SpringLagM, prop.HolderClearanceM,
+                Mathf.Max(prop.Body.LinearVelocity.Length(), prop.Body.ObservedSpeedMps)));
         }
         // NetworkedEntity instrumentation (empty unless the session spawned any). Mirrors the
         // remote-avatar metrics above deliberately: `mrs` is the peak per-frame rendered movement
@@ -754,8 +793,10 @@ public partial class BotHarness : Node
     // by-design chase lag), Bd = distance from the holder's rendered body (the full-chain drift
     // signal a player sees). Both 0 when unheld.
     // Qx/Qy/Qz/Qw: the prop's world orientation (CARRY-1) — what a place assertion compares
-    // against its intended pose. SpringLag: the holder-side feel spring's distance from the hand
-    // it is chasing, 0 on every peer that is not the holder.
+    // against its intended pose. SpringLag: the holder-side hold's distance from the point it is
+    // chasing, 0 on every peer that is not the holder. Cap/Spd: FEEL-1's two gates — see the
+    // comment at the call site.
     private sealed record PropSample(int Id, int Kind, int Holder, float X, float Y, float Z,
-        float Off, float Bd, float Qx, float Qy, float Qz, float Qw, float SpringLag);
+        float Off, float Bd, float Qx, float Qy, float Qz, float Qw, float SpringLag,
+        float Cap, float Spd);
 }
