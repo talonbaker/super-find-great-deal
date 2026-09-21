@@ -244,6 +244,51 @@ public static class StockBake
     }
 
     /// <summary>
+    /// The <c>custom_aabb</c> for one MultiMesh, as Godot writes an <c>AABB</c>: position then
+    /// size.
+    ///
+    /// <para><b>This is not an optimisation, it is the difference between the mesh rendering and
+    /// not.</b> Measured, not reasoned: the first capture pass photographed six floor bins with
+    /// nothing in them. The wiring was correct, the buffer held 29 instances, and Godot logged no
+    /// error -- the <c>MultiMeshInstance3D</c> was simply culled, because a MultiMesh loaded from
+    /// a scene file does not necessarily arrive with a usable bounding box and an empty one is
+    /// outside every frustum. The room's bulk happened to survive it (its instances span the
+    /// whole 14 x 10 m room, so whatever box it got still intersected the view); a mound 0.5 m
+    /// across inside a bin did not.</para>
+    ///
+    /// <para>Grown by the product's own half-extent on every axis, because the buffer holds
+    /// instance ORIGINS and the mesh sticks out around each one.</para>
+    /// </summary>
+    private static string CustomAabb(IReadOnlyList<RoomInstance> all, StockMaterial material)
+    {
+        float minX = float.MaxValue, minY = float.MaxValue, minZ = float.MaxValue;
+        float maxX = float.MinValue, maxY = float.MinValue, maxZ = float.MinValue;
+        int n = 0;
+        foreach (RoomInstance i in all)
+        {
+            if (i.Material != material)
+                continue;
+            n++;
+            minX = MathF.Min(minX, i.X); maxX = MathF.Max(maxX, i.X);
+            minY = MathF.Min(minY, i.Y); maxY = MathF.Max(maxY, i.Y);
+            minZ = MathF.Min(minZ, i.Z); maxZ = MathF.Max(maxZ, i.Z);
+        }
+        if (n == 0)
+            return "AABB(0, 0, 0, 0, 0, 0)";
+
+        ProductSize p = ShelfStock.SizeOf(material);
+        // The diagonal, because bulk carries a yaw: a box rotated 45 degrees reaches further than
+        // its half-width on either axis.
+        float padXZ = p.PlanDiagonalM * 0.5f;
+        float padY = p.HalfHeightM;
+        minX -= padXZ; maxX += padXZ;
+        minZ -= padXZ; maxZ += padXZ;
+        minY -= padY; maxY += padY;
+        return $"AABB({F(minX)}, {F(minY)}, {F(minZ)}, "
+               + $"{F(maxX - minX)}, {F(maxY - minY)}, {F(maxZ - minZ)})";
+    }
+
+    /// <summary>
     /// The can's mesh and material, taken from <c>Can.tscn</c> with <b>two deliberate
     /// differences</b>, both asserted by <c>ShelfStockTests</c> rather than left to be noticed.
     ///
@@ -433,11 +478,13 @@ buffer = PackedFloat32Array({BufferOf(stock.Instances, StockMaterial.Produce)})
 
 ; {cans} cans in ONE draw. No script, no _Ready, nothing built: the buffer above IS the shelf.
 [node name="BulkCans" type="MultiMeshInstance3D" parent="."]
+custom_aabb = {CustomAabb(stock.Instances, StockMaterial.Can)}
 multimesh = SubResource("MultiMesh_cans")
 material_override = SubResource("Mat_can")
 
 ; {boxes} cereal boxes in ONE draw -- two aisles of filler plus the two floor pallet stacks.
 [node name="BulkBoxes" type="MultiMeshInstance3D" parent="."]
+custom_aabb = {CustomAabb(stock.Instances, StockMaterial.Box)}
 multimesh = SubResource("MultiMesh_boxes")
 material_override = SubResource("Mat_box")
 
@@ -448,6 +495,7 @@ material_override = SubResource("Mat_box")
 ; stacked box displays the packet wanted are the two floor pallets, which is what a stacked
 ; display physically is; an end-cap is a shelf.
 [node name="BulkProduce" type="MultiMeshInstance3D" parent="."]
+custom_aabb = {CustomAabb(stock.Instances, StockMaterial.Produce)}
 multimesh = SubResource("MultiMesh_produce")
 material_override = SubResource("Mat_produce")
 
@@ -510,6 +558,7 @@ instance_count = {mound.Count}
 buffer = PackedFloat32Array({sb})
 
 [node name="BinMound" type="MultiMeshInstance3D"]
+custom_aabb = {CustomAabb(mound, StockMaterial.Produce)}
 multimesh = SubResource("MultiMesh_mound")
 material_override = SubResource("Mat_produce")
 

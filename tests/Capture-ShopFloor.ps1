@@ -52,7 +52,25 @@ Write-Host "=== STOCK-1 captures (pass: $Pass) -> $OutDir ===" -ForegroundColor 
 $Poses = @{
     aisle  = @{ Goto = "35.6,-2.1"; Look = "-90,-4"; Marks = "10,13,16" }
     endcap = @{ Goto = "46.0,-1.05"; Look = "90,-6";  Marks = "10,13,16" }
-    pile   = @{ Goto = "34.9,1.05";  Look = "90,-28"; Marks = "10,13,16" }
+    # Bin_4 at world (46.4, 0), in the +X cross-aisle. The first cut aimed at Bin_1 in the -X
+    # cross-aisle and BTN-1's DROP-OFF BIN stands at (33.8, 0) between the camera and it -- a
+    # dark tub with no mound in it by design, filling the frame. Aim at a bin nothing is parked
+    # in front of.
+    # THE BIN SHOT USES A FIXED CAMERA, and it took two failed poses to earn that.
+    #
+    # A bin's rim is 0.60 m and the avatar's eye is 1.040 m, so from any distance a walking bot
+    # can stop at, the near wall occludes the fruit. The first attempt aimed at Bin_1 in the -X
+    # cross-aisle and photographed BTN-1's DROP-OFF BIN instead (a dark tub at (33.8, 0) with no
+    # mound in it BY DESIGN) filling the frame -- which read exactly like a mound that was not
+    # rendering. It renders: StockSelfTest now asserts all six bins carry 174 produce instances
+    # between them, which is the check that settled it. The second attempt aimed along the z = 0
+    # walkway and the bot was stopped by CARRY-1's crate Prop_3 at (38, 0) -- SHELF-1 S6's rule
+    # about this room, for a third time.
+    #
+    # --capture-cam takes the walk out of the picture: half a metre from Bin_4 at (46.4, 0) and
+    # three quarters of a metre up, looking down into it. CELEBRATE-1's rule still holds -- a
+    # capture bot must be GIVEN a camera -- and this is the other flag that gives it one.
+    pile   = @{ Cam = "45.85,1.12,0.0,46.4,0.34,0.0"; Marks = "10,13,16" }
     gap    = @{ Goto = "35.6,-2.1";  Look = "-90,-2"; Marks = "10,13,16" }
 }
 
@@ -69,17 +87,31 @@ function Start-CaptureHost([string]$Tag, [string[]]$Extra) {
     return $p
 }
 
-function Start-Shot([string]$Tag, [string]$Name, [string]$Goto, [string]$Look, [string]$Marks, [int]$Dur) {
+function Start-Shot([string]$Tag, [string]$Name, [string]$Goto, [string]$Look, [string]$Marks, [int]$Dur, [string]$Cam) {
     # Engine flags before the bare --, game flags after. Wrong side is swallowed and looks
     # exactly like a hang (.claude/rules/test-suite.md).
-    $p = Start-Process -FilePath $script:GodotExe -ArgumentList @(
-        "--path", $script:Root, "--",
-        "--bot", "--address", "127.0.0.1:$Port", "--name", $Name,
-        "--windowed", "--first-person-cam",
-        "--goto-script", $Goto, "--fp-look", $Look,
+    #
+    # A pose gives EITHER a walk plus a first-person lens, or a FIXED camera. --capture-cam wins
+    # over --first-person-cam when both are present (BotHarness calls MakeCurrent after the
+    # avatar attaches), so they are never passed together.
+    if ($Cam) {
+        $lens = @("--capture-cam", $Cam)
+    } else {
+        $lens = @("--first-person-cam", "--goto-script", $Goto, "--fp-look", $Look)
+    }
+    $argv = @("--path", $script:Root, "--",
+        "--bot", "--address", "127.0.0.1:$Port", "--name", $Name, "--windowed") + $lens + @(
         "--capture-dir", $OutDir, "--capture-at", $Marks,
         "--world", "supermarket", "--duration", $Dur,
-        "--log", (Join-Path $script:LogDir "$Tag.jsonl")) `
+        # THE DRAW-CALL READING HAS TO COME FROM THE PEER WITH A CAMERA. The host gets
+        # --perf-log too and reports 6 draw calls and 806 primitives from every pose -- because a
+        # --server peer has no avatar and no camera, so its viewport draws the HUD and the clear
+        # colour and nothing else. That number looks like a wonderful result and is a photograph
+        # of a UI. PerfHud only exists on a non-headless peer (Gameplay gates it on IsHeadless),
+        # which is why this is the windowed CLIENT.
+        "--perf-log", (Join-Path $script:LogDir "$Tag.client.perf.jsonl"),
+        "--log", (Join-Path $script:LogDir "$Tag.jsonl"))
+    $p = Start-Process -FilePath $script:GodotExe -ArgumentList $argv `
         -RedirectStandardOutput (Join-Path $script:LogDir "$Tag.out.log") `
         -RedirectStandardError (Join-Path $script:LogDir "$Tag.err.log") `
         -PassThru
@@ -121,7 +153,8 @@ try {
         $cfg = $Poses[$pose]
         $prefix = if ($Pass -eq "before") { "$pose-before" } else { $pose }
         Write-Host ""
-        Write-Host ">>> $prefix  goto=$($cfg.Goto) look=$($cfg.Look)" -ForegroundColor Cyan
+        if ($cfg.Cam) { $how = "cam=$($cfg.Cam)" } else { $how = "goto=$($cfg.Goto) look=$($cfg.Look)" }
+        Write-Host ">>> $prefix  $how" -ForegroundColor Cyan
 
         $h = Start-CaptureHost "shotcap-$prefix" @()
         $procs += $h
@@ -129,7 +162,7 @@ try {
             Stop-Proc $h
             Write-Fail "the capture host never reported listening on udp/$Port"
         }
-        $shot = Start-Shot "shotcap-$prefix" $prefix $cfg.Goto $cfg.Look $cfg.Marks 22
+        $shot = Start-Shot "shotcap-$prefix" $prefix $cfg.Goto $cfg.Look $cfg.Marks 22 $cfg.Cam
         $procs += $shot
         if (-not (Wait-ForExit $shot 120)) { Stop-Proc $shot }
         Stop-Proc $h

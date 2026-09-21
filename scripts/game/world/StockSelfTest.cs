@@ -114,6 +114,7 @@ public sealed partial class StockSelfTest : Node3D
         CheckTheBakeIsWhatLoaded(room, stock);
         CheckEveryBoardKeepsAHole(bays, stock);
         CheckEveryHoleAcceptsAProp(room, stock);
+        CheckTheBinsAreStocked(room);
         PrintPlacementCandidates(room, stock);
         Finish();
     }
@@ -359,6 +360,52 @@ public sealed partial class StockSelfTest : Node3D
                  + $"blockedByAnotherProp={_propBlocked} "
                  + $"worstPenetration={_worstPenetrationM:0.000} m at {_worstWhere} "
                  + $"(tolerance {PlacementIntegrity.DefaultOverlapToleranceM:0.000} m)");
+    }
+
+    /// <summary>
+    /// <b>Every floor bin carries its mound, and the mound has instances in it.</b>
+    ///
+    /// <para>Added after the first capture pass photographed six bins with nothing in them. The
+    /// wiring was right, the buffer held 29 instances and Godot logged no error -- which is
+    /// exactly the shape of defect this repo keeps paying for: a thing that is correct in the
+    /// file and absent on the screen, with nothing in between to notice. The capture caught it
+    /// because a 47 KB frame next to a 176 KB one is FP-1's own rule; nothing else could have.
+    /// So it is asserted here, headless, where it costs a millisecond.</para>
+    ///
+    /// <para>This checks the SCENE TREE, not the render -- it cannot see a culled mesh. A render
+    /// is still the only witness for that (<c>docs/qa/2026-09-20-stock-1/pile-*.png</c>), which
+    /// is why the capture pose is part of this packet rather than a nicety.</para>
+    /// </summary>
+    private void CheckTheBinsAreStocked(Node3D room)
+    {
+        Node? stock = room.GetNodeOrNull("Stock");
+        if (stock == null)
+        {
+            Fail("the search room has no Stock container.");
+            return;
+        }
+
+        int bins = 0, mounded = 0, instances = 0;
+        foreach (Node child in stock.GetChildren())
+        {
+            if (!child.Name.ToString().StartsWith("Bin_"))
+                continue;
+            bins++;
+            var mound = child.GetNodeOrNull<MultiMeshInstance3D>("Body/BinMound");
+            if (mound?.Multimesh is not MultiMesh mm || mm.InstanceCount <= 0)
+                continue;
+            mounded++;
+            instances += mm.InstanceCount;
+        }
+
+        Check(bins > 0, "the search room authors no floor bins at all.");
+        Check(mounded == bins,
+            $"{mounded} of {bins} floor bin(s) carry a BinMound with instances in it. A bin "
+            + "without one is an empty tub where Talon asked for a pile of fruit, and FloorBin.tscn "
+            + "instances BinMound.tscn at its root -- so a miss here means the prefab wiring broke, "
+            + "not the bake.");
+        GD.Print($"{Prefix}   floor bins: {bins}, mounded: {mounded}, "
+                 + $"produce instances in them: {instances}");
     }
 
     /// <summary>
