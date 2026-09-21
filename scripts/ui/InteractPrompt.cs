@@ -104,22 +104,16 @@ public partial class InteractPrompt : CanvasLayer
         _chip.Position = screen - new Vector2(_chip.Size.X / 2f, _chip.Size.Y + 6f);
     }
 
-    /// <summary>Whatever key the InputMap actually binds to <c>interact</c> right now —
-    /// respects rebinds instead of hard-coding "E". Physical keycodes translate through
-    /// the active layout so an AZERTY player sees their own key.</summary>
-    private static string InteractKeyLabel()
-    {
-        foreach (InputEvent ev in InputMap.ActionGetEvents("interact"))
-        {
-            if (ev is not InputEventKey key)
-                continue;
-            Key code = key.Keycode != Key.None
-                ? key.Keycode
-                : DisplayServer.KeyboardGetKeycodeFromPhysical(key.PhysicalKeycode);
-            string label = OS.GetKeycodeString(code);
-            if (!string.IsNullOrEmpty(label))
-                return label;
-        }
-        return "E";
-    }
+    /// <summary>Whatever the InputMap actually binds to <c>interact</c> right now — respects
+    /// rebinds instead of hard-coding a key.
+    ///
+    /// <para><b>Read through <see cref="ControlGlyphs.BindingFor"/> since FEEL-1 (2026-09-20),
+    /// not off the event list here.</b> This used to walk the events itself and skip anything
+    /// that was not an <c>InputEventKey</c>, falling back to the literal "E" — so the moment
+    /// Talon's ruling moved interact onto the LEFT MOUSE BUTTON, every chip in the world would
+    /// have gone on cheerfully advertising a key that no longer does anything. The How-to-Play
+    /// panel already had a resolver that understands mouse buttons and the wheel; there is now
+    /// one resolver rather than two, which is also what keeps the chip and the panel from
+    /// disagreeing.</para></summary>
+    private static string InteractKeyLabel() => ControlGlyphs.BindingFor("interact").Label;
 }

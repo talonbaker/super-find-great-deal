@@ -365,6 +365,17 @@ public sealed class LaunchOptions
     public IReadOnlyList<(int PropId, int BinSlot)> SortScript => _sortScript;
     private readonly List<(int PropId, int BinSlot)> _sortScript = new();
 
+    /// <summary>--walk-speed &lt;m/s&gt;: this process's top ground speed, overriding
+    /// <c>BrowsePace.DefaultWalkSpeedMps</c> (FEEL-1, 2026-09-20).
+    ///
+    /// <para><b>It is a MOTOR constant, so a session must give every process the same one.</b>
+    /// The owner predicts with it and the server judges with it; two peers holding different
+    /// values disagree about where a body is, which is a desync rather than a difference of
+    /// opinion. A value the knob table would refuse falls back to the shipped default rather
+    /// than being clamped — see <c>BrowsePace.SanitizeWalkSpeed</c> for why refusing is the safe
+    /// direction. Negative (the default) means "the shipped browse pace".</para></summary>
+    public float WalkSpeedMps { get; private set; } = -1f;
+
     /// <summary>--carry-grab-retry &lt;sec&gt;: re-fire a scripted bot's FIRST grab on this cadence
     /// until it is actually holding something. Negative (the default) = the original one-shot
     /// press, so every existing carry suite's pacing is byte-for-byte unchanged.
@@ -1449,6 +1460,10 @@ public sealed class LaunchOptions
                 // the game owns; a display name belongs to whoever typed it.
                 case "--spawn-index":
                     options.SpawnIndexSpec = Next(args, ref i).Trim();
+                    break;
+                case "--walk-speed":
+                    if (float.TryParse(Next(args, ref i), NumberStyles.Float, CultureInfo.InvariantCulture, out float walkSpeed))
+                        options.WalkSpeedMps = walkSpeed;
                     break;
                 case "--carry-grab-retry":
                     if (double.TryParse(Next(args, ref i), NumberStyles.Float, CultureInfo.InvariantCulture, out double grabRetry))
