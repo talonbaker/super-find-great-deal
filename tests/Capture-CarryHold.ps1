@@ -47,12 +47,18 @@ Write-Host "=== FEEL-1 captures (pass: $Pass) -> $OutDir ===" -ForegroundColor W
 
 # Each shot: the prop it grabs, where it walks first, how many wheel notches, and whether it runs
 # the hold-stress loop (which is what puts the body in a backward walk).
+# THE LENS HAS TO BE POINTED WHERE THE BODY IS POINTED, and for a bot those are two different
+# things. FirstPersonCamera carries its own yaw/pitch (a human's mouse drives it); a scripted bot
+# has no mouse, so without --fp-look the lens sits at its default while the BODY turns to face
+# wherever the brain is walking -- and the held prop, which rides the body's aim, is off-camera.
+# The first capture pass shot five frames of a shelf with the object out of frame in every one.
+# Yaw convention (STOCK-1's table): 0 faces -Z, -90 faces +X, +90 faces -X, 180 faces +Z.
 $Shots = @{
-    "held"       = @{ Prop = "SearchRoom/Prop_0"; Script = "36,0.22,0,1.0,-1"; Notches = 0;   Stress = $false; Marks = "9,11,13" }
-    "held-close" = @{ Prop = "SearchRoom/Prop_0"; Script = "36,0.22,0,1.0,-1"; Notches = -9;  Stress = $false; Marks = "9,11,13" }
-    "held-far"   = @{ Prop = "SearchRoom/Prop_0"; Script = "36,0.22,0,1.0,-1"; Notches = 9;   Stress = $false; Marks = "9,11,13" }
-    "shelf"      = @{ Prop = "SearchRoom/Prop_1"; Script = "36,0.22,2,1.0,-1"; Notches = 0;   Stress = $false; Marks = "12,14,16"; WalkTo = "46,2.5" }
-    "backwards"  = @{ Prop = "SearchRoom/Prop_0"; Script = "36,0.22,0,1.0,-1"; Notches = 0;   Stress = $true;  Marks = "11,12.5,14" }
+    "held"       = @{ Look = "-90,-12"; Prop = "SearchRoom/Prop_0"; Script = "36,0.22,0,1.0,-1"; Notches = 0;   Stress = $false; Marks = "9,11,13" }
+    "held-close" = @{ Look = "-90,-12"; Prop = "SearchRoom/Prop_0"; Script = "36,0.22,0,1.0,-1"; Notches = -9;  Stress = $false; Marks = "9,11,13" }
+    "held-far"   = @{ Look = "-90,-12"; Prop = "SearchRoom/Prop_0"; Script = "36,0.22,0,1.0,-1"; Notches = 9;   Stress = $false; Marks = "9,11,13" }
+    "shelf"      = @{ Look = "-90,-10"; Prop = "SearchRoom/Prop_1"; Script = "36,0.22,2,1.0,-1"; Notches = 0;   Stress = $false; Marks = "12,14,16"; WalkTo = "46,2.5" }
+    "backwards"  = @{ Look = "-90,-12"; Prop = "SearchRoom/Prop_0"; Script = "36,0.22,0,1.0,-1"; Notches = 0;   Stress = $true;  Marks = "11,12.5,14" }
 }
 
 function Start-CaptureHost([string]$Tag) {
@@ -98,11 +104,16 @@ try {
             "--path", $script:Root, "--",
             "--bot", "--address", "127.0.0.1:$Port", "--name", $name,
             "--windowed", "--first-person-cam",
-            "--carry-script", $cfg.Script, "--carry-grab-retry", "0.6",
+            "--carry-script", $cfg.Script,
             "--carry-target-prop", $propId,
             "--capture-dir", $OutDir, "--capture-at", $cfg.Marks,
+            "--fp-look", $cfg.Look,
             "--world", "supermarket", "--duration", 20,
             "--log", (Join-Path $script:LogDir "feelcap-$name.jsonl"))
+        # NO --carry-grab-retry here, unlike the suites. A retry that fires while the bot is
+        # already holding something is refused -- correctly -- and the refusal CARD then covers
+        # the middle of every frame ("CAN'T PICK THAT UP / Your hands are full"). A suite wants
+        # the retry because a missed grab costs it a phase; a photograph wants a clean frame.
         if ($cfg.Notches -ne 0) { $args += @("--hold-notches", $cfg.Notches) }
         if ($cfg.Stress) { $args += "--hold-stress" }
         if ($cfg.ContainsKey("WalkTo")) { $args += @("--carry-walk-to", $cfg.WalkTo) }

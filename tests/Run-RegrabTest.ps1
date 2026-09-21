@@ -79,7 +79,19 @@ $ErrorActionPreference = "Stop"
 . "$PSScriptRoot\_Common.ps1"
 
 $BallId = 2 # Ball at (-2.5, 0.5, -2.5) in the propsync roster (PropManager.SpawnInitialProps)
-$HoldRadius = 1.6 # carry anchor sits ~0.5m from avatar centre; generous for lerp lag
+# How far a held ball may sit from its holder's avatar, metres.
+#
+# RE-DERIVED BY FEEL-1 (2026-09-20), 1.6 -> 2.0, for the reason written out in full at
+# Run-CarryNetTest's copy of this same constant: a held prop no longer rides a carry anchor
+# ~0.5 m from the avatar's centre, it rides the VIEW RAY up to CarryHold.HoldMaxBaseM (1.2 m)
+# from an eye at AvatarProportions.PlayerEyeHeightM (0.995 m), so sqrt(1.2^2 + 0.995^2) = 1.56 m
+# is the geometric maximum before the spring has lagged at all. The marathon measured 1.60 m and
+# reported it 80 times -- the bar being wrong rather than the carry being wrong, and the suite
+# passed 3/3 standalone only because 1.60 sits exactly ON the old bar.
+#
+# What this assertion is FOR is unchanged and 2.0 m still catches it: the drift this suite was
+# written for left the ball metres behind its holder and growing.
+$HoldRadius = 2.0
 
 Write-Host "=== regrab: loose->held second-pickup drift regression test ===" -ForegroundColor White
 if (-not $SkipBuild) {
