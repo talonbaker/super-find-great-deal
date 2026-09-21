@@ -723,6 +723,16 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
     /// transition.</remarks>
     public virtual void OnThrown(Vector3 impulse) => Release(impulse);
 
+    /// <summary><b>Released with the spin NAMED instead of drawn</b> (PHYS-2, 2026-09-20).
+    /// <see cref="Release(Vector3)"/> above draws a random tumble of +/-2 rad/s on every axis,
+    /// which is right for a discarded object and is a fact about the verb rather than about the
+    /// physics. A test fixture that asks for a known shove and is handed a random spin with it is
+    /// not a known shove: +/-2 rad/s is half of what it takes to put a cereal box over, so the
+    /// tumble alone decides whether a shoved box topples or slides. This entry point is how
+    /// <c>--phys-shove</c> gets a repeatable one; every shipped release still goes through the
+    /// overload above and still tumbles.</summary>
+    public virtual void OnThrown(Vector3 impulse, Vector3 angular) => Release(impulse, angular);
+
     /// <summary><b>Set down, not dropped</b> (CARRY-1's place verb): rejoin physics with no
     /// velocity and NO SPIN. The random tumble <see cref="Release(Vector3)"/> applies is what
     /// makes a discarded prop look discarded; applying it to a placement would spin away the

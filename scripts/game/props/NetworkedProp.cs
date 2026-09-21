@@ -478,13 +478,23 @@ public partial class NetworkedProp : Node3D
     /// take over. Detaches any hold first (throwing something you hold is also a release), then
     /// unfreezes + restores collision via the same OnThrown entry point Carryable already uses
     /// for the offline path — from here PropManager's server loop drives it every physics tick.</summary>
-    public void BeginLooseServer(Vector3 impulse)
+    public void BeginLooseServer(Vector3 impulse) => BeginLooseServer(impulse, null);
+
+    /// <summary>As above, with the tumble NAMED rather than drawn (PHYS-2). <paramref name="angular"/>
+    /// null keeps <see cref="Carryable.OnThrown(Vector3)"/>'s random +/-2 rad/s, which is every
+    /// shipped release; a value hands the body exactly that spin, which is what a fixture asking
+    /// for a known shove needs. See <c>Carryable.OnThrown(Vector3, Vector3)</c> for the
+    /// measurement that made this necessary.</summary>
+    public void BeginLooseServer(Vector3 impulse, Vector3? angular)
     {
         HolderPeerId = 0;
         _holder = null;
         ClearSpring();
         Body.CanSleep = false;   // PHYS-1: for the length of the episode; see WakeFromContactServer
-        Body.OnThrown(impulse);
+        if (angular is { } spin)
+            Body.OnThrown(impulse, spin);
+        else
+            Body.OnThrown(impulse);
     }
 
     /// <summary>Server-only, test fixture (<c>--seed-props-drop</c>): let a seeded prop FALL from

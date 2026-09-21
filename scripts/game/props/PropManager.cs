@@ -337,7 +337,25 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
     /// prop being dropped or thrown, and the planted room has no players in it. Server-only, and
     /// the only caller in the tree is the self-test the flag <c>--reach-selftest</c> arms.</para>
     /// </summary>
-    public void ServerNudgeLoose(int propId, Vector3 impulse)
+    public void ServerNudgeLoose(int propId, Vector3 impulse) =>
+        ServerNudgeLoose(propId, impulse, null);
+
+    /// <summary>
+    /// As above, with the tumble NAMED rather than drawn (PHYS-2, 2026-09-20).
+    ///
+    /// <para><b>Why this exists, and it is the difference between a fixture and a coin flip.</b>
+    /// The release funnel this hook goes through draws a random angular velocity of +/-2 rad/s on
+    /// every axis (<c>Carryable.Release(Vector3)</c>) because a discarded object should look
+    /// discarded. A cereal box goes over at about 4 rad/s, so that draw alone decides whether a
+    /// shoved box topples forward, slides, or falls backwards into the thing that pushed it --
+    /// and <c>--phys-shove</c> exists precisely so a domino row stops being measured against
+    /// something random. Passing <see cref="Vector3.Zero"/> is what makes "the row was struck at
+    /// 2.8 m/s" the whole description of the event.</para>
+    ///
+    /// <para><paramref name="angular"/> null is REACH-1's original behaviour to the digit, which
+    /// is what its two callers (the cost probe's shove wave and the planted room) still get.</para>
+    /// </summary>
+    public void ServerNudgeLoose(int propId, Vector3 impulse, Vector3? angular)
     {
         if (!_isServer)
             return;
@@ -353,7 +371,7 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
         // shoved a RESTING prop, which is not one of the four release verbs. The sound this
         // produces is the impact when it lands, which SFX-2's PropImpact event carries.
         Rpc(MethodName.ApplyPropState, propId, (int)PropMode.Loose, 0, at, (int)PropRelease.None);
-        node.BeginLooseServer(impulse);
+        node.BeginLooseServer(impulse, angular);
     }
 
     // --- PHYS-1 (P3): the audit's restore, gated -------------------------------------------
@@ -927,7 +945,11 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
             // this on the prop would silently swallow the second.
             if (_physShoveClock < atSec || !_physShovesFired.Add(i))
                 continue;
-            ServerNudgeLoose(propId, velocity);
+            // Vector3.Zero, NOT the release funnel's random tumble. See ServerNudgeLoose's
+            // overload: +/-2 rad/s on every axis is half of what it takes to put a cereal box
+            // over, so a shove that drew its own spin would still be a coin flip with a tidy
+            // number written beside it.
+            ServerNudgeLoose(propId, velocity, Vector3.Zero);
             // The line the suite reads: it is the only record of what the fixture actually asked
             // for, and a shove that names a prop id nothing seeded would otherwise be a silent
             // no-op that reads downstream as "the physics did not work".
