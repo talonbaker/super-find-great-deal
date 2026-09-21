@@ -1282,7 +1282,7 @@ that walk, and it is the only copy).
 | **7911** | **`Run-StockTest.ps1`** (and `Capture-ShopFloor.ps1`, unregistered) | **STOCK-1** |
 | **7912** | **`Run-SoloSmoke.ps1`** (and `Capture-SoloBoard.ps1`, unregistered) | **SOLO-1** |
 | **7913** | **`Run-CarryHoldTest.ps1`** (and `Capture-CarryHold.ps1`, unregistered) | **FEEL-1** (7912 was taken by a live SOLO-1 lane) |
-| **7914** | **`Measure-CameraPacing.ps1`** (unregistered) | **SICK-1** |
+| **7914** | **`Measure-CameraPacing.ps1`** and **`Measure-RenderStall.ps1`** (both unregistered) | **SICK-1**, extended by **STALL-1** (2026-09-21) on the same number — `Measure-CameraPacing.ps1` is byte-identical to what SICK-1 measured, deliberately, so the two lanes' rows stay comparable |
 | 7915 | *reserved, unused* -- ART-1 was cancelled 2026-09-20 (Talon sources the art himself) | ART-1 |
 | **7916** | **`Run-PhysicsFeelTest.ps1`** (and `Capture-PhysicsFeel.ps1`, unregistered) | **PHYS-1** |
 | **7917** | **`Run-HandsSmoke.ps1`** | **HANDS-1** (assigned in the dispatch, not computed) |
@@ -2616,3 +2616,45 @@ read 2.6 cm outside the room once it had rolled 45°, and `OutOfBounds -> Restor
 back where it started, mid-run — the same run restored authored produce 1135 by 0.4 m.
 `PlacementIntegrity.ExtentsInside` measures the true extent per shape now
 (`PropPhysics.RoundExtents` / `BoxExtents`; `PhysStrikeExtentsSeedTests` pins the arithmetic).
+
+## STALL-1 (2026-09-21): `TimeProcess` is a PER-SECOND MAXIMUM, and three handoffs quote it as a frame
+
+**Added by INT-2 part B on STALL-1's ruling, because it is a correction this lane owes three other
+documents rather than a finding about one suite.**
+
+`Performance.Monitor.TimeProcess` and `Performance.Monitor.TimePhysicsProcess` are **not per-frame
+values. They are the worst idle / physics step in the second the sample falls in**, and the engine
+refreshes them once a second. Measured by counting distinct values rather than by arguing:
+
+| run | recorded frames | **distinct `proc_ms` values** | window |
+|---|---|---|---|
+| `gpu1-novsync` | 11 055 | **37** | 35.9 s |
+| `novsync-nvidia` | 48 780 | **56** | 54.6 s |
+
+One new value per second, on both. That is why `novsync-nvidia` shows a mean `frame_ms` of
+1.12 ms beside a mean `proc_ms` of **430.79 ms** without either being wrong, and why an Intel row
+whose worst frame was 69.9 ms reports a `proc_ms` maximum of **800.6 ms** (that is the boot
+second).
+
+**What it means for numbers already written down.** `PerfHud.cs` prints `TimeProcess` as
+`frame_ms`, and SHELF-1's and STOCK-1's `pms` is `TimePhysicsProcess` described as "a 5 Hz spot
+reading". Both are worst-in-second. **Like-for-like comparisons survive** — the two sides of an
+A/B are distorted identically, so every before/after in those handoffs still holds — **but the
+ABSOLUTE values do not**: read them as an upper bound over a second, never as "a frame cost this".
+
+**And two specific numbers are now explained rather than outstanding.** HANDS-1's frame-cost A/B
+recorded a p95 of **513.820 ms identical on base and branch**, and STOCK-1 §5.6 recorded a capture
+client's median of **~514 ms** and read it as "an artefact of the harness". **Both were this
+stall** — the cross-adapter present STALL-1 names, Godot drawing on an RTX 4070 with no display
+attached while the Intel UHD 770 owns the screen. Neither was the hands, and neither was the
+harness. A windowed client on this machine is at about 4 fps until the monitor cable moves, and
+`--gpu-index 1` is the proof-without-touching-anything (255.851 ms -> 2.837 ms median, 269 stalls
+-> 0).
+
+**The practical rule for anyone writing a capture or a pacing harness here:** a windowed run on
+the default adapter cannot resolve an event shorter than about two seconds. INT-2 part B measured
+exactly that on PHYS-2's capture harness — a 0.5 s `--capture-at` grid came out **1.5-2.0 s
+apart**, and a domino row whose entire fall takes 1.5 s fell between two marks, so all eleven
+frames were the settled pile and four runs of that harness had photographed nothing. Pass
+`--gpu-index 1` (an ENGINE flag, before the bare `--`) to any windowed capture client, and
+correlate a PNG's mtime against the subject's own clock before believing a mark's label.

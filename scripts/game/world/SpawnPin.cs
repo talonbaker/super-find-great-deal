@@ -110,4 +110,54 @@ public sealed class SpawnPin
     /// <summary>The pinned names, for a log line. Order is unspecified; callers that print it
     /// sort.</summary>
     public IEnumerable<KeyValuePair<string, int>> Pins => _byName;
+
+    /// <summary>How close another body has to be to a pinned marker for the pin to WAIT for it
+    /// (PHYS-2 finding 2, fixed by INT-2 part B, 2026-09-21). A `SearchSpawn` marker's nearest
+    /// neighbour is 2.1 m away, so at 1 m this can only ever mean "somebody is standing ON this
+    /// marker" and never "somebody is standing at the next one".</summary>
+    public const float PinClearM = 1.0f;
+
+    /// <summary>
+    /// <b>Is a peer that has not been settled yet standing where a pin wants to land?</b>
+    ///
+    /// <para><b>The defect, measured.</b> PHYS-2 §2.1: <c>Gameplay.ApplySpawnPins</c> pins a name
+    /// the frame it replicates, and names replicate at different times. <c>SfxProduceBot</c>'s
+    /// arrived first and it was teleported onto marker 3 <i>while the still-unnamed witness was
+    /// standing on it by join order</i> — the produce bot ended up at <c>y = 2.30</c>, on the
+    /// witness's head, for 0.6 s, then fell into the +Z walkway and stopped 5.7 m from its prop
+    /// with <c>heldPropId = -1</c> all run. <c>Run-MaterialSfxTest</c> 2/3, and the suite
+    /// correctly reported it as a sound that never played.</para>
+    ///
+    /// <para><b>Why the fix is the ORDER and not the radii or the table.</b> The search room has
+    /// exactly four <c>SearchSpawn</c> markers and that suite pins names to all four, so there is
+    /// no unreserved marker to deal an unnamed joiner instead — "reserve the pinned markers from
+    /// join-order assignment" is unavailable here by construction. What is always available is to
+    /// let the occupant move first: a peer whose name has not replicated yet is one the poll is
+    /// still going to act on, so a pin that would land on it simply waits a frame.</para>
+    ///
+    /// <para><b>It cannot deadlock</b>, and that is why the test is "has no name yet" rather than
+    /// "is not pinned yet". Every avatar whose name HAS arrived is settled in the same pass it is
+    /// seen — pinned, or written off as unpinned — so the waiting set strictly shrinks. Two peers
+    /// cannot wait on each other. A peer that never publishes a name at all would hold a pin
+    /// forever, which is a session that never passes <c>--spawn-index</c>: the flag is the
+    /// server's, every driver that uses it also passes <c>--name</c>, and
+    /// <see cref="Empty"/> short-circuits the whole path in every session a player starts.</para>
+    ///
+    /// <para>Static and engine-free so the geometry is asserted in the Godot-free suite and the
+    /// adapter in <c>Gameplay</c> stays a handful of lines, which is this whole file's pattern.
+    /// </para>
+    /// </summary>
+    public static bool BlockedByAnUnsettledPeer(
+        Godot.Vector3 destination, IEnumerable<Godot.Vector3>? unsettledAt, float clearM)
+    {
+        if (unsettledAt == null)
+            return false;
+        float r2 = clearM * clearM;
+        foreach (Godot.Vector3 at in unsettledAt)
+        {
+            if (at.DistanceSquaredTo(destination) <= r2)
+                return true;
+        }
+        return false;
+    }
 }

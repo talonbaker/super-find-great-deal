@@ -142,4 +142,52 @@ public class SpawnPinTests
         Assert.Equal(0, SpawnPin.Empty.Count);
         Assert.Equal(-1, SpawnPin.Empty.IndexFor("anybody"));
     }
+
+    // --- The pin ORDER (INT-2 part B, 2026-09-21, ruling 5) -----------------------------------
+    // PHYS-2 section 2.1 measured a pin teleporting SfxProduceBot onto marker 3 while the
+    // still-unnamed witness was standing on it by join order: the produce bot spent 0.6 s at
+    // y = 2.30 on the witness's head, fell into the +Z walkway and stopped 5.7 m from its prop.
+    // These assert the geometry half; the ordering half is four lines in Gameplay.ApplySpawnPins.
+
+    /// <summary><b>A marker with an unnamed peer standing on it is blocked.</b> That peer is one
+    /// the same poll is about to move, so the pin waits a frame rather than landing on it.</summary>
+    [Fact]
+    public void AMarkerAnUnnamedPeerIsStandingOnIsBlocked()
+    {
+        var destination = new Godot.Vector3(41.5f, 1.10f, -2.1f);
+        var unsettled = new[] { new Godot.Vector3(41.46f, 0.82f, -2.03f) };  // PHYS-2's own trace
+        Assert.True(SpawnPin.BlockedByAnUnsettledPeer(destination, unsettled, SpawnPin.PinClearM));
+    }
+
+    /// <summary><b>A peer on the NEXT marker does not block.</b> The nearest two SearchSpawn
+    /// markers are 2.1 m apart and the clearance is 1 m, so this can only ever mean "standing on
+    /// it" -- a radius that swallowed the neighbouring marker would deadlock every pinned suite,
+    /// which is the failure mode worth a test of its own.</summary>
+    [Fact]
+    public void APeerOnTheNextMarkerDoesNotBlock()
+    {
+        var destination = new Godot.Vector3(41.5f, 1.10f, -2.1f);
+        var elsewhere = new[] { new Godot.Vector3(44.5f, 1.10f, 0f) };
+        Assert.False(SpawnPin.BlockedByAnUnsettledPeer(destination, elsewhere, SpawnPin.PinClearM));
+    }
+
+    /// <summary>Nobody waiting, nothing blocked -- including the null the adapter passes when it
+    /// never allocated the list, which is every ordinary frame.</summary>
+    [Fact]
+    public void NothingIsBlockedWhenEveryPeerIsNamed()
+    {
+        var destination = new Godot.Vector3(41.5f, 1.10f, -2.1f);
+        Assert.False(SpawnPin.BlockedByAnUnsettledPeer(destination, new Godot.Vector3[0], SpawnPin.PinClearM));
+        Assert.False(SpawnPin.BlockedByAnUnsettledPeer(destination, null!, SpawnPin.PinClearM));
+    }
+
+    /// <summary><b>The clearance is under the marker spacing, and that is the property that makes
+    /// the wait terminate.</b> Asserted as a relation rather than as the number, so a later ride
+    /// that moves the markers gets a red here instead of a deadlocked suite.</summary>
+    [Fact]
+    public void TheClearanceIsWellInsideTheMarkerSpacing()
+    {
+        Assert.True(SpawnPin.PinClearM > 0f);
+        Assert.True(SpawnPin.PinClearM < 2.1f);   // closest two SearchSpawn markers
+    }
 }

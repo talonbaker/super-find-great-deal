@@ -1075,10 +1075,32 @@ public partial class Gameplay : Node3D
     /// deliberately not the same as "harmless if a client could" — a self-teleport verb is an
     /// anti-cheat surface and this lane is not the place to open one.</para>
     /// </summary>
+    /// <summary>Peers already told, once each, that their pin is waiting for somebody to move off
+    /// the marker. This poll runs every frame on the server, so an unthrottled line here would be
+    /// sixty a second; the wait is worth exactly one line and then silence.</summary>
+    private readonly HashSet<int> _spawnPinWaitLogged = new();
+
     private void ApplySpawnPins()
     {
         if (_spawnPins.Count == 0 || _players == null || !GodotObject.IsInstanceValid(_players))
             return;
+        // PASS 1 (INT-2 part B, 2026-09-21, ruling 5 -- PHYS-2 §2.1's spawn-pin collision).
+        // Where is everybody whose name has NOT replicated yet? Those are the peers still sitting
+        // on their join-order marker that this same poll is about to move, and teleporting a
+        // named peer on top of one is what put SfxProduceBot at y = 2.30 on the witness's head.
+        // Gathered first, because a pin has to be able to see who is standing where it wants to
+        // land -- which a single pass that pins as it walks the children cannot.
+        List<Vector3>? unsettled = null;
+        foreach (Node child in _players.GetChildren())
+        {
+            if (child is not SandboxAvatar waiting)
+                continue;
+            if (_spawnPinned.Contains(waiting.OwnerPeerId)
+                || !string.IsNullOrEmpty(waiting.DisplayName))
+                continue;
+            (unsettled ??= new List<Vector3>()).Add(waiting.GlobalPosition);
+        }
+        // PASS 2: pin whoever can be pinned without landing on one of them.
         foreach (Node child in _players.GetChildren())
         {
             if (child is not SandboxAvatar avatar)
@@ -1094,10 +1116,29 @@ public partial class Gameplay : Node3D
             if (string.IsNullOrEmpty(name))
                 continue;
             int index = _spawnPins.IndexFor(name);
-            _spawnPinned.Add(peer);
             if (index < 0)
+            {
+                // Named and not in the map: settled forever, on the ordinary join-order deal.
+                _spawnPinned.Add(peer);
                 continue;
+            }
             Vector3 destination = SpawnPositionFor(index);
+            if (World.SpawnPin.BlockedByAnUnsettledPeer(
+                    destination, unsettled, World.SpawnPin.PinClearM))
+            {
+                // Somebody whose name has not arrived is standing on this marker. It is NOT
+                // settled (no _spawnPinned.Add), so this peer is asked again next frame -- by
+                // which time that occupant has a name and has been moved to wherever it belongs.
+                if (_spawnPinWaitLogged.Add(peer))
+                {
+                    ServerLog.Info("spawn pin waiting",
+                        $"peer={peer} name={name} marker={index} "
+                        + $"at=({destination.X:F2},{destination.Y:F2},{destination.Z:F2}) "
+                        + "- an unnamed peer is standing there");
+                }
+                continue;
+            }
+            _spawnPinned.Add(peer);
             bool moved = World.RoomTeleport.ServerMove(avatar, destination);
             ServerLog.Info("spawn pinned",
                 $"peer={peer} name={name} marker={index} "
