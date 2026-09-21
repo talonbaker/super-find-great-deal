@@ -1277,6 +1277,10 @@ that walk, and it is the only copy).
 | **7909** | **`Run-HoldingBoardTest.ps1`** (and `Capture-HoldingBoard.ps1`, unregistered) | **HOLD-1** |
 | **7910** | **`Walk-DefinitionOfDone.ps1`** (the §8 walk, unregistered and manual) | **INT-1** |
 | **7911** | **`Run-StockTest.ps1`** (and `Capture-ShopFloor.ps1`, unregistered) | **STOCK-1** |
+| **7912** | *assigned, SOLO-1* | **SOLO-1** |
+| **7913** | *assigned, FEEL-1* | **FEEL-1** |
+| **7914** | **`Measure-CameraPacing.ps1`** (unregistered) | **SICK-1** |
+| **7915 / 7916 / 7917** | *assigned, no suite yet* | **ART-1 / PHYS-1 / HANDS-1** |
 
 Everything below 7893 is the pre-fork ladder and is unchanged: 7777, 7778, 7788, 7799, 7807,
 7809/7810, 7815, 7816, 7817, 7818, 7821, 7822, 7830, 7831, 7834.
@@ -1981,3 +1985,75 @@ come within 10 mm of a facing, and
 0.175 m pitch for a 0.16 m sphere, a 0.02 m clearance empties both NEIGHBOURS of every facing as
 well and leaves an end-cap with 2 of 14 cells standing -- barer than SHELF-1 left it. The quantity
 that matters is penetration, and any positive clearance is already zero penetration.
+
+
+## PORTS ARE NOW ASSIGNED, NOT COMPUTED -- and the fifth collision is why (SICK-1, 2026-09-20)
+
+**Stop computing "the next free port" from the table above. Ask the orchestrator.** The table is a
+SNAPSHOT, and every lane in a live wave reads the same snapshot, so two lanes pick the same number
+every time. The tally this rule has now cost: **7896 three times** (INT-0), **7899 twice**
+(DOOR-1/VOICE-1), **7910 once** (REVIEW-1's correction), **7912 twice** (2026-09-20), and **7913
+once** -- this lane, which read the table correctly, took the next free number, and collided with
+FEEL-1. The wave assignment is in the table above; a row is claimed when the orchestrator hands it
+out, not when a suite lands on `origin`.
+
+**The failure sentence is ambiguous and the discriminator is one grep.** A port collision presents
+as `the server never reported listening within 30s`, which is byte-identical to what a starved
+machine and a wedged server produce. Read the server's `.err.log`: `Couldn't create an ENet host`
+with `err=CantCreate` is the bind, and nothing else is.
+
+## A HEADLESS RUN CANNOT SEE A RENDERING STALL, and this one is 535 ms (SICK-1, measured 2026-09-20)
+
+**Every performance number in `tests/` except `Run-FirstPersonTest`'s is measured on a `--headless`
+process, and a headless process does not render.** SHELF-1 said this about `pms` and STOCK-1
+restated it after 2 212 MultiMesh instances landed on the GPU and the headless column went DOWN.
+Here is the measurement that gives it a magnitude, and it is large.
+
+Same build, same bot, same 30 s patrol, one windowed run and one headless:
+
+| | windowed (1280x720) | headless |
+|---|---|---|
+| dt p50 | 16.65 ms (60.0 fps) | 6.90 ms (145 fps) |
+| dt max | **535-1014 ms** | **50.6 ms** |
+| frames over 20 ms | 90-95 of ~1 640 (**5.6%**) | 7 of 4 328 (**0.16%**) |
+| stalls over 100 ms | **17-18 per 36 s**, all ~535 ms, ~1-2 s apart | **none** |
+
+**Each stall costs exactly 0.507 m of world movement, and that number names the mechanism**:
+0.507 m is eight physics ticks of walking, and `physics/common/max_physics_steps_per_frame`
+defaults to **8**. On a 535 ms frame the engine simulates 133 ms of world and the rest is simply
+lost -- the world lurches half a metre and the clock skips.
+
+**Ruled out by measurement, not by argument:** vsync (`--vsync 0` did not remove it, `dt_max`
+533 ms at ~2 100 fps); first-use shader compilation (it recurs at the same rate on a warm cache,
+run after run); the bot harness and its 20 KB 5 Hz JSONL (the headless bot writes the identical
+sample at the identical rate and has no stalls, and ~1 Hz does not match 5 Hz); machine contention
+alone (present with two foreign Godot processes on the machine and again with eight).
+**NOT identified.** One hypothesis for whoever picks it up: `Win32_VideoController` reports two
+adapters on this machine, an RTX 4070 and an Intel UHD 770, and the display's resolution and
+refresh are reported against the **Intel** one -- a cross-adapter presentation path is a known
+source of half-second stalls. That is a hypothesis; it has not been measured.
+
+**The reusable rule: a headless green is not evidence about frame time, and a headless frame-time
+number is not a smaller version of the windowed one -- it is a different quantity.** Any packet
+that claims a performance result a player will feel needs a windowed row, and
+`tests/Measure-CameraPacing.ps1` is a rig that produces one.
+
+## `powershell -File` collapses a comma-separated array argument into ONE string (SICK-1, 2026-09-20)
+
+Windows PowerShell 5.1, and it fails silently rather than throwing. Measured:
+
+```
+powershell -File tests/Measure-CameraPacing.ps1 -Configs "a:--x 0","b:--x 1","c:--x 2"
+```
+
+ran **one** configuration whose label was `a` and whose flags were
+`--x 0,b:--x 1,c:--x 2` -- every flag from every later element appended to the first, so the LAST
+value of each repeated flag won and the run silently measured a configuration nobody asked for.
+Nothing warns; the script's own echo of its arguments is what showed it. `-File` hands the script
+raw command-line tokens and does no array binding; **`-Command "& '<path>' -Configs @('a','b')"`
+does.**
+
+Same family as the `$Args`-is-an-automatic-variable trap (REACH-1) and the `@($list)`-on-a-
+`List[object]` throw (TASK-1): **a PowerShell parameter that silently receives the wrong thing is
+this repo's most expensive recurring bug shape.** Echo what a script actually received before
+trusting a run that used an array or a typed parameter.
