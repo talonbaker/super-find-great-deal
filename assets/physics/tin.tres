@@ -1,0 +1,24 @@
+[gd_resource type="PhysicsMaterial" format=3 uid="uid://phystin0sfgdmvp"]
+
+; PHYS-1 (2026-09-20). A CAN, and this is the one row of the table Talon named out loud:
+; "cans should roll around." Friction 0.25 against the floor's default 1.0 combines to 0.25 --
+; low enough that a nudge becomes a roll instead of a scrape, and high enough that a can set down
+; on a shelf does not slide off it on its own.
+;
+'; NO BOUNCE, AND THAT IS MEASURED (PHYS-2, 2026-09-21). PHYS-1 shipped 0.10 as "a ping rather
+; than a bounce", and Run-StockTest went red on it three times out of three, to the millimetre: a
+; can released at its exact resting pose in an authored hole read 0.032 m of penetration against
+; the bay board (tolerance 0.020) where every tree without this file read under 0.020. The
+; ablation was one file at a time on the same build: bounce 0.0 with friction 0.25 kept -> PASS;
+; friction 1.0 with bounce 0.1 kept -> PASS; both shipped values -> FAIL. The pose the can settles
+; to differs by under a degree and 5 mm between those runs, which is the cylinder-against-board
+; depth query's whole sensitivity, and a ping nobody has ridden is not worth a registered suite
+; going red. The roll (friction 0.25) is the row of the table Talon named; the bounce was not.
+;
+; NOT `rough`/`absorbent`: those make this material's number WIN at a contact instead of combining,
+; and a can is not the thing that should decide how a contact behaves -- the surface it is on is.
+[resource]
+friction = 0.25
+rough = false
+bounce = 0.0
+absorbent = false

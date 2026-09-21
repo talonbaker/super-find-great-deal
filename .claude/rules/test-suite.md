@@ -1284,7 +1284,7 @@ that walk, and it is the only copy).
 | **7913** | **`Run-CarryHoldTest.ps1`** (and `Capture-CarryHold.ps1`, unregistered) | **FEEL-1** (7912 was taken by a live SOLO-1 lane) |
 | **7914** | **`Measure-CameraPacing.ps1`** (unregistered) | **SICK-1** |
 | 7915 | *reserved, unused* -- ART-1 was cancelled 2026-09-20 (Talon sources the art himself) | ART-1 |
-| **7916** | *assigned, suite not yet cut* | **PHYS-1** |
+| **7916** | **`Run-PhysicsFeelTest.ps1`** (and `Capture-PhysicsFeel.ps1`, unregistered) | **PHYS-1** |
 | **7917** | **`Run-HandsSmoke.ps1`** | **HANDS-1** (assigned in the dispatch, not computed) |
 
 > **Updated by SOLO-1, 2026-09-20 — and THE "NEXT FREE" RULE IS RETIRED FOR THIS WAVE.** It
@@ -2431,3 +2431,188 @@ the whole time.
 *inside one suite's own files* names the suite to re-run, and the suites on either side of it are
 unaffected because each one is its own processes reading its own logs.
 
+## PHYS-1 (2026-09-20): udp/7916, and a suite whose bars are an ANGLE and a distance
+
+`tests/Run-PhysicsFeelTest.ps1` claims **udp/7916** and is registered last in
+`tests/Run-AllTests.ps1`. The number was **assigned by the orchestrator in the dispatch**, which
+is the rule FEEL-1's section above states in capitals; nothing here was computed from a snapshot
+of `tests/`. Its row is in the one ladder table.
+
+### How to read a red
+
+Its failures are **readings**, in the carry family's tradition, and they separate cleanly:
+
+| The line | What it is |
+|---|---|
+| `STAGING: PhysBot never held prop N -- closest approach X m` | the walk, not the physics. Read X against the CLIENT's 1.5 m `PickupRadius` in 3D exactly as REVIEW-1's entry says: inside it and motionless is a press that found nothing; several metres out is the four-corridor mis-walk, and no constant reaches that |
+| `not one of the five boxes tilted past 60 deg` | **the subject.** A resting prop is an immovable wall again — `PropManager.ServerBumpProp` is not being reached, or `PropRegistry.Wake` is refusing |
+| `only N of 5 boxes went over` | the chain stopped part way: the shove is arriving but is too small, or the boxes are no longer top-heavy (`center_of_mass_mode` lost off `CerealBox.tscn` is the way that happens silently) |
+| `the row took Xs to go over` | each box is being knocked by the CRATE rather than by its neighbour — check whether the row's pitch still sits inside a falling box's 0.28 m of reach |
+| `the can travelled X m` | the material table. `assets/physics/tin.tres`'s friction or `Can.tscn`'s `angular_damp` moved |
+| `prop N was seen at X m/s` / `the clamp bit N times` | P2. The impulse clamp is in `PropPhysics.WakeSpeed`; the per-tick backstop is `NetworkedProp.ServerClampMotion` |
+| `the rest audit teleported N prop(s)` | P3's gate (`PropRestGate`) is not holding, or a prop is genuinely unfixable |
+| `the server logged not one [phys] wake` | **read this one first whatever else is red.** Every other bar is then green for the wrong reason |
+
+**The line to grep on a green run** is printed unconditionally:
+`PHYS1BARS restWorst=… fastestUnheld=… clamps=… restores=… wakes=… waits=…`.
+
+### A frozen body is trivially stable, so "the stack is stable at rest" is not the bar
+
+A `Resting` prop in this game is `Freeze = true, FreezeMode = Kinematic` on every peer, so a row
+of five boxes standing untouched for thirty seconds proves only that the latch works — it is true
+by construction and would stay true with every line of PHYS-1 reverted. The suite measures it
+anyway (bar 1, as a movement of at most 1 cm before anything arrives, which catches a stack that
+drifts because something woke it early), and it puts the weight on the honest half instead:
+**every prop the crate knocks over must be back at Resting by the end of the run** (bar 5). A
+woken prop that never settles is the one case where P1 and the rest audit cannot both hold, and
+that bar is what would say so.
+
+## PHYS-2 (2026-09-21): the three PHYS-1 reds discriminated on a base, a wrapper that deadlocks on itself, and a capture that photographed a wall
+
+PHYS-1 §11.2 left three standalone reds undiscriminated. Each was re-run **at least three times a
+side, interleaved**, on a detached worktree (`C:/repos/sfgd-phys2-base`) moved between three bases:
+`f086ed4` (FEEL-1's tip), `e75e04d` (the integration tip, STOCK-1 in) and `1511ea8` (a synthetic,
+unreferenced merge of the two: FEEL-1 + STOCK-1 with no PROBE-1/PHYS-1/PHYS-2). Talon's idle 7777
+server was up throughout; STALL-1 shared the mutex. Verdicts are the suites' own `OVERALL` lines.
+
+### `Carry: hold` — FEEL-1's own bar, red on FEEL-1's own tree
+
+| tree | runs | the clip |
+|---|---|---|
+| PHYS-2 `d8f024b` | **4/6 PASS** | `-0.0435 m` (twice), 1 of 77 ticks, `t=12009` / `t=12040`, prop at `(35.50, 0.67, -2.40)` |
+| `f086ed4`, no PHYS | **5/6 PASS** | `-0.0441 m`, 1 of 77 ticks, `t=12051`, prop at `(35.50, 0.67, -2.41)` |
+
+Same tick of the stress script, same coordinate to the centimetre, with and without PHYS. PHYS-1's
+`-0.0428 m` was the third sighting of one defect: the holder against the west bay face at the
+twelfth second of `HoldStressIntentSource`, about once in six runs. The witness's clearance was
+positive in all twelve runs (`0.0008–0.0205 m`), so it is the holder's own capsule projection, not
+the world sweep. **Owner: FEEL-1's suite. Not a physics-lineage red.**
+
+### `Sfx: material voices` — a THIRD way to lose one driver: the spawn PIN lands on somebody
+
+PHYS-2 **2/3**, `e75e04d` **3/3**; the red was `produce: prop 3 never made a sound at all`.
+INT-1's entry above ruled out the join-order theory and measured the 1.49 m wedge; REVIEW-1
+measured the client's 1.5 m bar. This is neither, and the discriminator is the lost driver's
+FIRST sample. From the failing run's `matsfx.host.out.log`, `matsfx.produce.jsonl` and
+`matsfx.witness.jsonl`:
+
+```
+17:07:33.908  peer joined 1099405582 (SfxProduceBot) players=2   <- 2nd joiner: join-order marker 1 (44.5, 0)
+17:07:34.165  peer joined 1954162340 (SfxWitness)    players=4   <- 4th joiner: join-order marker 3 (41.5, -2.1)
+17:07:34.415  spawn pinned SfxProduceBot marker=3 at=(41.50,1.10,-2.10) moved=True
+17:07:35.169  spawn pinned SfxWitness    marker=1 at=(44.50,1.10,0.00)  moved=True   <- 750 ms later
+```
+
+`Gameplay.ApplySpawnPins` pins a name the frame it replicates, and the produce bot's name arrived
+first — so it was moved onto marker 3 **while the still-unnamed witness was standing there by
+join order.** Both peers' logs agree: the produce bot at `(41.5, 2.30, -2.1)` — on the witness's
+head — for 0.6 s, the witness at `(41.46, 0.82, -2.03)` under it; when the witness was pinned
+away the produce bot came off into the +Z edge walkway at `(39.97, 0, 4.8)`, walked its straight
+line toward `(38, -2.1)` and stopped against the aisle face at `(38.09, 0, 3.55)`, 5.7 m from its
+prop, `heldPropId = -1` all run, no `[phys] wake prop=3`, no `ProducePick`. In every passing run
+the produce bot joined 4th, so the pin moved it onto the marker it already had.
+
+- `y ≈ 2.3` at a marker's x/z in the first sample → **this** (it is standing on a peer).
+- resting 1.49 m from its prop → INT-1's wedge.
+- `y = 0` in another walkway → displaced before it walked (this, one sample later).
+
+**The fix is in `Gameplay.ApplySpawnPins`, not in any suite:** a marker is not free until the peer
+whose join-order default it is has been pinned away — pin in one pass once every expected name is
+known, or pin the displaced peer first. `Gameplay.cs` has no diff on the PHYS branch; handed on.
+PHYS-1's `crossed wires: CardThud from Bin_4` did not recur in six runs.
+
+### `Stock: authored holes` — PHYS-1's, and the file is `assets/physics/tin.tres`
+
+| tree | `Run-StockTest` |
+|---|---|
+| PHYS-2 `d8f024b` | **0/3**, byte-identical: `layer2 prop=1 StaticOverlap -> Depenetrated from=(35.87, 0.48, -3.15) to=(35.88, 0.51, -3.15) depth=0.032m ... penetrates Aisle0_Bay0 (tolerance 0.020 m)` |
+| `e75e04d` (STOCK-1, no FEEL-1, no PHYS) | **3/3**, layer 2 silent |
+| `1511ea8` (FEEL-1 + STOCK-1, no PHYS) | **3/3**, layer 2 silent |
+| PHYS-2 with `tin.tres` back to `friction = 1.0, bounce = 0.0` (nothing else, nothing rebuilt) | **2/2 PASS** |
+| PHYS-2 with only `bounce = 0.0` (friction 0.25 kept) | **PASS** (1/1) |
+| PHYS-2 with only `friction = 1.0` (bounce 0.1 kept) | **PASS** (1/1) |
+
+What is identical on every tree: the seeded pose (`35.875,0.485,-3.150,can`, printed by phase 1
+of every run), the audit (`ServerAuditRest` / `RestAudit` / `PlacementIntegrity` — no diff), the
+drop (`StepSeededDrop` — no diff), and the pose the can has settled to when the audit fires
+(`y = 0.478`, 7 mm below the seed, on every tree, from the bots' own samples). What differs is
+the number `CollideShape` reads at that pose: ≤ 0.020 m without the material, 0.032 m with it.
+The single-variable rows say the two shipped values only fail TOGETHER: either engine default
+alone reads under tolerance. Across the four rows the audited pose differs by under a degree of
+tilt and 5 mm of height (from the bots' own samples: shipped `q=(-0.003,-0.005,-0.006)` at
+`y=0.478`; bounce-only-off `(0.010,-0.005,0.003)` at `0.476`; friction-only-off
+`(-0.002,-0.001,0.000)` at `0.479`; base `(-0.001,-0.001,0.000)` at `0.478`), and the depth
+`CollideShape` reports for a cylinder against a box moves from under 0.020 m to 0.032 m across
+that range. There is no monotonic relation between tilt and the reading — the bounce-off row is
+the MOST tilted and passes — so the honest statement is: a can's rest pose in a hole is decided
+by two material numbers at once, and the cylinder-vs-box depth query is not smooth in that pose.
+**Fixed on the PHYS branch by `bounce = 0.0`** (the friction that makes cans roll is untouched);
+`PropMaterialTableTests.NothingBounces` pins it.
+
+**Two things to carry forward.** (1) The suite's own message already calls this shape "a landing
+penetration, i.e. a staging artefact", and STOCK-1's handoff recorded a 0.035 m board penetration
+from a 5 cm drop in the same words; **the audit is doing its job** (the can is pushed 3.7 cm
+clear and rests clean). The bar that cannot hold is "0 corrections on a DROPPED prop" once a prop
+material has any bounce at all. (2) **A `.tres` ablation needs no rebuild and no import** — text
+resources are read at load — so a material-table suspicion costs one suite run per row, not a
+build. Do it before bisecting commits.
+
+### A wrapper that takes the suite mutex may only wrap a suite that does NOT (measured, 15 min)
+
+My lane wrapper took `Enter-SuiteMutex` and then ran `Run-StockTest.ps1`, which takes it again
+inside — a different process waiting on a mutex held by its own parent. It sat there fifteen
+minutes, holding the machine from STALL-1 and from my own base runs, until I killed my two
+PowerShell PIDs (no Godot was involved). `Run-MaterialSfxTest` and `Run-CarryHoldTest` do not
+take the mutex themselves; `Run-StockTest`, `Run-PhysicsFeelTest`, `Measure-ShopFloor` and
+`Capture-PhysicsFeel` do. **`grep -c Enter-SuiteMutex tests/<suite>.ps1` before wrapping one**, and
+a suite that prints `waiting for machine-wide full-suite lock ... held by: pid N` where N is
+your own wrapper is this, not contention.
+
+### `Capture-PhysicsFeel.ps1`'s first run photographed a shelf face twelve times
+
+PHYS-1 wrote it and never ran it. Its holder grabbed the crate at x = 36 and stopped dead at
+x = 37.74 against **Prop_3 (1017), another of CARRY-1's crates in the same walkway** — the server
+logged nine `[phys] wake prop=1017` lines (the new wake funnel working, and a crate still a wall
+to a `CharacterBody3D`) — and the mark grid (4.5–5.5 s) was placed for a contact that would have
+been at ~9 s even unblocked. Twelve frames in three distinct byte sizes, one per pass. **Frame
+sizes that repeat within a pass are the tell; read them before reading the frames.** The harness
+now stages each pass by `--phys-shove` with the camera a bystander, and two more runs taught it
+two more things: **a `--fp-look` camera does not follow a spawn-pin teleport** (pinned to
+SearchSpawn_1, the avatar's own samples read 44.5 then 45.9 while every frame was shot from the
+join-order spawn at (35.5, 1.1, 0), ten metres from its own body), and **yaw +90 looks −X** —
+Measure-ShopFloor's ShopEast uses −90 for +X and it is right; one run of this harness at +90
+photographed the drop-off bin behind the camera, eight times, in a byte-size band of 300. So the
+camera stays on the join-order spawn (`--goto-script 35.5,0`, no pin) looking −90/−20, and the
+fixtures are seeded 2.5–3.3 m in front of it at z = +0.4.
+
+### A domino row is a GEOMETRY, and a frozen neighbour eats the first touch (PHYS-2, measured 2026-09-21)
+
+`Run-PhysicsFeelTest` on `d8f024b`, run on the tip for the first time under `--phys-shove`:
+**0/3, `not one of the five boxes tilted past 60 deg`** on both views, with the shove firing and
+`[phys] wake` lines for every box. PHYS-1's 5/5 had been two bots walking THROUGH the row (its
+own commit: "one mover could not do it"). Six fixes and two fixture changes later it is 3/3
+(handoff §1b has the table); the two things worth carrying past this suite:
+
+- **A Resting prop is `Freeze = true, Kinematic` — infinite mass for the one physics step in
+  which the contact is reported.** The mover is stopped dead in that step, the wake hands the
+  neighbour `ContactImpulse`'s share of a speed the mover no longer has, and the chain decays
+  geometrically: `wake prop=2 at=2.77 -> 1.66`, `prop=3 1.65 -> 0.99`, `prop=4 0.57 -> 0.34`,
+  byte-identical across three runs. Projecting the pre-step velocity, striking at the leading
+  edge and handing the mover its momentum back after the wake are each right and each moved
+  nothing. What moved it: **`PropManager.ServerWakeIsland`** — every Resting prop within 0.15 m
+  (world-axis boxes) of a prop that wakes wakes with it, no impulse, cap 16, logged
+  `[phys] wake-island` and NOT counted in `wakes=`. A row is dynamic end to end before the first
+  box arrives and the engine does the rest.
+- **Five cereal boxes at 2 cm are a stack of books, and at 11 cm across their width they are a
+  lean that stalls (52° / 23° / 7°, then frozen leaning at 33 / 20 / 4 by the settle latch).** A
+  0.19 × 0.28 × 0.06 box is committed at 24° across its width and 8° across its depth; the row
+  now stands EDGE-ON (`--seed-test-props` sixth field, yaw 90) at 0.10 m pitch, and went
+  **5/5 `all within 0.00s`** on both views the first time it was tried. Read a domino red against
+  the row's geometry before reading it against the physics.
+
+And one the same run found for every round prop in the game: **REACH-1's bounds test swept the
+corners of the shape's LOCAL box**, so a can lying on the floor at its measured rest (1.2 cm in)
+read 2.6 cm outside the room once it had rolled 45°, and `OutOfBounds -> RestoredLastGood` put it
+back where it started, mid-run — the same run restored authored produce 1135 by 0.4 m.
+`PlacementIntegrity.ExtentsInside` measures the true extent per shape now
+(`PropPhysics.RoundExtents` / `BoxExtents`; `PhysStrikeExtentsSeedTests` pins the arithmetic).

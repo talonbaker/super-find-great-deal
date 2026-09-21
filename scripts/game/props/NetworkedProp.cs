@@ -96,6 +96,14 @@ public partial class NetworkedProp : Node3D
     private float _holdMaxM;
     private CarryHold.BlockedClock _blocked; // how long the world has had it STUCK (not merely scraping)
 
+    // --- PHYS-1's bounded energy, server-side (ruling P2) ------------------------------------
+    //
+    // This prop's own ceiling. PropPhysics.MaxPropSpeedMps ordinarily; raised for the length of a
+    // throw's launch and latched back down the first tick the throw's horizontal energy is spent.
+    // Per prop rather than global because a throw is one prop's episode, and a second prop that
+    // the thrown one knocks into must not inherit the throw's allowance.
+    private float _speedCapMps = PropPhysics.MaxPropSpeedMps;
+
     /// <summary>How far a full-heft item sags below the hand anchor, metres — the feel system's
     /// own <c>Interactor.CarryDroop</c> default. Here rather than on <see cref="CarrySpring"/>
     /// because the droop is a fact about where the HAND is, not about how the spring chases it;
@@ -159,6 +167,9 @@ public partial class NetworkedProp : Node3D
         // SFX-2: and its contacts are ANNOUNCED, not played where they happen. See
         // Carryable.ImpactReporter and ReportImpact below.
         Body.ImpactReporter = ReportImpact;
+        // PHYS-1 (P1): and the SAME contact signal, read a second time and above both of the
+        // sound gates, is what wakes whatever this prop hits. See Carryable.BumpReporter.
+        Body.BumpReporter = ReportBump;
 
         // Resting default: frozen kinematic at the prop's place on every peer. The SERVER alone
         // unfreezes and simulates loose props and streams their transforms; clients stay frozen
@@ -470,6 +481,9 @@ public partial class NetworkedProp : Node3D
         // to a sound today. The release VERB now rides the state change as PropRelease and is
         // announced once, in BeginLoose, where a release actually happens.
         Body.RejoinPhysicsSilently();  // rejoins physics locally, but we immediately pin it below:
+        // PHYS-1: and the episode is over, so the body may sleep again. Given back HERE because
+        // this is the every-peer Resting latch that every route into rest funnels through.
+        Body.CanSleep = true;
         Body.Freeze = true;
         Body.FreezeMode = RigidBody3D.FreezeModeEnum.Kinematic;
         Body.LinearVelocity = Vector3.Zero;
@@ -481,12 +495,23 @@ public partial class NetworkedProp : Node3D
     /// take over. Detaches any hold first (throwing something you hold is also a release), then
     /// unfreezes + restores collision via the same OnThrown entry point Carryable already uses
     /// for the offline path — from here PropManager's server loop drives it every physics tick.</summary>
-    public void BeginLooseServer(Vector3 impulse)
+    public void BeginLooseServer(Vector3 impulse) => BeginLooseServer(impulse, null);
+
+    /// <summary>As above, with the tumble NAMED rather than drawn (PHYS-2). <paramref name="angular"/>
+    /// null keeps <see cref="Carryable.OnThrown(Vector3)"/>'s random +/-2 rad/s, which is every
+    /// shipped release; a value hands the body exactly that spin, which is what a fixture asking
+    /// for a known shove needs. See <c>Carryable.OnThrown(Vector3, Vector3)</c> for the
+    /// measurement that made this necessary.</summary>
+    public void BeginLooseServer(Vector3 impulse, Vector3? angular)
     {
         HolderPeerId = 0;
         _holder = null;
         ClearSpring();
-        Body.OnThrown(impulse);
+        Body.CanSleep = false;   // PHYS-1: for the length of the episode; see WakeFromContactServer
+        if (angular is { } spin)
+            Body.OnThrown(impulse, spin);
+        else
+            Body.OnThrown(impulse);
     }
 
     /// <summary>Server-only, test fixture (<c>--seed-props-drop</c>): let a seeded prop FALL from
@@ -606,6 +631,9 @@ public partial class NetworkedProp : Node3D
 
     public override void _PhysicsProcess(double delta)
     {
+        // PHYS-1: a wake queued last tick is spent HERE, now that the unfreeze has taken. First,
+        // and before any early-out, because every branch below can return.
+        ApplyPendingImpulse();
         // The holder's own spring wins, on the holder's peer only, and runs on the SERVER too
         // when the host is the one carrying (a host is a player; its held prop deserves the same
         // hand as everybody else's). The early-out below is specifically about the loose STREAM,
@@ -711,7 +739,11 @@ public partial class NetworkedProp : Node3D
 
         // 3. the world
         Body.GlobalBasis = pose;
-        Vector3 swept = SweepTo(from, resolved);
+        Vector3 swept = SweepTo(from, resolved, out PhysicsTestMotionResult3D? hit);
+        // PHYS-1 (P1): and whatever the world put in the way, if it was a resting prop, is now
+        // moving. Talon: "if they're placing an object on a shelf and accidentally hit a bunch of
+        // boxes, those boxes should fall over like dominoes."
+        WakeSweptContactServer(hit, resolved - from, dt);
 
         // 4. the holder
         (Vector3 capA, Vector3 capB, float capR) = HolderCapsule(_holder);
@@ -803,8 +835,16 @@ public partial class NetworkedProp : Node3D
     /// (<c>Carryable.OnPickedUpBySpring</c> sets it to the world layer while held); its LAYER
     /// stays 0, so nothing is pushed BY the held prop and the query cannot hit the holder.</para>
     /// </summary>
-    private Vector3 SweepTo(Vector3 from, Vector3 to)
+    /// <param name="hit">What the sweep met, or null. <b>PHYS-1 (P1) reads this rather than
+    /// adding a query of its own</b>: the one thing a held crate driven into a stack of boxes
+    /// needs is the identity of the first box, and the sweep that already runs every tick to stop
+    /// the crate at the shelf knows it. A frozen kinematic body meeting another frozen kinematic
+    /// body produces no <c>body_entered</c> on either side (SFX-1 measured exactly that, one
+    /// system over), so this result IS the contact signal for a held prop, and it costs
+    /// nothing.</param>
+    private Vector3 SweepTo(Vector3 from, Vector3 to, out PhysicsTestMotionResult3D? hit)
     {
+        hit = null;
         Vector3 motion = to - from;
         if (motion.LengthSquared() < 1e-10f)
             return to;
@@ -815,9 +855,36 @@ public partial class NetworkedProp : Node3D
             RecoveryAsCollision = false,
         };
         var result = new PhysicsTestMotionResult3D();
-        return PhysicsServer3D.BodyTestMotion(Body.GetRid(), parameters, result)
-            ? from + result.GetTravel()
-            : to;
+        if (!PhysicsServer3D.BodyTestMotion(Body.GetRid(), parameters, result))
+            return to;
+        hit = result;
+        return from + result.GetTravel();
+    }
+
+    /// <summary>
+    /// <b>Server-only: a held prop has been driven into something — wake it if it is a resting
+    /// prop</b> (P1). Fed from the hold's own per-tick sweep, so there is no second query and no
+    /// second monitor.
+    ///
+    /// <para>The approach speed is the step the hold WANTED to take, not the one it got: the
+    /// sweep stops the held body at the first contact, so its achieved motion after a block is
+    /// near zero and would read as no shove at all. The direction is the sweep's own contact
+    /// normal, inverted — <c>GetCollisionNormal</c> points out of the thing that was hit, and the
+    /// push goes in.</para>
+    /// </summary>
+    private void WakeSweptContactServer(PhysicsTestMotionResult3D? hit, Vector3 wantedMotion,
+        float dt)
+    {
+        if (hit == null || !IsServer || dt <= 0f || PropManager.Instance is not { } mgr)
+            return;
+        if (hit.GetCollider() is not Carryable struck)
+            return;
+        float approach = wantedMotion.Length() / dt;
+        Vector3 push = -hit.GetCollisionNormal();
+        if (push.LengthSquared() < 1e-8f)
+            push = struck.GlobalPosition - Body.GlobalPosition;
+        mgr.ServerBumpProp(struck, Body.Mass > 0f ? (float)Body.Mass : 0f, approach, push,
+            hit.GetCollisionPoint());
     }
 
     // SWEEP-AND-SLIDE WAS TRIED HERE AND REVERTED (FEEL-1, 2026-09-20), and it is worth knowing
@@ -883,6 +950,24 @@ public partial class NetworkedProp : Node3D
         Vector3 pos = Body.GlobalPosition.Lerp(target.Origin, w);
         pos = CarryHold.CapStep(Body.GlobalPosition, pos,
             CarryHold.MaxHoldSpeedMps(Net.AvatarMotor.MoveSpeed), dt);
+        // PHYS-1 (P1): THE SERVER'S COPY OF A PROP A CLIENT IS HOLDING ALSO KNOCKS THINGS OVER.
+        //
+        // StepSpring's sweep covers the host's own hands and nothing else: when a CLIENT is the
+        // holder, this is the arm that runs on the server, and it writes the pose straight onto
+        // the body with no sweep at all. Without a probe here a client could carry a crate
+        // through a row of boxes and the server — the only peer that may wake anything — would
+        // never learn a contact happened, so the dominoes would fall for the host and for nobody
+        // else. One motion query per client-held prop per tick, on the server only, and there is
+        // at most one held prop per player.
+        //
+        // It PROBES and does not clamp: the pose written below is unchanged, because the holder's
+        // own peer already ran the sweep that stops the crate at the shelf, and a second,
+        // independent stop on the server would put the two views in permanent disagreement.
+        if (IsServer)
+        {
+            SweepTo(Body.GlobalPosition, pos, out PhysicsTestMotionResult3D? hit);
+            WakeSweptContactServer(hit, pos - Body.GlobalPosition, dt);
+        }
         (Vector3 capA, Vector3 capB, float capR) = HolderCapsule(_holder);
         Body.GlobalPosition = CarryHold.PushOutOfSegment(
             pos, capA, capB, capR + Body.BoundingRadiusM + CarryHold.HolderSkinM,
@@ -957,4 +1042,216 @@ public partial class NetworkedProp : Node3D
     /// <summary>Play the server's announced impact on this peer's own copy of the prop
     /// (SFX-2). Delegates to the body because the profile and the position live there.</summary>
     public void PlayWireImpact(float intensity) => Body.PlayWireImpact(intensity);
+
+    // --- PHYS-1: wake on contact (P1) and bounded energy (P2) --------------------------------
+
+    /// <summary>
+    /// <b>This prop's body just touched another prop's body</b> — the second consumer of the
+    /// contact signal SFX-2 already reads (<see cref="Carryable.BumpReporter"/>).
+    ///
+    /// <para><b>Server only, and for exactly <see cref="ReportImpact"/>'s reason:</b> a Loose prop
+    /// simulates only on the server, so only the server's copy is ever asked about a contact. A
+    /// client reaching here would be reporting a collision between two frozen kinematic bodies,
+    /// which is not an event about the world — and P1 is explicit that clients never wake a prop
+    /// on their own.</para>
+    ///
+    /// <para><b>The DIRECTION is computed here rather than taken from the signal</b>, because
+    /// <c>body_entered</c> carries no normal. The line of centres is the honest approximation for
+    /// two compact props, and taking the approach speed ALONG it is what makes a graze different
+    /// from a shove — the property <c>PropPhysics.WakeSpeedThresholdMps</c> leans on. The reported
+    /// speed is used only where that line is degenerate (two bodies at the same point, which the
+    /// solver is about to separate anyway).</para>
+    ///
+    /// <para><b>The velocity projected is the one this body CARRIED INTO the step
+    /// (<see cref="Carryable.ApproachVelocity"/>), not <c>LinearVelocity</c></b> — PHYS-2,
+    /// 2026-09-21. By the time <c>body_entered</c> fires, a head-on contact with a frozen prop has
+    /// already had its normal impulse applied and <c>LinearVelocity</c> reads the STOPPED body:
+    /// a box shoved at 2.8 m/s into its neighbour projected to ~0, nothing woke, and the row stood.
+    /// <c>Carryable.ApproachSpeedMps</c> already existed for SFX-2's identical problem one signal
+    /// over; the vector beside it is what this consumer needed. The live velocity is kept as a
+    /// floor for the case the pre-step sample is stale (a body that was frozen at the top of the
+    /// step and thrown inside it).</para>
+    /// </summary>
+    private void ReportBump(Carryable other, float reportedSpeed)
+    {
+        if (!IsServer || PropManager.Instance is not { } mgr || !IsInstanceValid(other))
+            return;
+        Vector3 toward = other.GlobalPosition - Body.GlobalPosition;
+        Vector3 mover = Body.ApproachVelocity.LengthSquared() >= Body.LinearVelocity.LengthSquared()
+            ? Body.ApproachVelocity
+            : Body.LinearVelocity;
+        float approach = toward.LengthSquared() > 1e-8f
+            ? PropPhysics.ApproachSpeed(mover, other.LinearVelocity, toward)
+            : reportedSpeed;
+        // WHERE the impulse lands is the difference between a domino and a shuffle -- PHYS-2. A
+        // box's support point toward the struck prop is its leading edge (high, when it is
+        // toppling; the face's centre, when it is sliding); a sphere's is its surface along the
+        // line of centres. See PropPhysics.StrikePoint for the measurement behind it.
+        Shape3D? moverShape = Body.GetNodeOrNull<CollisionShape3D>("CollisionShape3D")?.Shape;
+        Vector3 strike = moverShape is SphereShape3D sphere && toward.LengthSquared() > 1e-8f
+            ? Body.GlobalPosition + toward.Normalized() * sphere.Radius
+            : PropPhysics.StrikePoint(Body.GlobalTransform,
+                moverShape != null ? PlacementIntegrity.HalfExtentsOf(moverShape) : Vector3.One * 0.05f,
+                toward);
+        Vector3 spent = mgr.ServerBumpProp(other, Body.Mass > 0f ? (float)Body.Mass : 0f, approach,
+            toward, strike);
+
+        // THE FROZEN WALL ATE THE MOVER'S MOMENTUM, AND THIS GIVES IT BACK -- PHYS-2 (2026-09-21),
+        // and the row of dominoes did not fall until it did. A Resting prop is a frozen KINEMATIC
+        // body on every peer: infinite mass to the solver. So in the step that reports this
+        // contact the mover has already been stopped dead against it -- a box shoved at 2.8 m/s
+        // reads ~0 here -- and the wake that follows hands the neighbour a FRACTION of the
+        // approach speed (ContactImpulse's share) while the mover keeps nothing. Measured: the
+        // funnel woke boxes 2, 3 and 4 at 1.66, 0.99 and 0.34 m/s, each stopped in turn by the
+        // next frozen one, and not one tilted. Talon's sentence is "fall over like dominoes", and
+        // a domino keeps leaning on the next one after the first touch.
+        //
+        // So when -- and only when -- the neighbour actually woke, the mover is given back the
+        // velocity it carried INTO the step less the share it just handed over, and its spin
+        // whole. Next tick both bodies are dynamic and the solver resolves the contact between
+        // two real masses, which is what P1 promised and a frozen first touch could not deliver.
+        // Nothing woken = the wall was real (below threshold, cooling down, or not Resting) and
+        // the mover stays stopped, exactly as before.
+        if (spent.LengthSquared() > 0f && !Body.IsHeld && !Body.Freeze && Body.Mass > 0f)
+        {
+            Body.LinearVelocity = Body.ApproachVelocity - spent / (float)Body.Mass;
+            Body.AngularVelocity = Body.ApproachAngularVelocity;
+        }
+    }
+
+    /// <summary>
+    /// <b>Server-only: this resting prop has been hit — wake it into Loose and hand it the
+    /// impulse</b> (P1). The registry transition and the broadcast are the caller's
+    /// (<c>PropManager.ServerBumpProp</c>); this is the physical half.
+    ///
+    /// <para><b>The impulse is applied at the CONTACT POINT, not at the centre of mass</b>, and
+    /// that is what makes P4's dominoes fall rather than slide. A cereal box struck near its top
+    /// edge gets a torque that tips it; the same impulse through its centre would push it along
+    /// the board. Godot's <c>ApplyImpulse</c> takes the offset relative to the centre of mass,
+    /// which is a prefab-authored quantity on the boxes (<c>center_of_mass</c>), so the lever and
+    /// the top-heaviness compose.</para>
+    ///
+    /// <para><c>RejoinPhysicsSilently</c> rather than <c>OnThrown</c>: no toss arc, no random
+    /// tumble spin, and no <c>ActorEvent</c>. The fire for this transition is
+    /// <see cref="PropRelease.Bumped"/>, spent once on every peer in
+    /// <see cref="BeginLoose"/>, exactly as every other release verb is.</para>
+    /// </summary>
+    public void WakeFromContactServer(Vector3 impulse, Vector3 atWorld)
+    {
+        HolderPeerId = 0;
+        _holder = null;
+        ClearSpring();
+        _speedCapMps = PropPhysics.MaxPropSpeedMps;
+        // SLEEP IS SUSPENDED FOR THE LENGTH OF THE EPISODE, NOT AUTHORED ON THE PREFAB, and the
+        // difference is 20 ms of server frame time. MEASURED at rest, 162 props, nothing touched:
+        // with `can_sleep = false` in Can.tscn the server's p95 was 23.080 ms against the base
+        // tree's 2.712 ms, because every can on every shelf stayed in the physics server's active
+        // set forever. What the flag is FOR -- a can must not be put to sleep half way down an
+        // aisle -- is only true while it is rolling, which is exactly this episode.
+        Body.CanSleep = false;
+        Body.RejoinPhysicsSilently();
+        // QUEUED FOR THE NEXT TICK, NOT APPLIED NOW, AND THE FIRST RUN OF THE SUITE IS WHY.
+        //
+        // `Freeze = false` takes effect when the physics server next steps the body; an impulse
+        // applied before that is integrated into a state the unfreeze then re-initialises, and
+        // it is silently lost. MEASURED, on the first live run of tests/Run-PhysicsFeelTest.ps1:
+        // the server logged `[phys] wake prop=1017 at=4.30 m/s -> 2.58 m/s` NINETY-SEVEN times
+        // -- wake, nothing moves, settle, wake again -- and the crate travelled 0.093 m in
+        // forty seconds. Every counter said the feature worked.
+        //
+        // The reason the release funnel never hit this is that it does not use an impulse at
+        // all: Carryable.Release WRITES LinearVelocity, and a written velocity survives the
+        // unfreeze where an accumulated impulse does not. Writing the velocity here instead
+        // would work and would throw away the thing P4 needs -- the impulse is applied at the
+        // CONTACT POINT, and that lever is what tips a top-heavy cereal box rather than sliding
+        // it. So the lever is kept and the impulse waits one tick (16 ms, invisible).
+        _pendingImpulse = impulse;
+        _pendingImpulseAt = atWorld;
+        _hasPendingImpulse = true;
+    }
+
+    private Vector3 _pendingImpulse;
+    private Vector3 _pendingImpulseAt;
+    private bool _hasPendingImpulse;
+
+    /// <summary>Spend a queued wake impulse, on the first server tick after the body was
+    /// unfrozen. See <see cref="WakeFromContactServer"/> for why it cannot be spent at the
+    /// wake.</summary>
+    private void ApplyPendingImpulse()
+    {
+        if (!_hasPendingImpulse)
+            return;
+        _hasPendingImpulse = false;
+        if (!IsInstanceValid(Body) || Body.Freeze)
+            return;   // re-frozen between the wake and now: grabbed, reset, or settled
+        // The offset ApplyImpulse wants is relative to the CENTRE OF MASS, in world space.
+        // Body.CenterOfMass is the body-local one -- the authored value on a prefab whose
+        // center_of_mass_mode is Custom (PHYS-1 makes the cereal box top-heavy that way), and
+        // zero on every prop whose collider is centred on its origin, which is all the others.
+        Body.ApplyImpulse(_pendingImpulse, _pendingImpulseAt - Body.GlobalTransform * Body.CenterOfMass);
+    }
+
+    /// <summary>Server-only: this prop was just THROWN, so it rides
+    /// <c>PropPhysics.ThrowSpeedCapMps</c> until its launch energy is spent (P2's one
+    /// exception). Called from the release funnel rather than inferred from the velocity,
+    /// because "was this a throw" is a fact about the verb and not about a number.</summary>
+    public void NoteThrownServer() => _speedCapMps = PropPhysics.ThrowSpeedCapMps;
+
+    /// <summary>
+    /// <b>Server-only: hold this loose prop inside the bar</b> (P2). Called once per physics tick
+    /// from the server's prop loop, after the solver has run.
+    ///
+    /// <para>The real guarantee is at the impulse — nothing this build DOES to a prop can hand it
+    /// more than <c>PropPhysics.MaxPropSpeedMps</c> (see <c>PropPhysics.WakeSpeed</c>). This is
+    /// the backstop for the energy a SOLVER can invent: a prop wedged between a shelf and a
+    /// depenetration, a stack resolving a deep overlap in one step. Those are the events a player
+    /// reads as "it freaked out", and they do not come in through any call this file makes.</para>
+    ///
+    /// <para>Returns true when it bit, so the caller can count it — P2 asks for the count to be
+    /// ~0 in ordinary play, which is a claim that only a counter can support.</para>
+    /// </summary>
+    public bool ServerClampMotion(out float fromHorizontalMps)
+    {
+        fromHorizontalMps = 0f;
+        if (!IsServer || !IsInstanceValid(Body))
+            return false;
+        fromHorizontalMps = HorizontalSpeedMps;
+        // The throw's allowance is spent the first tick its horizontal energy is gone, and never
+        // comes back for this episode; a fresh throw sets it again through NoteThrownServer.
+        if (_speedCapMps > PropPhysics.MaxPropSpeedMps
+            && PropPhysics.ThrowEnergySpent(Body.LinearVelocity))
+        {
+            _speedCapMps = PropPhysics.MaxPropSpeedMps;
+        }
+
+        bool bit = false;
+        if (PropPhysics.ClampVelocity(Body.LinearVelocity, _speedCapMps, out Vector3 v))
+        {
+            Body.LinearVelocity = v;
+            bit = true;
+        }
+        if (PropPhysics.ClampSpin(Body.AngularVelocity, out Vector3 w))
+        {
+            Body.AngularVelocity = w;
+            bit = true;
+        }
+        return bit;
+    }
+
+    /// <summary>This prop's speed right now, for the suite's freakout bar and the clamp log.
+    /// Reads the body, which on the server is the simulation itself.</summary>
+    public float SpeedMps => IsInstanceValid(Body) ? Body.LinearVelocity.Length() : 0f;
+
+    /// <summary>This prop's horizontal speed — the component <c>PropPhysics.ClampVelocity</c>
+    /// actually bounds, and therefore the one a clamp line has to report. The magnitude is
+    /// dominated by the FALL for anything knocked off a surface, which made the log read like a
+    /// clamp that had not worked.</summary>
+    public float HorizontalSpeedMps => IsInstanceValid(Body)
+        ? new Vector3(Body.LinearVelocity.X, 0f, Body.LinearVelocity.Z).Length()
+        : 0f;
+
+    /// <summary>This prop's current ceiling, metres per second — the bar, or a throw's larger
+    /// allowance while its launch energy is unspent. Read by the suite so a clamp line can be
+    /// checked against the cap that was actually in force.</summary>
+    public float SpeedCapMps => _speedCapMps;
 }

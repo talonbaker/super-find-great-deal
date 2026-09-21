@@ -21,7 +21,46 @@ public sealed class PropRegistry
     /// <summary>Every prop's current state — the payload of the late-join dump.</summary>
     public IReadOnlyCollection<PropState> All => _props.Values;
 
+    /// <summary><b>The same collection, typed concretely so a per-tick <c>foreach</c> uses the
+    /// dictionary's STRUCT enumerator</b> (PROBE-1, 2026-09-20). <see cref="All"/> is an
+    /// interface, so enumerating it boxes an enumerator on the heap and copies every 64-byte
+    /// <see cref="PropState"/> through it — once per prop per physics tick in the server's loop,
+    /// which at two thousand props is 120 000 struct copies and 60 heap allocations a second for
+    /// an answer that is almost always "nothing is loose". Late-join dumps and other one-shot
+    /// walks keep using <see cref="All"/>; the hot paths use this.</summary>
+    public Dictionary<int, PropState>.ValueCollection AllValues => _props.Values;
+
     public int Count => _props.Count;
+
+    /// <summary>
+    /// <b>How many props are currently <see cref="PropMode.Loose"/></b> — maintained here, on
+    /// every transition, rather than counted by the caller (PROBE-1, 2026-09-20).
+    ///
+    /// <para><b>Why it is worth a field.</b> <c>PropManager._PhysicsProcess</c>'s first act is to
+    /// find out whether anything is loose, and its own comment says the common case is that
+    /// nothing is. It was answering that by walking every prop in the world, sixty times a
+    /// second — O(props) work to discover there was no work. A room is asleep for almost all of a
+    /// round, so almost all of that walk was the whole cost. Kept in the store because the store
+    /// is where every mode transition already funnels; a count maintained anywhere else is a
+    /// count that can drift from the thing it counts.</para>
+    ///
+    /// <para>Pinned by <c>PropRegistryLooseCountTests</c> against the honest answer (a filter over
+    /// <see cref="All"/>) after every verb, including the ones that are refused.</para>
+    /// </summary>
+    public int LooseCount { get; private set; }
+
+    /// <summary>The one place the count changes: called with the mode a slot held before a write
+    /// and the mode it holds after. Every mutator below routes through it, so adding a verb
+    /// without adding a line here is a compile-time-visible omission rather than a slow drift.</summary>
+    private void Recount(PropMode before, PropMode after)
+    {
+        if (before == after)
+            return;
+        if (before == PropMode.Loose)
+            LooseCount--;
+        if (after == PropMode.Loose)
+            LooseCount++;
+    }
 
     /// <summary>Registers a new prop at rest and returns its stable id. Skips forward past any
     /// id already in the store (e.g. the authored-id range adopted via <see cref="RegisterAt"/>)
@@ -70,6 +109,7 @@ public sealed class PropRegistry
             return false;
         if (s.Mode == PropMode.Held && s.HolderPeerId != peerId)
             return false;
+        Recount(s.Mode, PropMode.Held);
         _props[id] = s.AsHeld(peerId);
         return true;
     }
@@ -88,6 +128,7 @@ public sealed class PropRegistry
     {
         if (!_props.TryGetValue(id, out PropState s) || s.Mode != PropMode.Held)
             return false;
+        Recount(s.Mode, PropMode.Loose);
         _props[id] = s.AsLoose(at, release);
         return true;
     }
@@ -124,6 +165,7 @@ public sealed class PropRegistry
     {
         if (!_props.TryGetValue(id, out PropState s) || s.Mode == PropMode.Held)
             return false;
+        Recount(s.Mode, PropMode.Loose);
         _props[id] = s.AsLoose(at);
         return true;
     }
@@ -151,6 +193,7 @@ public sealed class PropRegistry
     {
         if (!_props.TryGetValue(id, out PropState s))
             return false;
+        Recount(s.Mode, PropMode.Loose);
         _props[id] = s.AsLoose(at);
         return true;
     }
@@ -171,6 +214,7 @@ public sealed class PropRegistry
     {
         if (!_props.TryGetValue(id, out PropState s))
             return false;
+        Recount(s.Mode, PropMode.Resting);
         _props[id] = s.AsResting(at);
         return true;
     }
@@ -181,7 +225,13 @@ public sealed class PropRegistry
     /// drain. Returns false on an unknown id. The id is never reused (ids are
     /// monotonic), so a straggler packet about a removed prop can never alias onto a
     /// new one.</summary>
-    public bool Remove(int id) => _props.Remove(id);
+    public bool Remove(int id)
+    {
+        if (!_props.TryGetValue(id, out PropState s))
+            return false;
+        Recount(s.Mode, PropMode.Resting);
+        return _props.Remove(id);
+    }
 
     /// <summary>Latches every prop currently held by <paramref name="peerId"/> to Resting at
     /// <paramref name="at"/> (a disconnecting holder drops everything it carried). Returns the
@@ -196,6 +246,7 @@ public sealed class PropRegistry
             PropState s = _props[id];
             if (s.Mode == PropMode.Held && s.HolderPeerId == peerId)
             {
+                Recount(s.Mode, PropMode.Resting);
                 _props[id] = s.AsResting(at);
                 n++;
             }

@@ -850,6 +850,7 @@ public static class AvatarMotor
         // -normal). Reported, not reacted to — bumps are cosmetic-only by design rule.
         float bumpImpact = 0f;
         Vector3 bumpPosition = default;
+        GodotObject? bumpCollider = null;
         for (int i = 0; i < body.GetSlideCollisionCount(); i++)
         {
             KinematicCollision3D hit = body.GetSlideCollision(i);
@@ -861,6 +862,12 @@ public static class AvatarMotor
             {
                 bumpImpact = impact;
                 bumpPosition = hit.GetPosition();
+                // PHYS-1 (2026-09-20): and WHAT was bumped, so a player who walks into a shelf of
+                // cans knocks them over. Read off the slide collision this scan already walks --
+                // no second query, and nothing here reacts to it: bumps stay "reported, not
+                // reacted to" in this file, exactly as the rule above says. The consumer is
+                // SandboxAvatar, on the server only.
+                bumpCollider = hit.GetCollider();
             }
         }
 
@@ -871,6 +878,7 @@ public static class AvatarMotor
             Jumped = jumped,
             BumpImpact = bumpImpact,
             BumpPosition = bumpPosition,
+            BumpCollider = bumpCollider,
             FallSpeed = fallSpeed,
         };
         // Water state for the NEXT tick, resolved from where the body actually ended up. Placed

@@ -98,6 +98,19 @@ public enum PropRelease : byte
 
     /// <summary>Thrown along the holder's aim (<c>PropManager.RequestThrow</c>).</summary>
     Thrown = 3,
+
+    /// <summary><b>Knocked into motion by something that hit it</b> (PHYS-1, 2026-09-20, ruling
+    /// P1): a held prop driven into a stack, a loose prop rolling into a resting one, a player
+    /// walking into a shelf. Nobody let go of it — it was never in a hand — so none of the three
+    /// release verbs above describes it, and reporting one would give the sound layer the wrong
+    /// event for the one transition in the game that has no holder at either end.
+    ///
+    /// <para><b>No <c>ProtocolVersion</c> bump.</b> The verb already rode an existing int argument
+    /// on <c>ApplyPropState</c>; this adds a fifth ordinal to a range that had four, adds no
+    /// field and widens no message. <see cref="PropReleaseWire.Decode"/>'s unknown-ordinal arm is
+    /// what made that safe to do, and it is why a build without this member hears silence rather
+    /// than a wrong sound.</para></summary>
+    Bumped = 4,
 }
 
 /// <summary>The <see cref="PropRelease"/> byte's wire form, as arithmetic a Godot-free test can
@@ -118,6 +131,7 @@ public static class PropReleaseWire
         (int)PropRelease.Dropped => PropRelease.Dropped,
         (int)PropRelease.Placed => PropRelease.Placed,
         (int)PropRelease.Thrown => PropRelease.Thrown,
+        (int)PropRelease.Bumped => PropRelease.Bumped,
         _ => PropRelease.None,
     };
 }

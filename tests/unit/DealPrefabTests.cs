@@ -58,7 +58,17 @@ public class DealPrefabTests
 
         // The mass, and the damping a prefab sets (Produce.tscn damps itself so it stops rolling;
         // a deal orange that rolled further than an ordinary one would be findable by watching it).
-        foreach (string field in new[] { "mass", "linear_damp", "angular_damp" })
+        // PHYS-1 (2026-09-20) appends four: the shared PhysicsMaterial reference and the three
+        // native per-body quantities the material table authors. A deal can that rolled further,
+        // a deal box that was less top-heavy, or a deal orange that gripped differently would all
+        // be findable by WATCHING IT MOVE, which is the same defect as being findable by
+        // silhouette and is the one this whole test exists to forbid.
+        foreach (string field in new[]
+                 {
+                     "mass", "linear_damp", "angular_damp",
+                     "physics_material_override", "center_of_mass_mode", "center_of_mass",
+                     "can_sleep",
+                 })
             Assert.Equal(RootField(plain, field), RootField(deal, field));
 
         // The body's own material: every albedo/roughness/metallic/emission line, in order.

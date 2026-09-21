@@ -158,6 +158,26 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
         _ => DefaultProfilePath,
     };
 
+    /// <summary><b>The same classification, pointed at the FEEL instead of at the sound</b>
+    /// (PHYS-1, 2026-09-20). One `PropMaterial` picks both, which is the whole point of
+    /// `assets/physics/README.md`'s table: a prop that sounds like tin and behaves like cardboard
+    /// would be two classifications of one object that nothing keeps in step.
+    ///
+    /// <para><b>Why the code-built path needs this at all.</b> An AUTHORED prefab carries its
+    /// `physics_material_override` in its own `.tscn` and never reaches here. A prop built in
+    /// code — <c>--seed-test-props</c>, the offline sandbox — has no `.tscn` and would otherwise
+    /// get Godot's bare defaults. <c>Produce.tscn</c>'s own header already records what that
+    /// costs: <i>"the two birth paths have to agree or the seeded fixture stops being the same
+    /// object as the shelved product, which is the whole reason the dimensions are shared
+    /// constants."</i> It was written about damping; it is just as true of friction.</para></summary>
+    public static string PhysicsMaterialPathFor(PropMaterial material) => material switch
+    {
+        PropMaterial.Tin => "res://assets/physics/tin.tres",
+        PropMaterial.Cardboard => "res://assets/physics/cardboard.tres",
+        PropMaterial.Produce => "res://assets/physics/produce.tres",
+        _ => "res://assets/physics/wood.tres",
+    };
+
     /// <summary>The material each shape is made of, when nothing says otherwise. Pure, and public
     /// so the Godot-free suite can pin the mapping — this is the table SHELF-1 will rely on when
     /// it fills the aisles.</summary>
@@ -315,6 +335,28 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
     /// <para>The parameter is the 0..1 intensity from <see cref="ImpactIntensity"/>, already
     /// computed here because the relative-contact-speed rule lives here.</para></summary>
     public System.Action<float>? ImpactReporter { get; set; }
+
+    /// <summary><b>Where a contact with ANOTHER PROP goes, whether or not it was loud enough to
+    /// hear</b> (PHYS-1, 2026-09-20, ruling P1). Set by <c>NetworkedProp</c> beside
+    /// <see cref="ImpactReporter"/>; null on every offline/sandbox body, which is unchanged.
+    ///
+    /// <para><b>The same signal, a second consumer — not a second monitor.</b> P1's wording is
+    /// exact about this: <c>ContactMonitor</c> and <c>body_entered</c> already exist on this class
+    /// for sound, and a resting prop that has to be woken is the same contact the sound layer is
+    /// already being told about. What differs is the GATES. The impact fire is behind a 0.4 s
+    /// per-body cooldown and a 2 m/s audibility floor, and neither is a fact about whether the
+    /// thing that got hit should move: a can rolled into a pyramid at 1 m/s is inaudible and must
+    /// still knock it over, and the second can of a collapsing stack is inside the first's cooldown
+    /// and must still be knocked. So this reports from ABOVE both gates, with
+    /// <c>PropPhysics.WakeSpeedThresholdMps</c> — a seventh of the audibility floor — as its
+    /// own.</para>
+    ///
+    /// <para><b>What it is NOT.</b> It is not the wake itself and it carries no decision: the
+    /// arguments are the other body and the speed, and the server's prop layer decides whether
+    /// that body is a resting networked prop, whether it may be woken, and with what. This file
+    /// stays the physical body and keeps knowing nothing about netcode, exactly as
+    /// <see cref="ImpactReporter"/>'s own note says.</para></summary>
+    public System.Action<Carryable, float>? BumpReporter { get; set; }
 
     /// <summary>In someone's hands, by either of the two mechanisms: the anchor chase
     /// (<see cref="_holder"/>) or the holder-side feel spring (<see cref="_springHeld"/>, CARRY-1).
@@ -490,11 +532,22 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
                 };
                 collider = new CylinderShape3D { Radius = CanRadiusM, Height = CanHeightM };
                 Mass = CanMassKg;
+                // PHYS-1 (2026-09-20): Can.tscn's own lines, to the digit. See the class-level
+                // note on PhysicsMaterialPathFor for why a code-built prop has to carry them.
+                LinearDamp = 0.55f;   // re-measured; see Can.tscn
+                AngularDamp = 0.25f;
                 break;
             case Shape.Box:
                 mesh = new BoxMesh { Size = BoxSizeM };
                 collider = new BoxShape3D { Size = BoxSizeM };
                 Mass = BoxMassKg;
+                // PHYS-1 (2026-09-20): CerealBox.tscn's own lines, to the digit -- the centre of
+                // mass included, because a seeded box that was not top-heavy would not domino and
+                // the suite that measures dominoing seeds its own row.
+                LinearDamp = 0.4f;
+                AngularDamp = 0.5f;   // re-measured; see CerealBox.tscn
+                CenterOfMassMode = CenterOfMassModeEnum.Custom;
+                CenterOfMass = new Vector3(0f, 0.07f, 0f);
                 break;
             case Shape.Produce:
                 mesh = new SphereMesh { Radius = ProduceRadiusM, Height = ProduceRadiusM * 2f };
@@ -512,8 +565,17 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
             default:
                 mesh = new BoxMesh { Size = new Vector3(0.44f, 0.44f, 0.44f) };
                 collider = new BoxShape3D { Size = new Vector3(0.44f, 0.44f, 0.44f) };
+                // PHYS-1 (2026-09-20): Crate.tscn's own lines. Mass is left at the engine default
+                // 1.0 here exactly as it is there.
+                LinearDamp = 0.3f;
+                AngularDamp = 1.0f;
                 break;
         }
+        // PHYS-1 (2026-09-20): and the CONTACT half of the material table, resolved from the same
+        // PropMaterial that picks this prop's sound. An authored prefab sets its own
+        // physics_material_override in its .tscn and never reaches BuildShape at all.
+        PhysicsMaterialOverride ??=
+            GD.Load<PhysicsMaterial>(PhysicsMaterialPathFor(ResolveMaterial()));
         var meshInstance = new MeshInstance3D { Mesh = mesh, MaterialOverride = _material };
         _visual.AddChild(meshInstance);
         AddChild(new CollisionShape3D { Shape = collider });
@@ -661,6 +723,16 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
     /// transition.</remarks>
     public virtual void OnThrown(Vector3 impulse) => Release(impulse);
 
+    /// <summary><b>Released with the spin NAMED instead of drawn</b> (PHYS-2, 2026-09-20).
+    /// <see cref="Release(Vector3)"/> above draws a random tumble of +/-2 rad/s on every axis,
+    /// which is right for a discarded object and is a fact about the verb rather than about the
+    /// physics. A test fixture that asks for a known shove and is handed a random spin with it is
+    /// not a known shove: +/-2 rad/s is half of what it takes to put a cereal box over, so the
+    /// tumble alone decides whether a shoved box topples or slides. This entry point is how
+    /// <c>--phys-shove</c> gets a repeatable one; every shipped release still goes through the
+    /// overload above and still tumbles.</summary>
+    public virtual void OnThrown(Vector3 impulse, Vector3 angular) => Release(impulse, angular);
+
     /// <summary><b>Set down, not dropped</b> (CARRY-1's place verb): rejoin physics with no
     /// velocity and NO SPIN. The random tumble <see cref="Release(Vector3)"/> applies is what
     /// makes a discarded prop look discarded; applying it to a placement would spin away the
@@ -730,13 +802,48 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
 
     // --- Behaviour ---------------------------------------------------------------------
 
+    /// <summary><b>PROBE-1's at-rest gate.</b> True while every per-frame visual quantity on this
+    /// prop has arrived and nothing can move it until an event does — see
+    /// <see cref="CarryIdle.IsSettled"/> for what that means and why it is re-read rather than
+    /// latched. Public so a probe can count how many props in a room are actually costing
+    /// nothing, which is the claim this fix makes and therefore the claim that has to be
+    /// measurable.</summary>
+    public bool IsVisuallySettled => Props.PropCostSwitches.CarryableIdleGate
+        && CarryIdle.IsSettled(_homeSet, Freeze, IsHeld, Highlighted,
+            _outlineMesh?.Visible ?? false, _thunkCooldown,
+            _visualScale, _visualScaleVel,
+            _material.EmissionEnergyMultiplier, _baseGlow);
+
     public override void _PhysicsProcess(double delta)
     {
         float dt = (float)delta;
 
+        // PROBE-1 (2026-09-20): NOTHING TO DO FOR A PROP NOTHING HAS TOUCHED.
+        //
+        // Everything below this line either chases something (a holder's anchor, a kill-plane, a
+        // pop spring, an emission lerp) or writes a value that is already correct. When all four
+        // of those have arrived and the body is frozen, the remaining work is four writes through
+        // the engine boundary — three of which reach the RenderingServer — repeated sixty times a
+        // second, per prop, on every peer, forever.
+        //
+        // MEASURED, not reasoned: see docs/agents/handoffs/2026-09-20-PROBE-1.md. The gate is
+        // what makes a room of two thousand items a question about draw calls rather than about
+        // interop.
+        //
+        // The early-out is BEFORE the ApproachSpeedMps read deliberately. That field is the speed
+        // a body carried INTO this step, and a frozen body's LinearVelocity is permanently zero —
+        // so re-reading it here for a resting prop is one interop call to learn a number that
+        // cannot have changed. It is zeroed on the edge into settled (below) so no stale value
+        // survives, which is the same guard NetworkedProp._PhysicsProcess already keeps on
+        // ObservedSpeedMps for the same reason.
+        if (IsVisuallySettled)
+            return;
+
         // Before the physics server integrates this step — see ApproachSpeedMps for why the
         // velocity read inside body_entered is the wrong number for a landing.
-        ApproachSpeedMps = LinearVelocity.Length();
+        ApproachVelocity = LinearVelocity;
+        ApproachAngularVelocity = AngularVelocity;
+        ApproachSpeedMps = ApproachVelocity.Length();
 
         if (!_homeSet)
         {
@@ -804,6 +911,26 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
             _outlineMesh.Visible = Highlighted && !IsHeld;
 
         _thunkCooldown -= delta;
+
+        // PROBE-1: THE EDGE INTO SETTLED, taken once so the gate above never freezes a residual.
+        //
+        // The pop spring and the emission lerp are both asymptotic — they converge on their
+        // target and never arrive at it — so the gate's epsilons are what decide when a prop is
+        // "done". Landing exactly on the target on the last tick that runs means the resting
+        // state a player sees is the authored one, not the authored one minus an epsilon, and it
+        // means a prop that goes idle and wakes again resumes from a clean value rather than
+        // accumulating a drift per episode. Three writes, once per rest episode, against sixty a
+        // second forever.
+        if (IsVisuallySettled)
+        {
+            _visualScale = Vector3.One;
+            _visualScaleVel = Vector3.Zero;
+            _visual.Scale = Vector3.One;
+            _material.EmissionEnergyMultiplier = _baseGlow;
+            ApproachSpeedMps = 0f;
+            ApproachVelocity = Vector3.Zero;
+            ApproachAngularVelocity = Vector3.Zero;
+        }
     }
 
     /// <summary><b>How fast this body is observed to be moving on a peer that is not simulating
@@ -840,6 +967,26 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
     /// impulse applied by the time the signal is emitted, so the handler reads a body that has
     /// stopped. Half the impacts in a game working is exactly the kind of bug that ships.</para></summary>
     public float ApproachSpeedMps { get; private set; }
+
+    /// <summary>The VECTOR <see cref="ApproachSpeedMps"/> is the length of — this body's velocity
+    /// as it entered the current physics step.
+    ///
+    /// <para><b>PHYS-2 (2026-09-21): the wake funnel needed the vector, not the number, and the
+    /// row of dominoes did not fall until it had it.</b> <c>NetworkedProp.ReportBump</c> projects
+    /// the mover's velocity onto the line of centres so a graze is not a shove — the right idea,
+    /// computed from <c>LinearVelocity</c> inside <c>body_entered</c>, which is the one-sided
+    /// failure the paragraph above describes: a cereal box shoved at 2.8 m/s into a FROZEN
+    /// neighbour 2 cm away has its whole velocity absorbed in the step that reports the contact,
+    /// so the projection read ~0, <c>ShouldWake</c> said no, and the head of the row slid 3 cm and
+    /// stopped dead — measured three times, `wakes=0` for the row on every run. PHYS-1's 5/5 was
+    /// two BOTS walking through the row (its own commit says so: "one mover could not do it");
+    /// box-on-box never propagated. Projecting THIS vector instead is the whole fix.</para></summary>
+    public Vector3 ApproachVelocity { get; private set; }
+
+    /// <summary>The angular half of <see cref="ApproachVelocity"/>, sampled at the same
+    /// instant, for the same consumer: a box pitched into its neighbour has its spin eaten by
+    /// the frozen contact along with its speed, and gets both back when the neighbour wakes.</summary>
+    public Vector3 ApproachAngularVelocity { get; private set; }
 
     /// <summary><b>The speed that actually matters at a contact</b> (SFX-1): this body's velocity
     /// relative to what it hit, when what it hit is another rigid body, and its own velocity
@@ -878,6 +1025,26 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
 
     private void OnBodyEntered(Node body)
     {
+        // PHYS-1 (2026-09-20), ruling P1: THE WAKE IS REPORTED FIRST, ABOVE BOTH SOUND GATES.
+        //
+        // The two early-outs below are correct for AUDIO and wrong for physics, and both cases
+        // are exactly the ones Talon named:
+        //   IsHeld            -- a held crate driven into a row of boxes is the domino case, and
+        //                        a held body's contacts are precisely what must move them. (A
+        //                        SPRING-held prop is frozen kinematic and Godot asks it nothing,
+        //                        so the holder's own sweep handles that one; this arm is what
+        //                        covers a prop held by the anchor chase and any future holder.)
+        //   _thunkCooldown    -- the second can of a collapsing stack is inside the first can's
+        //                        0.4 s cooldown and must still be knocked over.
+        // And ThunkSpeedThreshold (2 m/s) is an AUDIBILITY floor: a can nudged into a pyramid at
+        // 1 m/s is silent and must still bring it down. The wake has its own, far lower gate
+        // (PropPhysics.WakeSpeedThresholdMps).
+        //
+        // Only prop-on-prop: a wall has nothing to wake, and the reporter itself is only ever set
+        // on a networked prop's body by NetworkedProp, which drops everything off the server.
+        if (BumpReporter is { } bump && body is Carryable hitProp)
+            bump(hitProp, RelativeContactSpeed(body));
+
         if (IsHeld || _thunkCooldown > 0)
             return;
         float relativeSpeed = RelativeContactSpeed(body);

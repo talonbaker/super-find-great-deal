@@ -294,6 +294,22 @@ public readonly struct StepEvents
     /// <summary>World position of that impact (for 3D bump SFX).</summary>
     public Vector3 BumpPosition { get; init; }
 
+    /// <summary><b>What was bumped</b> — the collider of the hardest non-floor slide contact this
+    /// step, or null (PHYS-1, 2026-09-20, ruling P1: "a Resting prop touched by a moving body — a
+    /// held prop, a Loose prop, an avatar — wakes").
+    ///
+    /// <para><b>An output, never state.</b> <see cref="StepEvents"/> is what a step REPORTS;
+    /// <see cref="MoveState"/> is what it carries forward, and only the latter is replayed by
+    /// reconciliation. Putting the collider here rather than in the state is what keeps a
+    /// prediction replay from waking a prop a second time: the server consumes this on its own
+    /// authoritative step and a client's predicted step consumes nothing, because the wake funnel
+    /// is server-gated (<c>PropManager.ServerBumpProp</c>).</para>
+    ///
+    /// <para>Godot's own <c>KinematicCollision3D.GetCollider</c> returns <c>GodotObject</c>; it is
+    /// kept as that here so this file — the pure movement foundation — needs to know nothing
+    /// about props.</para></summary>
+    public GodotObject? BumpCollider { get; init; }
+
     /// <summary>Downward speed carried into MoveAndSlide this step while airborne;
     /// the presentation layer maxes this across a fall to scale the landing squash.</summary>
     public float FallSpeed { get; init; }
