@@ -823,13 +823,11 @@ public partial class NetworkedProp : Node3D
             return;
         }
         Transform3D target = _holder.GlobalTransform * _holdLocalToHolder;
-        if (_holdMaxM <= 0f
-            ? Body.GlobalPosition.DistanceSquaredTo(target.Origin) > 4f
-            : ShouldSeat(target.Origin))
+        if (ShouldSeat(target.Origin))
         {
-            // The holder teleported (see ShouldSeat). A non-holder has no hold band of its own --
-            // _holdMaxM is only filled in on the holder's peer -- so it falls back to 2 m, which
-            // is the same order as the band and far below any room move.
+            // The holder teleported (see ShouldSeat). The same threshold on every peer, because
+            // it is a fact about how far a holder can travel in a frame rather than about this
+            // prop's hold band.
             Body.GlobalTransform = target;
             return;
         }
@@ -859,8 +857,29 @@ public partial class NetworkedProp : Node3D
     /// the case the break rule takes -- so anything past that is a discontinuity, not a lag. The
     /// measured worst honest lag is 0.809 m against a threshold of 1.8 m.</para></summary>
     private bool ShouldSeat(Vector3 target) =>
-        Body.GlobalPosition.DistanceSquaredTo(target)
-            > (_holdMaxM + CarryHold.BreakHoldM) * (_holdMaxM + CarryHold.BreakHoldM);
+        Body.GlobalPosition.DistanceSquaredTo(target) > TeleportSeatM * TeleportSeatM;
+
+    /// <summary>
+    /// How far the target must jump before the hold is SEATED on it rather than swept toward it,
+    /// metres.
+    ///
+    /// <para><b>5 m, and the first version of this got it wrong in the direction that matters.</b>
+    /// It was <c>HoldMax + BreakHoldM</c> (1.8 m) on the reasoning that no honest lag can exceed
+    /// that -- true of a lag, and false of a FRAME. Under a loaded 45-suite marathon a physics
+    /// tick can be long enough that the holder moves most of a metre in it, the target jumps past
+    /// 1.8 m, and the seat then teleports the prop onto the target <b>with no sweep at all</b> --
+    /// straight through whatever was in between. Measured: the held crate ended up
+    /// <b>0.183 m inside SearchPillar</b> in a marathon, on a tree where the same suite reported
+    /// 0.001 m three times standalone. That is the packet's own planted fault arriving through a
+    /// door the fix opened.</para>
+    ///
+    /// <para>5 m separates the two cases by two orders of magnitude rather than by a margin: a
+    /// room teleport moves a holder 38-80 m (ROUND-1's measured room separations), while at the
+    /// 2.4 m browse pace a holder covers 5 m only in a frame lasting two full seconds, which is
+    /// not a frame this game survives for other reasons. Everything below it is swept, so the
+    /// world still stops the prop; above it, nothing legitimate is in between anyway, because the
+    /// holder did not travel through the space -- they were moved across it.</para></summary>
+    private const float TeleportSeatM = 5.0f;
 
     /// <summary>How hard a non-holder's view chases the pose the holder is carrying at, s^-1.
     /// Fast: this is not a feel spring, it is a correction against an interpolated body, and the
