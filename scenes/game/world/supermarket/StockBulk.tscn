@@ -204,11 +204,13 @@ size = Vector3(0.63, 1.4, 0.49)
 
 ; 1356 cans in ONE draw. No script, no _Ready, nothing built: the buffer above IS the shelf.
 [node name="BulkCans" type="MultiMeshInstance3D" parent="."]
+custom_aabb = AABB(-4.534498, 0.425, -3.349498, 9.068995, 1.22, 4.598995)
 multimesh = SubResource("MultiMesh_cans")
 material_override = SubResource("Mat_can")
 
 ; 652 cereal boxes in ONE draw -- two aisles of filler plus the two floor pallet stacks.
 [node name="BulkBoxes" type="MultiMeshInstance3D" parent="."]
+custom_aabb = AABB(-6.909624, 0, -2.609624, 13.81925, 1.805, 6.009248)
 multimesh = SubResource("MultiMesh_boxes")
 material_override = SubResource("Mat_box")
 
@@ -219,6 +221,7 @@ material_override = SubResource("Mat_box")
 ; stacked box displays the packet wanted are the two floor pallets, which is what a stacked
 ; display physically is; an end-cap is a shelf.
 [node name="BulkProduce" type="MultiMeshInstance3D" parent="."]
+custom_aabb = AABB(-5.063137, 0.425, -1.688137, 10.12627, 1.26, 5.476274)
 multimesh = SubResource("MultiMesh_produce")
 material_override = SubResource("Mat_produce")
 
