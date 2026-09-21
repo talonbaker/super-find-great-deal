@@ -460,6 +460,17 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
     /// comfortably under the gap between two separate events in a collapse.</summary>
     private const ulong WakeCooldownMsec = 800;
 
+    /// <summary>Where each prop was when it was last woken. Paired with
+    /// <see cref="_lastWokeMsec"/>: together they answer "has anything come of the last wake",
+    /// which is the question the cooldown is really asking.</summary>
+    private readonly System.Collections.Generic.Dictionary<int, Vector3> _lastWokeAt = new();
+
+    /// <summary>How far a prop must have travelled since its last wake for the next contact to
+    /// count as a new shove rather than the same lean. 5 cm — well past the depenetration slack
+    /// a body resting against another can jitter through, and far under the distance any real
+    /// push moves something.</summary>
+    private const float WakeMovedM = 0.05f;
+
     /// <summary>How many resting props have been woken by a contact this session (P1). Read at
     /// rest by the suite: a wake storm in an untouched room would be 0 here and must stay 0.</summary>
     public long PropWakeCount { get; private set; }
@@ -506,10 +517,28 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
         // that has settled and is STILL being leaned on must not immediately re-wake, while a
         // genuine second hit -- a rolled can arriving at a stack a second after the first one --
         // is well clear of it.
+        // ...BUT A LEAN IS ONLY A LEAN WHILE NOTHING IS HAPPENING. The cooldown alone also stops
+        // a player SHOVING A STACK ALONG, which is the verb Talon asked for, and it cost a run
+        // to see: with no cooldown the bot pushed through all five boxes (5/5); with a bare
+        // 800 ms cooldown it reached four and stopped, because the fifth box refused to be woken
+        // again while the bot was still walking into it.
+        //
+        // The discriminating question is not "how long ago" but "did anything come of it". A prop
+        // that was woken and is back at rest WHERE IT WAS is a body somebody is leaning on; a prop
+        // that was woken and has MOVED is a shove that is working, and the next contact is the
+        // next shove. So the cooldown is skipped once the prop has travelled WakeMovedM since its
+        // last wake.
         ulong now = Time.GetTicksMsec();
+        Vector3 herePos = struck.GlobalPosition;
         if (_lastWokeMsec.TryGetValue(target.PropId, out ulong wokeAt) && now - wokeAt < WakeCooldownMsec)
-            return;
+        {
+            bool hasMoved = _lastWokeAt.TryGetValue(target.PropId, out Vector3 wokeFrom)
+                && wokeFrom.DistanceSquaredTo(herePos) > WakeMovedM * WakeMovedM;
+            if (!hasMoved)
+                return;
+        }
         _lastWokeMsec[target.PropId] = now;
+        _lastWokeAt[target.PropId] = herePos;
 
         float targetMass = struck.MassKg > 0f ? struck.MassKg : 1f;
         Vector3 impulse = PropPhysics.ContactImpulse(pushDirection, moverMassKg, targetMass,
