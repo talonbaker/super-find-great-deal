@@ -112,11 +112,23 @@ $ErrorActionPreference = "Stop"
 $CrateId = 1   # Crate at (2.5, 0.5, 2.5)
 $BallId = 2    # Ball  at (-2.5, 0.5, -2.5)
 
-# The carry anchor sits ~0.88 m from the avatar's rendered body (CarryAnchorRest; see
-# Run-CarryDriftTest's tolerance table, which measures the steady state at 0.88 m and caps the
-# peak at 1.45 m). 1.6 m is Run-RegrabTest's radius and is reused unchanged so a number measured
-# by this suite is directly comparable with the one that suite prints.
-$HoldRadius = 1.6
+# How far a held prop may sit from its holder's rendered body, metres.
+#
+# RE-DERIVED BY FEEL-1 (2026-09-20), 1.6 -> 2.0, because the thing it measures moved. It used to
+# be Run-RegrabTest's radius, reused unchanged, and it worked because a held prop rode a chest
+# socket ~0.88 m from the body. A held prop now rides the VIEW RAY: its centre sits up to
+# CarryHold.HoldMaxBaseM (1.2 m) from the EYE, and the eye is at AvatarProportions.PlayerEyeHeightM
+# (0.995 m), so the geometric maximum against the body's own origin is
+# sqrt(1.2^2 + 0.995^2) = 1.56 m before the spring has lagged at all. The marathon measured 1.61 m
+# on a witness and this suite reported it 110 times, which is the bar being wrong rather than the
+# carry being wrong.
+#
+# 2.0 m is that 1.56 m plus the spring's transient through a turn (FEEL-1's own suite measured a
+# peak lag of 0.809 m from target, most of it tangential, so it adds far less than its own length
+# to a radius). It still catches what this assertion is FOR: a prop that has genuinely detached
+# from its holder is metres away -- the failure mode here has always been a prop left behind in
+# another room, not one held 40 cm further out than expected.
+$HoldRadius = 2.0
 
 # SandboxAvatar.PickupRadius. The CLIENT's reach, and it is the discriminator between "the prop
 # refused to be picked up" and "nobody ever asked": inside this radius the client sends a request

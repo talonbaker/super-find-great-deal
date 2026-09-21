@@ -678,6 +678,16 @@ public partial class NetworkedProp : Node3D
             Mathf.Lerp(_spring!.LightResponse, _spring.HeavyResponse, SpringHeft),
             _holdMinM, Net.AvatarMotor.MoveSpeed);
         Vector3 from = Body.GlobalPosition;
+        if (ShouldSeat(target))
+        {
+            // A teleport, a respawn, a room move. Seat the whole hold on the target and start the
+            // spring again from there; easing would drag the prop across the level.
+            _springPos = target;
+            _springVel = Vector3.Zero;
+            _blockedSec = 0f;
+            Body.GlobalTransform = new Transform3D(pose, target);
+            return;
+        }
         Vector3 resolved = SpringTo(target, omega, dt);
         resolved = CarryHold.CapStep(from, resolved,
             CarryHold.MaxHoldSpeedMps(Net.AvatarMotor.MoveSpeed), dt);
@@ -708,12 +718,20 @@ public partial class NetworkedProp : Node3D
             && _holder.OwnerPeerId == Multiplayer.GetUniqueId()
             && PropManager.Instance is { } mgr)
         {
-            // The world has had this prop off its target for BreakHoldSec. Ask the server to set
-            // it down where it actually is -- a request, never a local mutation, exactly like
-            // every other carry verb (see PropManager's client entry points).
+            // The world has had this prop off its target for BreakHoldSec: it has left your
+            // hands. A request, never a local mutation, exactly like every other carry verb.
+            //
+            // A DROP, NOT A PLACE, and that was measured rather than reasoned. A place can be
+            // REFUSED -- the prop is wedged in whatever stopped it, so placement integrity
+            // answers Overlapping -- which leaves the player holding something the game has
+            // decided they have lost, and spends the refusal channel the HUD and three suites
+            // read on an event nobody asked for (Run-PlaceTest reported `ordinal 4` where its
+            // own scripted place expected 5). A drop cannot be refused, which is the right
+            // property for a transition the WORLD forced: an object torn out of your hands is a
+            // drop, not a careful set-down, and the physics that torn it out takes it from here.
             GD.Print($"[carry] hold broken prop={PropId} blocked={blocked:F2}m for {_blockedSec:F2}s");
             _blockedSec = 0f;
-            mgr.ClientRequestPlace(PropId, Body.GlobalTransform);
+            mgr.ClientRequestDrop();
         }
     }
 
@@ -805,6 +823,16 @@ public partial class NetworkedProp : Node3D
             return;
         }
         Transform3D target = _holder.GlobalTransform * _holdLocalToHolder;
+        if (_holdMaxM <= 0f
+            ? Body.GlobalPosition.DistanceSquaredTo(target.Origin) > 4f
+            : ShouldSeat(target.Origin))
+        {
+            // The holder teleported (see ShouldSeat). A non-holder has no hold band of its own --
+            // _holdMaxM is only filled in on the holder's peer -- so it falls back to 2 m, which
+            // is the same order as the band and far below any room move.
+            Body.GlobalTransform = target;
+            return;
+        }
         float w = 1f - Mathf.Exp(-FollowResponse * dt);
         Vector3 pos = Body.GlobalPosition.Lerp(target.Origin, w);
         pos = CarryHold.CapStep(Body.GlobalPosition, pos,
@@ -815,6 +843,24 @@ public partial class NetworkedProp : Node3D
             target.Origin - _holder.GlobalPosition);
         Body.GlobalBasis = Body.GlobalBasis.Orthonormalized().Slerp(target.Basis.Orthonormalized(), w);
     }
+
+    /// <summary>
+    /// <b>A hold does not EASE across a room.</b> When the target is further away than any lag
+    /// could honestly put it, the prop is seated on it outright instead of springing toward it.
+    ///
+    /// <para><b>Measured, and it is the room teleport</b> (<c>Run-CarryNetTest</c> phase 3). The
+    /// round moves a holder between rooms; the hold's target moves 40 m in one tick; the spring
+    /// and the speed cap then walked the crate across the map at 4.8 m/s while the witness
+    /// watched it trail its holder by 33 m, then 32, then 31. The old anchor chase never showed
+    /// this because it snapped to the anchor on the grab frame and lerped hard afterwards.</para>
+    ///
+    /// <para>The threshold is derived rather than typed: a lag can only exceed
+    /// <c>HoldMax + BreakHoldM</c> if the world is holding the prop, and the world holding it is
+    /// the case the break rule takes -- so anything past that is a discontinuity, not a lag. The
+    /// measured worst honest lag is 0.809 m against a threshold of 1.8 m.</para></summary>
+    private bool ShouldSeat(Vector3 target) =>
+        Body.GlobalPosition.DistanceSquaredTo(target)
+            > (_holdMaxM + CarryHold.BreakHoldM) * (_holdMaxM + CarryHold.BreakHoldM);
 
     /// <summary>How hard a non-holder's view chases the pose the holder is carrying at, s^-1.
     /// Fast: this is not a feel spring, it is a correction against an interpolated body, and the

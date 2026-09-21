@@ -57,7 +57,21 @@ param(
     # Don't raise this without re-reading that table: above ~0.48 the ball outruns the bot and the
     # race comes back. Don't drop it far below either, or the ball settles before the bot arrives and
     # the Loose->Held path this suite exists to prove goes untested ("ball had already settled").
-    [double]$ThrowScale = 0.35,
+    #
+    # RE-DERIVED BY FEEL-1 (2026-09-20), 0.35 -> 0.23, because the table above is a RATIO and its
+    # denominator moved. Every line of it is written against "the bot walks ~3.6 m/s"; Talon's
+    # ruling of 2026-09-20 brought the walk down to 2.4 m/s (MpFoundation.Game.BrowsePace) and
+    # deleted sprint, so 0.35 x 7.5 = 2.6 m/s -- which that table calls "slower than the bot from
+    # the first frame" -- became FASTER than the bot, and the race the table exists to abolish
+    # came straight back. Measured, three standalone runs on an idle machine, all three red with
+    # the documented staging string and the bot stranded at (7.28, 7.17) while the ball rolled on
+    # to x = 10.59 and was still rolling when the run ended.
+    #
+    # 0.23 keeps the ratio the table chose rather than picking a new number: 0.35 x (2.4 / 3.6).
+    # The ball leaves at ~1.7 m/s against a 2.4 m/s walk, so the gap only ever closes, which is
+    # the property the whole table is about. <b>Read the ratio, not the constant</b>, if the walk
+    # speed moves again.
+    [double]$ThrowScale = 0.23,
     [switch]$SkipBuild
 )
 

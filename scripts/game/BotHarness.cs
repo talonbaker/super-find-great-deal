@@ -103,6 +103,7 @@ public partial class BotHarness : Node
         MaybeCapture();
         MaybeCaptureAtTick();
         MaybePlace();
+        MaybeScrollHold();
         MaybePress();
         if (MaybeFinishAfterHolding())
             return;
@@ -174,6 +175,34 @@ public partial class BotHarness : Node
     }
 
     private double _placeStartedSec = -1;
+
+    // --hold-notches: applied once, the first tick this bot is actually holding something.
+    private bool _notchesApplied;
+
+    /// <summary>
+    /// <b>The scripted WHEEL</b> (FEEL-1, <c>tests/Capture-CarryHold.ps1</c>): once this bot is
+    /// holding something, roll the hold distance by <c>--hold-notches</c> and stop.
+    ///
+    /// <para>It calls <see cref="NetworkedProp.ScrollHold"/> — the same method
+    /// <c>HoldDistanceController</c> calls on a wheel event — so a capture of "the same can, held
+    /// close and held far" is a photograph of the shipped verb rather than of a pose a harness
+    /// invented. A bot has no mouse, which is the only reason a flag exists at all.</para>
+    ///
+    /// <para>Once, and only once: the band is clamped, so repeating would silently pin the
+    /// distance at one end and a capture would stop being evidence about the wheel.</para>
+    /// </summary>
+    private void MaybeScrollHold()
+    {
+        if (_options.HoldNotches == 0 || _notchesApplied || _propManager == null)
+            return;
+        NetworkedProp? held = _propManager.FindHeldBy((int)Multiplayer.GetUniqueId());
+        if (held == null || !held.SpringActive)
+            return;
+        _notchesApplied = true;
+        held.ScrollHold(_options.HoldNotches);
+        GD.Print($"[bot] {_options.DisplayName} scrolled the hold by {_options.HoldNotches} notch(es) "
+                 + $"to {held.HoldDistanceM:F3} m (band {held.HoldMinM:F3}..{held.HoldMaxM:F3})");
+    }
 
     // --press: index of the next scheduled press. Marks arrive sorted ascending from
     // LaunchOptions, so one cursor is enough — the same shape --capture-at uses.

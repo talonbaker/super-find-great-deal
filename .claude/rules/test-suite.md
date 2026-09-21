@@ -1981,3 +1981,80 @@ come within 10 mm of a facing, and
 0.175 m pitch for a 0.16 m sphere, a 0.02 m clearance empties both NEIGHBOURS of every facing as
 well and leaves an end-cap with 2 of 14 cells standing -- barer than SHELF-1 left it. The quantity
 that matters is penetration, and any positive clearance is already zero penetration.
+
+## FEEL-1 (2026-09-20): udp/7913, a port collision that had already happened, and how ports are handed out now
+
+### PORTS ARE ASSIGNED BY THE ORCHESTRATOR IN THE DISPATCH. A LANE NEVER COMPUTES "NEXT FREE".
+
+That is the rule now, stated once, and everything below it is why. The ladder table in the
+REACH-1 section is a RECORD of what has been claimed, not a source of free numbers: by the time
+you read it, another lane branched off the same base has read it too.
+
+**`tests/Run-CarryHoldTest.ps1` claims udp/7913.** It was written for **7912** -- the number the
+one ladder table said was next -- and on its first real run the server printed:
+
+```
+ERROR: Couldn't create an ENet host.
+[server] failed to start server port=7912 transport=enet err=CantCreate
+```
+
+`netstat` named the holder, and it was not a stale socket and not a wedged process of this
+lane's: a **SOLO-1 lane in `C:\repos\sfgd-solo1`** was live on 7912 at that moment
+(`--server --port 7912 --world supermarket --solo --round-script ...`, plus its `SoloA` bot).
+Two lanes, one base, one table, the same next-free number. **That is the fourth time this repo
+has paid for it** (three lanes on 7896, two on 7899, INT-1's 7910 taken while three sentences
+said it was free, and now this), and the previous three entries each said "the orchestrator
+should hand the numbers out" without the rule ever being written as a rule. It is written now.
+
+**Assigned for this wave** (orchestrator, 2026-09-20): SOLO-1 **7912**, FEEL-1 **7913**,
+SICK-1 **7914**, ART-1 **7915**, PHYS-1 **7916**, HANDS-1 **7917**; PROBE-1 stays on 7908.
+Add your row to the ladder table when your suite lands; do not compute one.
+
+**Neither lane touched the other's processes**, and the discriminator that settled it in one
+command is worth copying: `netstat -ano | grep <port>` gives a PID, and
+`Get-CimInstance Win32_Process -Filter "ProcessId=<pid>"` gives its **command line**, which names
+the worktree. That separates "another lane is live on my port" (move) from "a straggler of mine
+is wedged" (stop it, by PID) from "a stale socket" (re-run) without guessing, and without going
+anywhere near `taskkill /IM`.
+
+### `Carry: drift (hold+walk)`'s quantity MOVED, and it is not drift
+
+CARRY-1's entry above records that this suite's caps survived the carry spring "by luck rather
+than by design", and warns: *"anyone who moves the carry anchor behind or beside the body puts
+the whole lag straight into `bd` and should expect to re-measure these caps."* FEEL-1 moved the
+anchor -- a held prop now rides the VIEW RAY in front of the eye instead of a chest mount plus an
+armful lift -- so here is the re-measurement, same fixture, same flags:
+
+| | mean `bd` | peak `bd` | growth | n |
+|---|---|---|---|---|
+| before (INT-1 / REVIEW-1's tree) | 1.010 m | 1.063 m | 0.000 m | 83 |
+| **after FEEL-1** | **0.894 m** | **0.902 m** | **0.001 m** | 83 |
+
+**The caps were NOT changed** (`MeanMax` 1.15, `PeakMax` 1.45): the number went DOWN, because the
+armful lift that used to raise a crate above the carry mount is gone with the socket. A
+`Carry: drift` red whose mean has moved back UP toward 1.0 is now the interesting one.
+
+### A suite can measure the wrong thing and call the feature broken
+
+Two of this packet's own instruments were wrong before the feature was, and both cost a run:
+
+- **The shelf beat asserted that a `[carry] hold broken` line appeared.** Measured, the held
+  crate stopped dead with its face ON the pillar (centre x = 45.28 against a face at 45.50 --
+  0.22 m, exactly its own half-width) and the BOT wedged at the same instant, so the hold never
+  ran the 0.6 m past its target that the break rule needs. The sweep had done its entire job and
+  the suite reported "a held prop that nothing can stop". It asserts the **penetration** now --
+  the quantity the beat is about, and the one a planted `CollisionMask = 0` moves: 0.001 m green
+  against 0.214 m planted.
+- **The lag table read `CarrySpring.Position`** while the ray hold integrates the spring's
+  arithmetic against its own state, so the field sat at its seed for the whole hold and reported
+  a mean lag of **1.54 m and a peak of 3.34 m** for a carry that was in fact tracking to within
+  0.22 m. **An instrument reading the wrong field looks exactly like the feature being broken**,
+  and the tell was that the number did not change when the behaviour did.
+
+### The plant that proved the new suite, and what stayed green under it
+
+`CollisionMask = 0` put back into `Carryable.OnPickedUpBySpring`: the shelf beat goes from
+0.001 m to **0.214 m of penetration** (the crate half inside a 1 m pillar). **Both clip bars
+stayed green under that plant** -- which is the useful half: the capsule projection and the world
+sweep are independent guarantees, so a single plant cannot flatter both, and a red in one says
+which mechanism moved.

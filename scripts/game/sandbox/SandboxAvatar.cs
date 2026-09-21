@@ -2809,6 +2809,14 @@ public partial class SandboxAvatar : CharacterBody3D, IServerConfirmedBody
     /// chest.</para></summary>
     public const float PlaceAimProbeM = 3.0f;
 
+    // UNREFERENCED SINCE FEEL-1 (2026-09-20), deliberately kept. A click while holding always
+    // places now -- the drop branch this probe chose between existed because a held prop could be
+    // left hanging inside a shelf, and a held prop keeps the world collision mask and is swept
+    // against it every tick, so it cannot be. The probe and its doc are left standing because the
+    // incident written into them is still true and still expensive: a teammate's capsule is not a
+    // surface, and the next verb that asks "is there something solid in front of me" will want to
+    // know that before it asks. Delete it the day nothing is going to ask.
+
     /// <summary>
     /// Is the player looking at something solid close enough to be setting an object down on?
     ///
@@ -2891,9 +2899,20 @@ public partial class SandboxAvatar : CharacterBody3D, IServerConfirmedBody
             return;
         PropKind? kind = Props.FindHeldBy(_ownerPeerId)?.Kind;
         if (kind is PropKind k && _fireHandlers.TryGetValue(k, out System.Action? handler))
+        {
             handler();
-        else
-            GD.Print($"[fire] no verb registered for the held item (kind={(kind.HasValue ? kind.Value.ToString() : "empty")})");
+            return;
+        }
+        // AN EMPTY HAND SAYS NOTHING (FEEL-1, 2026-09-20). `fire` and `interact` are both on the
+        // left mouse button now -- interact is the ruling, fire is the aim substrate's primary
+        // and nothing in this build registers a verb for it -- so this line would print on
+        // EVERY pickup, every put-down and every button press, in the player's own session and
+        // in every bot log a suite reads. Holding something with no verb is still worth a line:
+        // that is a real "I pressed the button and nothing happened" and the log is the only
+        // channel it has (INTERACTION-BIBLE 2 governs a triggered interaction going silent, not
+        // a press with no verb behind it to trigger).
+        if (kind.HasValue)
+            GD.Print($"[fire] no verb registered for the held item (kind={kind.Value})");
     }
 
     /// <summary>

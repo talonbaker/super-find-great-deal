@@ -60,9 +60,24 @@ public static class CarryHold
     /// so it is no longer in your hands.</summary>
     public const float BreakHoldM = 0.6f;
 
-    /// <summary>...and for how long, seconds. A doorway clips a crate for a frame or two on
-    /// every walk; only a sustained block is a lost hold.</summary>
-    public const float BreakHoldSec = 0.3f;
+    /// <summary>...and for how long, seconds.
+    ///
+    /// <para><b>0.8 s, not the packet's 0.3 s, and the reason is the DRESSED room.</b> F4 named
+    /// 0.3 s and that is the usual number for this rule; measured in the search room STOCK-1
+    /// filled, it is far too short. A bot carrying a crate eleven metres down the z = -2.1
+    /// walkway -- an ordinary journey, not a shove -- had the hold broken THREE times by brushing
+    /// floor bins and pallet stacks it was walking past, and arrived empty-handed
+    /// (<c>Run-PlaceTest</c>'s bot D, `[carry] hold broken prop=1016` three times in one run).
+    /// Losing the object you are carrying because you clipped a bin is worse than the defect this
+    /// rule exists to prevent.</para>
+    ///
+    /// <para>The rule still fires for what it is for: a prop the world holds for most of a second
+    /// while you keep walking is genuinely out of your hands, and the prop is swept rather than
+    /// teleported, so a brush that clears itself catches back up inside the window instead of
+    /// costing the player their object. <b>A value call, stated rather than smuggled</b> -- if
+    /// Talon rides it and a crate still gets ripped out of his hands on an aisle, this is the
+    /// number to move, and if a prop hangs on a shelf too long, it is the same one.</para></summary>
+    public const float BreakHoldSec = 0.8f;
 
     // --------------------------------------------------------------------- the prop's own bulk
 

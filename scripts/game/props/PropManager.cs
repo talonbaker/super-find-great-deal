@@ -1094,7 +1094,15 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
             DenyGrab(peer, GrabDenial.Taken); // someone else won the race
             return;
         }
-        Rpc(MethodName.ApplyPropState, propId, (int)PropMode.Held, peer, node.GlobalTransform, (int)PropRelease.None);
+        // node.BODY's transform, not the node's (FEEL-1, 2026-09-20). A NetworkedProp NODE is
+        // placed once at spawn and never moves again -- the physical Carryable child is what
+        // travels, which is why PropManager reads WorldPosition => Body.GlobalPosition
+        // everywhere else. This argument was DISCARDED by ApplyPropState's Held arm until FEEL-1
+        // made it the pose every non-holder peer carries the prop at, so the staleness was
+        // invisible and is now load-bearing. Measured: a witness watching a regrab saw the ball
+        // teleport to its SPAWN corner on the grab and then trail its holder by five metres for
+        // the rest of the run (Run-RegrabTest, "held ball 5.52m from holder").
+        Rpc(MethodName.ApplyPropState, propId, (int)PropMode.Held, peer, node.Body.GlobalTransform, (int)PropRelease.None);
     }
 
     /// <summary>
@@ -1909,7 +1917,8 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
             return;
         if (!_registry.SetHolder(propId, peerId))
             return;
-        Rpc(MethodName.ApplyPropState, propId, (int)PropMode.Held, peerId, node.GlobalTransform,
+        // node.Body's transform, not the node's -- see the note at the live-grab broadcast.
+        Rpc(MethodName.ApplyPropState, propId, (int)PropMode.Held, peerId, node.Body.GlobalTransform,
             (int)PropRelease.None);
     }
 
