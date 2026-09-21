@@ -72,10 +72,26 @@ public partial class CameraPacingProbe : Node
     //               with catch-up reads as 8 (max_physics_steps_per_frame); a physics blow-up
     //               reads as 1 with a huge phys_ms. Those are opposite findings and the CSV had
     //               no column that could tell them apart.
-    //   procMs      TimeProcess, and physMs TimePhysicsProcess: the time the engine spent INSIDE
-    //               its own frame. frame_ms minus (procMs + physMs) is time spent somewhere the
-    //               engine is not — present, swapchain acquire, the driver — which is the whole
-    //               question this lane asks.
+    //   procMs      TimeProcess, and physMs TimePhysicsProcess.
+    //
+    //               *** THESE TWO ARE NOT PER-FRAME VALUES AND MUST NOT BE READ AS ONE. ***
+    //               MEASURED, STALL-1 2026-09-21: across 11 055 recorded frames of one 36 s run
+    //               these columns hold only THIRTY-SEVEN distinct values, and 56 across 48 780
+    //               frames of a 55 s one — i.e. one new value per second. Godot refreshes them
+    //               once a second and refreshes them with the MAXIMUM over that second, not the
+    //               mean and not the frame. So a row's procMs is "the worst idle step in the
+    //               second this frame fell in", which is why a run whose mean frame is 1.12 ms
+    //               can carry a mean procMs of 430 ms without either number being wrong.
+    //
+    //               They are still worth recording, for two reasons. Godot's idle step is where
+    //               RenderingServer::draw() is called from, so a per-second max of ~500 ms on one
+    //               adapter and ~9 ms on another localises a half-second stall to the draw rather
+    //               than to physics — and physMs, measured the same way, stays at 3-5 ms in BOTH,
+    //               which is the control that says the difference is not the simulation.
+    //
+    //               PerfHud.cs prints TimeProcess as "frame_ms" and SHELF-1/STOCK-1's `pms` is
+    //               TimePhysicsProcess described as "a 5 Hz spot reading"; on this measurement
+    //               both are per-second maxima, so those are upper bounds rather than samples.
     private readonly List<int> _gc0 = new(16384);
     private readonly List<int> _gc1 = new(16384);
     private readonly List<int> _gc2 = new(16384);

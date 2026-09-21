@@ -13,10 +13,15 @@
     of magnitude to its right and nothing in between, and that gap is what says "a discrete event
     with a mechanism" rather than "the machine is slow".
 
-    The four discriminating columns (gc0/gc1/gc2, phys_ticks, proc_ms, phys_proc_ms) are printed
-    for every stall frame, because a stall that stepped 8 physics ticks with no GC and 2 ms of
-    proc time is a PRESENT stall, and one that stepped 1 tick with a gen2 collection on it is a
-    managed pause. Those are different packets.
+    The discriminating columns (gc0/gc1/gc2, phys_ticks, proc_ms, phys_proc_ms) are printed for
+    every stall frame, because a stall that stepped 8 physics ticks with no GC is a PRESENT stall
+    and one that stepped 1 tick with a gen2 collection on it is a managed pause. Those are
+    different packets.
+
+    READ proc_ms AND phys_proc_ms AS PER-SECOND MAXIMA, NOT AS THIS FRAME'S COST. Godot refreshes
+    both once a second, with the worst value in that second; measured in STALL-1 as 37 distinct
+    values across 11 055 frames. The class doc of CameraPacingProbe has the evidence. gc* and
+    phys_ticks ARE per-frame and are the columns to judge an individual stall on.
 
 .PARAMETER Csv
     One or more CSV paths (wildcards allowed).

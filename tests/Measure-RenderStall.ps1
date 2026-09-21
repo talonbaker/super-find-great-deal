@@ -214,7 +214,18 @@ try {
                         [void][StallWin]::SetForegroundWindow($hwnd)
                         Start-Sleep -Milliseconds 700
                         $fg = Get-ForegroundPid
-                        $ok = $treePids -contains $fg
+                        # COMPARE AGAINST THE WINDOW'S OWN OWNER, not the process tree snapshot.
+                        # Measured 2026-09-21: the engine window's pid was 41024 while the tree
+                        # walk had returned 41740,45844 -- the engine child is re-parented away
+                        # from the console wrapper, so a pid that owns a window of this launch can
+                        # legitimately be absent from the tree. The first version of this check
+                        # therefore printed NOT FOCUSED over a window that WAS in the foreground,
+                        # which is the same class of error as the MainWindowHandle bug it replaced:
+                        # verifying the wrong thing reads exactly like the feature not working.
+                        $winPid = 0
+                        [void][StallWin]::GetWindowThreadProcessId($hwnd, [ref]$winPid)
+                        $ok = ($fg -eq $winPid) -or ($treePids -contains $fg)
+                        $treePids = @($treePids + $winPid | Sort-Object -Unique)
                         # THE READ-BACK, NOT THE INTENT (Boot.cs's own rule for window mode).
                         # "We called SetForegroundWindow" and "the window has focus" are
                         # different claims and only the second one is evidence: Windows refuses
