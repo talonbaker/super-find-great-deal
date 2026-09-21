@@ -892,6 +892,50 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
         GD.Print($"[props] --seed-props-drop: released {dropped} seeded prop(s) into Loose at t={_seededDropClock:F2}s");
     }
 
+    // --- --phys-shove: a shove the SUITE chooses (PHYS-2, 2026-09-20) ------------------------
+    //
+    // WHY THIS HAD TO EXIST, and it is a measurement rather than a preference. PHYS-1 staged
+    // Run-PhysicsFeelTest's domino row by walking a bot into it, and then measured the bot: peak
+    // approach speeds of 0.66, 0.70, 0.89, 1.18, 2.88 and 3.30 m/s into the same fixture across
+    // six runs of ONE build, because the debris the bot had just made perturbed its own walk. The
+    // chain length came out 2/5, 3/5, 4/5, 5/5 on that unchanged build. Every OTHER bar of that
+    // suite was stable to two decimal places across the same runs, which is what identifies the
+    // shove as the variable rather than the physics.
+    //
+    // The clock is the same one --seed-props-drop uses and for the same reason: a shove at spawn
+    // is a shove before any peer is connected, so the event has to be placed inside the session.
+    // Each entry fires EXACTLY ONCE.
+    //
+    // WHAT IT DOES NOT DO. It does not wake anything by contact, does not compute an impulse and
+    // does not touch P1's contact path: it is how the FIRST body starts moving, and every prop
+    // that body goes on to knock over is woken by the shipped contact path exactly as a player's
+    // shove would wake it. So a run's `[phys] wake` lines still count contacts, and bar (4)'s
+    // "at least one wake" still means P1's path ran.
+    private double _physShoveClock;
+    private readonly System.Collections.Generic.HashSet<int> _physShovesFired = new();
+
+    private void StepPhysShove(double delta)
+    {
+        if (NetworkManager.Instance?.Options.PhysShoves is not { Count: > 0 } shoves)
+            return;
+        _physShoveClock += delta;
+        for (int i = 0; i < shoves.Count; i++)
+        {
+            (int propId, Vector3 velocity, double atSec) = shoves[i];
+            // The INDEX is the identity, not the prop id: a fixture is allowed to shove the same
+            // prop twice on one run (strike the row, then strike what is left of it), and keying
+            // this on the prop would silently swallow the second.
+            if (_physShoveClock < atSec || !_physShovesFired.Add(i))
+                continue;
+            ServerNudgeLoose(propId, velocity);
+            // The line the suite reads: it is the only record of what the fixture actually asked
+            // for, and a shove that names a prop id nothing seeded would otherwise be a silent
+            // no-op that reads downstream as "the physics did not work".
+            GD.Print($"[phys] shove prop={propId} v=({velocity.X:F2}, {velocity.Y:F2}, "
+                + $"{velocity.Z:F2}) |v|={velocity.Length():F2} m/s at t={_physShoveClock:F2}s");
+        }
+    }
+
     /// <summary>Server-only: drives every Loose prop's physics tick. Streams its live transform
     /// to every peer (unreliable — the next tick supersedes a dropped one), latches it to Resting
     /// once it has stayed slow for <see cref="SettleTicks"/> consecutive ticks, and recovers it to
@@ -908,6 +952,7 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
         // swallowed because nothing is Loose any more on the tick we get round to sending it.
         FlushImpacts();
         StepSeededDrop(delta);
+        StepPhysShove(delta);
         _streamTick++;
         // Reuse a persistent scratch list instead of allocating a fresh List<PropState> every
         // physics tick (60 Hz) - this loop needs a snapshot because a Loose prop settling to

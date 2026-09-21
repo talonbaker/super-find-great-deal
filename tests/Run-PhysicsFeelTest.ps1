@@ -11,20 +11,28 @@
          and accidentally hit a bunch of boxes, those boxes should fall over like dominoes, and
          cans should roll around."
 
+    PHYS-2 (2026-09-20) CHANGED THE MOVER AND NOTHING ELSE. The row and the can are struck by
+    --phys-shove at a speed this file chooses, instead of by a walking bot whose approach PHYS-1
+    measured at 0.66, 0.70, 0.89, 1.18, 2.88 and 3.30 m/s across six runs of one build. Every bar
+    below is unchanged except (1), whose window now ends when the shoved box first moves rather
+    than at the bot's grab -- see the bar for why that is not circular.
+
     ONE server and TWO bots on udp/7916 -- the port the orchestrator ASSIGNED for this wave
     (.claude/rules/test-suite.md, FEEL-1 section: "PORTS ARE ASSIGNED BY THE ORCHESTRATOR IN THE
     DISPATCH. A LANE NEVER COMPUTES NEXT FREE."). One pass of one carried crate produces every
     bar below, which is deliberate: the bars are about one continuous physical event and staging
     them separately would let a stack be knocked over by a fixture rather than by a carry.
 
-    THE FIXTURE. Five cereal boxes standing in a row 2 cm apart in the z = 0 walkway, and a can
+    THE FIXTURE. Five cereal boxes standing in a row 2 cm apart in the z = -2 walkway, and a can
     on the floor past them. Seeded props are born RESTING -- frozen kinematic on every peer --
     which is precisely the state P1 is about: before this packet a held crate driven into them
-    was stopped by an immovable wall of boxes.
+    was stopped by an immovable wall of boxes. The head of the row and the can are each given one
+    known velocity by --phys-shove; every box after the first is woken by the SHIPPED contact
+    path, which is why the [phys] wake count is still the evidence that P1 ran.
 
     THE BARS, in the order the phases measure them:
-      (1) UNTOUCHED IS UNTOUCHED     no seeded prop moves at all in the twenty seconds
-                                     before the bot even picks the crate up.
+      (1) UNTOUCHED IS UNTOUCHED     no seeded prop the suite did not shove moves at all in the
+                                     whole window before the row is struck.
       (2) DOMINOES                   every box tilts past 60 degrees, within 2 s of the first,
                                      on the holder's view AND on a witness's.
       (3) THE CAN ROLLS              travels at least 1 m and stops within 4 m.
@@ -46,12 +54,32 @@
 [CmdletBinding()]
 param(
     [int]$Port = 7916,
-    [double]$DurationSec = 60,
+    [double]$DurationSec = 70,
     [double]$MaxPropSpeed = 3.0,
     [double]$TiltDeg = 60,
     [double]$DominoWindowSec = 2.0,
     [double]$MinRollM = 1.0,
     [double]$MaxRollM = 4.0,
+    # THE SHOVE IS THE SUITE'S, AND PHYS-1 MEASURED WHY (PHYS-2, 2026-09-20). Staged by walking a
+    # bot into the row, this fixture was handed peak approach speeds of 0.66, 0.70, 0.89, 1.18,
+    # 2.88 and 3.30 m/s across six runs of ONE build -- the debris the bot made perturbed its own
+    # walk -- and the chain came out 2/5, 3/5, 4/5 and 5/5 on that unchanged build. Every other
+    # bar was stable to two decimals over the same runs, which is what identifies the shove as the
+    # variable. --phys-shove hands PropManager.ServerNudgeLoose a number this file chooses.
+    #
+    # 2.8 m/s is under P2's 3.0 bar on purpose: a fixture that had to be CLAMPED to be staged
+    # would be measuring the clamp. The can's 1.0 m/s is the packet's own wording -- "a can nudged
+    # at 1 m/s on the floor travels at least 1 m".
+    [double]$RowShoveMps = 2.8,
+    [double]$CanShoveMps = 1.0,
+    # On the SERVER's clock (the same one --seed-props-drop uses), which leads every bot's by the
+    # connect delay. Nothing below correlates the two: see bar (1).
+    [double]$RowShoveAtSec = 40,
+    [double]$CanShoveAtSec = 48,
+    # How long the row must stand still before the suite strikes it, in the BOT's own clock. The
+    # packet asks for thirty seconds; the schedule above buys between twenty-five and thirty-five
+    # depending on how long the bots take to connect, and this is the floor under that.
+    [double]$UntouchedBarSec = 15,
     [int]$MaxClampLines = 10,
     # Twice the bar: past this a clamp is catching a solver explosion, not trimming an excursion.
     [double]$MaxTrimFromMps = 6.0,
@@ -70,10 +98,22 @@ $BoxPitch = 0.21
 $BoxX0 = 42.30
 $BoxIds = 1..5                 # --seed-test-props assigns ids from 1 in seed order
 $RollCanId = 6
-$TailCanId = 7          # the can TailBot carries; not part of the fixture bars
+$ShovedBoxId = 1               # the head of the row: the one prop the SUITE moves
 
-# THE ROW STANDS ON THE FLOOR AND THE MOVER IS THE PLAYER'S OWN BODY, and getting here took
-# three runs, each of which measured why the previous fixture could not work.
+# THE ROW STANDS ON THE FLOOR AND THE MOVER IS A SHOVE THIS FILE CHOOSES (PHYS-2). The history
+# below is PHYS-1's and is kept because each line of it is a fixture that was tried and measured;
+# what changed is only the last step. A bot walking into the row was the third mover tried, it
+# worked, and then it turned out not to be REPEATABLE (see $RowShoveMps above). The row and the
+# can are now struck by --phys-shove at a fixed speed, and PhysBot's carry stays in the run for
+# bars (1) and (6) -- it stands beside its crate 6 m west of the row and never reaches it.
+#
+# What the suite gives up by doing this, stated rather than smuggled: the HELD-CRATE and AVATAR
+# arms of P1's wake no longer appear in these bars. They are covered by PropPhysicsTests branch
+# by branch, and PHYS-1's runs 4-7 measured both live (4/5 and 5/5 with the bot's own capsule,
+# recorded in its handoff §6). What these bars now measure is the part that was never repeatable:
+# a known shove in, a five-box chain and a rolling can out.
+#
+# The three earlier fixtures, each of which measured why it could not work:
 #
 #  run 1/2  Row on the floor, knocked by the CARRIED CRATE. It never touched them: FEEL-1 holds a
 #           prop on the VIEW RAY and a bot has no pitch, so a carried crate rides at y 0.45-0.89
@@ -85,11 +125,15 @@ $TailCanId = 7          # the can TailBot carries; not part of the fixture bars
 #           with nothing under it cannot domino: a box knocked off a shelf falls straight down
 #           instead of toppling into its neighbour.
 #
+#  runs 4-7 Row on the floor, knocked by the BOT'S OWN CAPSULE walking through it. This works --
+#           4/5 and 5/5 measured, on the holder's view and a witness's -- and it is not
+#           repeatable: see $RowShoveMps. The capsule is still the honest player-side mover and
+#           its evidence is PHYS-1's, not this file's, any more.
+#
 # A domino chain needs the row to stand ON something, so the first box goes OVER and its top
-# strikes the next. That is the floor, and the thing that can reach a row on the floor is the
-# avatar's own capsule -- which is P1's third mover and is exactly how a player knocks a low
-# shelf over in this game. The bot walks its own walkway straight through the row carrying its
-# crate; the crate is still in the run for bars 1 and 6.
+# strikes the next. That is the floor. The head of the row is now shoved east along it at a fixed
+# speed, and every box after it is woken by the SHIPPED contact path (P1) exactly as a player's
+# shove would wake it -- which is why the `[phys] wake` count is still the evidence that P1 ran.
 $RowY = 0.14                  # a cereal box's half-height: standing on the floor
 $CratePropPath = "SearchRoom/Prop_2"    # CARRY-1's crate at world (36, 0.22, -2)
 $RowZ = -2.0
@@ -101,10 +145,10 @@ $RowZ = -2.0
 # Starting at 42.30 puts the whole fixture past the spawn (capsule radius ~0.36 m reaches 41.86),
 # so the outbound leg never sees it and the return leg walks the length of it.
 $CanY = 0.06                  # a can's half-height, on its end
+# At the east end of the bays (they span x 35.4-44.6), shoved EAST into the open cross-aisle. The
+# floor bin at x = 46.4 is 1.8 m away, which is past where a can nudged at 1 m/s can reach and is
+# also a backstop if it is not: a can that stops against the bin is still inside the net-4 m bar.
 $CanX = 44.60
-# TailBot's own can, in the OPEN CROSS-AISLE east of the bays (they span x 35.4-44.6), which is
-# the only place a second bot can legally enter the z = -2 walkway from the far end.
-$TailCanX = 45.50
 
 # The search room is the supermarket seam's +40 x block. Anything outside this envelope has left
 # the room, which is the "cannot clip through walls or the floor" half of the bar.
@@ -118,8 +162,11 @@ for ($i = 0; $i -lt 5; $i++) {
     $seed += "$x,$RowY,$RowZ,box"
 }
 $seed += "$CanX,$CanY,$RowZ,can"
-$seed += "$TailCanX,$CanY,$RowZ,can"
 $seedArg = ($seed -join ";")
+
+# The two events this run stages, as numbers rather than as a bot's walk. Both are EAST (+x):
+# the row's head into the rest of the row, and the can down the open cross-aisle.
+$shoveArg = "$ShovedBoxId,$RowShoveMps,0,0,$RowShoveAtSec;$RollCanId,$CanShoveMps,0,0,$CanShoveAtSec"
 
 Write-Host "=== physics feel: dominoes fall, cans roll, nothing freaks out ===" -ForegroundColor White
 if (-not $SkipBuild) {
@@ -135,16 +182,18 @@ try {
     $serverOut = Join-Path $script:LogDir "physfeel.server.out.log"
     $server = Start-Godot @("--server", "--port", $Port, "--world", "supermarket",
         "--spawn-room", "search",
-        "--spawn-index", "PhysBot=3,TailBot=1,WitnessBot=2",
-        "--seed-test-props", $seedArg) "physfeel.server"
+        "--spawn-index", "PhysBot=3,WitnessBot=2",
+        "--seed-test-props", $seedArg,
+        "--phys-shove", $shoveArg) "physfeel.server"
     $procs += $server
     if (-not (Wait-ForLogLine $serverOut "\[server\] listening" 40)) {
         Write-Fail "server never reported listening on udp/$Port; see $serverOut"
     }
-    if (-not (Wait-ForLogLine $serverOut "seed-test-props: seeded 7 test prop" 20)) {
-        Write-Fail "the server did not seed all seven fixture props; see $serverOut"
+    if (-not (Wait-ForLogLine $serverOut "seed-test-props: seeded 6 test prop" 20)) {
+        Write-Fail "the server did not seed all six fixture props; see $serverOut"
     }
     Write-Host "        server up (pid $($server.Id)), row at x=$BoxX0..$([math]::Round($BoxX0 + 4 * $BoxPitch,2)) z=$RowZ y=$RowY, can at x=$CanX"
+    Write-Host "        the shove is this suite's: row head prop $ShovedBoxId at $RowShoveMps m/s (t=$RowShoveAtSec s), can prop $RollCanId at $CanShoveMps m/s (t=$CanShoveAtSec s), server clock"
 
     $CrateProp = Get-AuthoredPropId $serverOut $CratePropPath
     Write-Host "        the carried crate is authored prop $CrateProp (from the server's adoption log)"
@@ -158,44 +207,29 @@ try {
     # terrible place to stage a measurement about something else. Nothing stands between x = 36
     # and x = 45 at z = -2: the floor bins are at world x 33.6 / 46.4.
     #
-    # PhysBot: walk to CARRY-1's crate at (36, 0.22, -2) and then STAND THERE FOR TWENTY SECONDS
-    # before grabbing it, which is how bar (1) gets a real untouched window. The packet asks for
-    # thirty seconds of a row standing still; twenty is what fits beside the event in one run,
-    # and the measurement is the same measurement.
+    # PhysBot: walk to CARRY-1's crate at (36, 0.22, -2), grab it at t = 20 and STAY THERE. It is
+    # no longer the mover (PHYS-2): it carries the crate for bar (6)'s throw and its samples are
+    # the holder's view of everything else. It has no --carry-walk-to at all, so it never leaves
+    # x = 36 -- six metres west of the row's head at 42.30 -- and cannot touch the fixture with
+    # its own capsule. That separation is the point: the only thing that moves the row is the
+    # number this file chose.
     #
-    # Then it walks STRAIGHT down its own z = 0 walkway through the row and past the can (HOLD-1's
-    # rule: one point, one straight line, never diagonally). It never voluntarily drops (-1) and
-    # throws the crate 30 s after the grab, by which time the walk is long finished and everything
-    # it knocked over has had time to settle -- that throw is bar (6).
+    # It never voluntarily drops (-1) and throws the crate 30 s after the grab, east down the
+    # empty aisle, which is bar (6).
     $physLog = Join-Path $script:LogDir "physfeel.phys.jsonl"
     $physBot = Start-Godot @("--bot", "--address", "127.0.0.1:$Port", "--name", "PhysBot",
         "--log", $physLog, "--duration", $DurationSec, "--world", "supermarket",
         "--carry-script", "36,0.22,-2,20.0,-1,30", "--carry-grab-retry", "0.6",
-        "--carry-target-prop", $CrateProp,
-        "--carry-walk-to", "45.2,-2") "physfeel.phys"
+        "--carry-target-prop", $CrateProp) "physfeel.phys"
     $procs += $physBot
     Start-Sleep -Milliseconds 400
 
-    # TailBot: THE SECOND MOVER, and the row needs one. Measured over four runs: a body walking
-    # into a row knocks the first three or four boxes and then bogs down in the debris it has
-    # just made (3/5, 4/5, 4/5, 3/5) -- a CharacterBody3D cannot push a RigidBody3D, so once a
-    # fallen box is under its feet it stops advancing. That is honest behaviour and it is not a
-    # five-box row.
-    #
-    # It enters the z = -2 walkway from the FAR END, which is the only legal way in: the bays
-    # span x 35.4-44.6, so (45.5, -2) is open cross-aisle. It stands by its own can until t = 22
-    # -- after PhysBot's grab at 20, so bar (1)'s window is untouched -- then carries it WEST
-    # through the tail of the row and the rolling can, arriving within a second of PhysBot's
-    # crate reaching the head. Two movers, one event, and the domino window still means what it
-    # says.
-    $tailLog = Join-Path $script:LogDir "physfeel.tail.jsonl"
-    $tailBot = Start-Godot @("--bot", "--address", "127.0.0.1:$Port", "--name", "TailBot",
-        "--log", $tailLog, "--duration", $DurationSec, "--world", "supermarket",
-        "--carry-script", "$TailCanX,$CanY,$RowZ,22.0,-1", "--carry-grab-retry", "0.6",
-        "--carry-target-prop", $TailCanId,
-        "--carry-walk-to", "42.0,$RowZ") "physfeel.tail"
-    $procs += $tailBot
-    Start-Sleep -Milliseconds 400
+    # TailBot IS GONE (PHYS-2). It existed as a SECOND MOVER, because a body walking into the row
+    # knocked three or four boxes and then bogged down in the debris it had just made (3/5, 4/5,
+    # 4/5, 3/5 measured) -- a CharacterBody3D cannot push a RigidBody3D, so a fallen box under its
+    # feet stops it advancing. With the shove chosen by this file the row has one clean mover and
+    # needs no second bot, which also takes a Godot launch off a contended machine and removes the
+    # can this suite used to have to keep out of its own bars.
 
     # WitnessBot: holds nothing, touches nothing, stands at the far spawn. It is the peer that
     # proves the dominoes REPLICATED -- P1 wakes props on the server alone, and a stack that fell
@@ -208,7 +242,6 @@ try {
 
     $bots = @(
         @{ Name = "PhysBot"; Proc = $physBot; JsonLog = $physLog }
-        @{ Name = "TailBot"; Proc = $tailBot; JsonLog = $tailLog }
         @{ Name = "WitnessBot"; Proc = $witBot; JsonLog = $witLog }
     )
     $deadline = (Get-Date).AddSeconds($DurationSec + 90)
@@ -284,27 +317,50 @@ if ($heldEver.Count -eq 0) {
         "four-corridor mis-walk. Nothing below is about physics. See $serverOut")
 }
 
-# --- bar (1): untouched is untouched ------------------------------------------------------
-# THE WINDOW IS EVERYTHING BEFORE THE GRAB, and that choice is load-bearing. The obvious window
-# -- "before the holder came within 2 m of the row" -- is WRONG here, because CARRY-1's authored
-# crate Prop_3 stands at (38, 0.22, 0), squarely in this walkway: the held crate knocks THAT one
-# awake first, and a 1 kg crate shoved down the aisle can reach the row before its holder does.
-# That is P1 working, and a bar that called it a failure would be measuring the fixture.
-#
-# Before the grab nothing in the room has been touched by anything at all, so the window is
-# honest AND it is long: the bot stands beside its crate for twenty seconds first.
-$arriveT = [double]::PositiveInfinity
-foreach ($s in $physSamples) {
-    if ([int]$s.heldPropId -gt 0) { $arriveT = [double]$s.t / 1000.0; break }
+# --- STAGING, second half: the shove actually fired --------------------------------------
+# A --phys-shove entry that names a prop id nothing seeded is a silent no-op, and every bar below
+# would then read as "the physics did not work" about a command line that never asked it to. The
+# server prints one line per shove it spends, so that is what is checked, and it is checked before
+# anything is judged.
+$shoveLines = @($serverText | Select-String -Pattern "^\[phys\] shove ")
+if ($shoveLines.Count -lt 2) {
+    Write-Fail ("STAGING: the server logged $($shoveLines.Count) [phys] shove line(s), expected 2 " +
+        "(the row's head and the can). Nothing below is about physics -- the fixture never fired. " +
+        "See $serverOut")
 }
-if ([double]::IsInfinity($arriveT)) {
-    $failures.Add("PhysBot never grabbed the crate -- bars 2-5 were never staged")
-    $arriveT = 0.0
+foreach ($l in $shoveLines) { Write-Host "        $l" -ForegroundColor DarkGray }
+
+# --- bar (1): untouched is untouched ------------------------------------------------------
+# THE WINDOW ENDS WHEN THE SHOVED BOX FIRST MOVES, AND IT IS READ OFF THE PROPS THEMSELVES.
+# The server's shove clock and a bot's own clock are different clocks separated by the connect
+# delay, and nothing in these logs correlates them -- so a window typed in server seconds would
+# be a guess about how long the bots took to join. The head of the row is the one prop this file
+# moves deliberately, so the first sample in which it has left its seeded pose IS the moment the
+# fixture was struck, measured in the same clock as everything else.
+#
+# What the bar then says is the honest one: for that whole window, NOTHING ELSE moved. The other
+# four boxes and the can are props nothing has touched at all, and a wake storm, a solver drift or
+# an early contact would show up in them. (Measuring the shoved box against itself would be
+# circular, which is why it is excluded.)
+$shovedRows = @(Get-PropRows $physSamples $ShovedBoxId)
+if ($shovedRows.Count -lt 2) {
+    Write-Fail "STAGING: the holder never sampled prop $ShovedBoxId, the head of the row; see $physLog"
+}
+$struckT = [double]::PositiveInfinity
+$sx0 = $shovedRows[0].X; $sy0 = $shovedRows[0].Y; $sz0 = $shovedRows[0].Z
+foreach ($r in $shovedRows) {
+    $d = [math]::Sqrt([math]::Pow($r.X - $sx0, 2) + [math]::Pow($r.Y - $sy0, 2) + [math]::Pow($r.Z - $sz0, 2))
+    if ($d -gt 0.01) { $struckT = $r.T; break }
+}
+if ([double]::IsInfinity($struckT)) {
+    $failures.Add("the head of the row never moved on the holder's view -- the shove was logged and nothing came of it")
+    $struckT = 0.0
 }
 
 $restWorst = 0.0
 foreach ($id in ($BoxIds + $RollCanId)) {
-    $rows = @(Get-PropRows $physSamples $id | Where-Object { $_.T -lt $arriveT })
+    if ($id -eq $ShovedBoxId) { continue }
+    $rows = @(Get-PropRows $physSamples $id | Where-Object { $_.T -lt $struckT })
     if ($rows.Count -lt 2) { continue }
     $x0 = $rows[0].X; $y0 = $rows[0].Y; $z0 = $rows[0].Z
     foreach ($r in $rows) {
@@ -312,12 +368,15 @@ foreach ($id in ($BoxIds + $RollCanId)) {
         if ($d -gt $restWorst) { $restWorst = $d }
     }
 }
-Write-Host ("        untouched: worst movement {0:F4} m over the {1:F1} s before the grab" -f $restWorst, $arriveT) -ForegroundColor DarkGray
+Write-Host ("        untouched: worst movement {0:F4} m by the five props nothing touched, over the {1:F1} s before the row was struck" -f $restWorst, $struckT) -ForegroundColor DarkGray
 # This IS the "no wake storm at rest" bar. A [phys] wake line carries no timestamp, so counting
-# those lines could never tell a wake before the crate arrived from one after it; the props'
-# own positions over a window derived from the run can, and do.
+# those lines could never tell a wake before the shove from one after it; the props' own positions
+# over a window derived from the run can, and do.
 if ($restWorst -gt 0.01) {
     $failures.Add(("a seeded prop moved {0:F3} m before anything touched it (bar 0.01) -- a stack that drifts at rest is not a stack" -f $restWorst))
+}
+if ($struckT -lt $UntouchedBarSec) {
+    $failures.Add(("the row stood untouched for only {0:F1} s (bar {1:F1} s) -- something reached it before the suite's own shove did" -f $struckT, $UntouchedBarSec))
 }
 
 
@@ -514,8 +573,9 @@ if ($escapes.Count -gt 0) {
 
 # Machine-readable evidence for the handoff and for whoever reads this next, printed
 # unconditionally so a green run still hands over its numbers (FEEL-1's LAGTABLE pattern).
-Write-Host ("PHYS1BARS restWorst={0:F4} fastestUnheldHoriz={1:F2} clamps={2} restores={3} wakes={4} waits={5} jumps={6}" -f `
-    $restWorst, $fastest, $clampLines.Count, $restoreLines.Count, $wakeLines.Count, $waitLines.Count, $teleports.Count)
+Write-Host ("PHYS1BARS restWorst={0:F4} untouchedSec={7:F1} shoveMps={8:F2} fastestUnheldHoriz={1:F2} clamps={2} restores={3} wakes={4} waits={5} jumps={6}" -f `
+    $restWorst, $fastest, $clampLines.Count, $restoreLines.Count, $wakeLines.Count, $waitLines.Count, $teleports.Count, `
+    $struckT, $RowShoveMps)
 
 Write-Host "[4/4] verdict" -ForegroundColor Cyan
 Write-Host ""

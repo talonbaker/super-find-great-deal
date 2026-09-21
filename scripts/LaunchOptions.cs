@@ -457,6 +457,36 @@ public sealed class LaunchOptions
     /// default) = never, so every suite written before SFX-1 is unaffected.</summary>
     public double SeedPropsDropAtSec { get; private set; } = -1;
 
+    /// <summary>
+    /// <c>--phys-shove "propId,vx,vy,vz,atSec[;propId,vx,vy,vz,atSec...]"</c>: server-only,
+    /// test-only. <b>A shove the SUITE chooses</b> (PHYS-2, 2026-09-20). That many seconds into
+    /// the session, put prop <c>propId</c> into Loose with velocity <c>(vx, vy, vz)</c> through
+    /// REACH-1's existing <c>PropManager.ServerNudgeLoose</c> — the same registry transition, the
+    /// same broadcast, no second physics path.
+    ///
+    /// <para><b>Why it exists, measured.</b> <c>Run-PhysicsFeelTest</c> staged its domino row by
+    /// walking a bot into it, and PHYS-1 measured the bot delivering peak shoves of <b>0.66, 0.70,
+    /// 0.89, 1.18, 2.88 and 3.30 m/s</b> into that fixture across six runs of ONE build, because
+    /// the debris it had just made perturbed its own walk. The length of the chain and the can's
+    /// roll distance were therefore measuring the bot's approach, not the physics: the same build
+    /// produced 2/5, 3/5, 4/5 and 5/5. The packet's own wording asks for a known impulse — "a can
+    /// nudged at 1 m/s" is a claim about a NUMBER — and a fixture cannot make that claim while a
+    /// walking bot chooses the number.</para>
+    ///
+    /// <para><b>A VELOCITY, not an impulse</b>, because that is what <c>ServerNudgeLoose</c>
+    /// takes and what makes the fixture repeatable across prop masses: "the can leaves at 1 m/s"
+    /// is the bar, and it stays 1 m/s if a later packet re-authors the can's mass. The wake
+    /// impulse that P1's contact path computes is untouched by this flag — this is how the FIRST
+    /// body starts moving, and every prop it goes on to knock over is woken by the shipped
+    /// contact path exactly as it would be by a player.</para>
+    ///
+    /// <para>An entry with a malformed number or fewer than five fields is DROPPED, by
+    /// <c>--seed-test-props</c>' own rule: a shove silently defaulted to zero is a fixture that
+    /// stages nothing, and the suite would then report a physics failure about its own
+    /// arguments.</para></summary>
+    public IReadOnlyList<(int PropId, Vector3 Velocity, double AtSec)> PhysShoves => _physShoves;
+    private readonly List<(int PropId, Vector3 Velocity, double AtSec)> _physShoves = new();
+
     /// <summary>--log-sfx: print one <c>[sfx] sfx &lt;name&gt; event=... intensity=... at (...)</c>
     /// line per sound <c>ActorFx</c> actually plays, plus one
     /// <c>[sfx] SUMMARY fires=... peakLive3DVoices=... oneShotSteals=...</c> line when a bot
@@ -1526,6 +1556,30 @@ public sealed class LaunchOptions
                     if (double.TryParse(Next(args, ref i), NumberStyles.Float, CultureInfo.InvariantCulture, out double dropAt))
                         options.SeedPropsDropAtSec = dropAt;
                     break;
+                case "--phys-shove":
+                {
+                    // "propId,vx,vy,vz,atSec[;...]" -- one shove per entry. A malformed entry is
+                    // DROPPED rather than defaulted, exactly as --seed-test-props drops a
+                    // malformed triple and for the same reason: a shove of (0,0,0) at t=0 is a
+                    // fixture that stages nothing, and the suite would go on to report a physics
+                    // failure about its own command line.
+                    foreach (string entry in Next(args, ref i).Split(';'))
+                    {
+                        string[] parts = entry.Split(',');
+                        if (parts.Length < 5
+                            || !int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out int shoveId)
+                            || !double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out double svx)
+                            || !double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out double svy)
+                            || !double.TryParse(parts[3], NumberStyles.Float, CultureInfo.InvariantCulture, out double svz)
+                            || !double.TryParse(parts[4], NumberStyles.Float, CultureInfo.InvariantCulture, out double shoveAt))
+                        {
+                            continue;
+                        }
+                        options._physShoves.Add((shoveId,
+                            new Vector3((float)svx, (float)svy, (float)svz), shoveAt));
+                    }
+                    break;
+                }
                 case "--log-sfx":
                     options.LogSfx = true;
                     break;
