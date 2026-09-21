@@ -1004,6 +1004,32 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
         RpcId(1, MethodName.RequestDrop);
     }
 
+    /// <summary>
+    /// Networked client: <b>let go of what this peer is holding, exactly where it is</b>, at rest
+    /// (FEEL-1, 2026-09-20). The hold-break path and nothing else.
+    ///
+    /// <para><b>Why it is neither of the two verbs that already exist.</b> A PLACE can be refused
+    /// — the prop is wedged in whatever stopped it, so placement integrity answers
+    /// <c>Overlapping</c> — which would leave the player holding something the game has decided
+    /// they have lost, and would spend the refusal channel the HUD and three suites read on an
+    /// event nobody asked for. A DROP cannot be refused but applies a toss arc off the holder's
+    /// facing (<see cref="DropForwardSpeed"/> / <see cref="DropUpSpeed"/>), which would FLING the
+    /// object the world just took off you. Where it is, at rest, is the honest outcome: the world
+    /// has it now, and physics takes it from there.</para>
+    ///
+    /// <para><b>A new method, not a changed one</b>, so no <c>ProtocolVersion</c> bump: no
+    /// existing message shape moves and no argument count changes. It rides the same reliable
+    /// channel as the other carry verbs, and a peer of a different build never reaches it —
+    /// mixed versions are refused at the handshake, which is what that gate is for.</para>
+    /// </summary>
+    public void ClientRequestReleaseInPlace()
+    {
+        // Counted as a drop, like a place is: the telemetry column has always meant "the player
+        // stopped carrying something".
+        Telemetry.Telemetry.Instance?.NotePropDropped();
+        RpcId(1, MethodName.RequestReleaseInPlace);
+    }
+
     /// <summary>Networked client: ask the server to throw whatever this peer holds. No local
     /// effect until the server confirms with <see cref="ApplyPropState"/> — throw is
     /// server-confirmed, not predicted, consistent with grab and drop.</summary>
@@ -1155,6 +1181,23 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
     /// tumbles and settles like the offline path and the server's loose loop (see
     /// _PhysicsProcess) latches it to Resting once it stops moving. No-op if the hand is
     /// empty.</summary>
+    /// <summary>Client -> server: release the sender's held prop where it is, at rest. See
+    /// <see cref="ClientRequestReleaseInPlace"/> for why this is not the drop verb. Same sender
+    /// validation and the same <see cref="ControlDenied"/> gate as every other carry verb.</summary>
+    [Rpc(MultiplayerApi.RpcMode.AnyPeer, TransferMode = MultiplayerPeer.TransferModeEnum.Reliable)]
+    private void RequestReleaseInPlace()
+    {
+        if (!_isServer)
+            return;
+        int peer = Multiplayer.GetRemoteSenderId();
+        if (peer <= 0 || ControlDenied(peer))
+            return;
+        // Zero forward, zero up: Loose exactly where the body already is. PropRelease.Dropped is
+        // the verb on the wire -- the sound a released object makes is the same one whether the
+        // player let go or the world took it, and there is no fifth ordinal worth spending.
+        ReleaseHeldInto(peer, 0f, 0f, PropRelease.Dropped);
+    }
+
     [Rpc(MultiplayerApi.RpcMode.AnyPeer, TransferMode = MultiplayerPeer.TransferModeEnum.Reliable)]
     private void RequestDrop()
     {

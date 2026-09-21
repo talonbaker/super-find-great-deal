@@ -294,9 +294,64 @@ public static class CarryHold
     // ------------------------------------------------------------------------------- the break
 
     /// <summary>How long the prop has been held off its target, after this tick: the clock runs
-    /// while the gap is past <see cref="BreakHoldM"/> and resets the instant it catches up.</summary>
+    /// while the gap is past <see cref="BreakHoldM"/> and resets the instant it catches up.
+    ///
+    /// <para>Superseded by <see cref="StepBlocked"/> for the live carry, which adds the half this
+    /// one cannot see — whether the prop is STUCK or merely scraping past. Kept because it is the
+    /// honest statement of the simple rule and the unit suite pins both.</para></summary>
     public static float StepBlockedSeconds(float blockedSec, float blockedM, float dt) =>
         blockedM > BreakHoldM ? blockedSec + dt : 0f;
+
+    /// <summary>What counts as the prop WORKING ITSELF FREE rather than jittering in place,
+    /// metres. Below this a change in the gap is solver noise and the clock keeps running; at or
+    /// above it the prop has made real progress and the clock starts again.
+    ///
+    /// <para>2 cm, which is <c>PlacementIntegrity.DefaultOverlapToleranceM</c> — the same figure
+    /// this game already uses for "near enough to be the same place" — rather than a second
+    /// opinion about what a small distance is.</para></summary>
+    public const float BlockedProgressM = 0.02f;
+
+    /// <summary>The break clock, and the best (smallest) gap seen so far in this blocked episode.
+    /// A value type, so a caller keeps one field and no more.</summary>
+    public readonly record struct BlockedClock(float Seconds, float BestBlockedM)
+    {
+        /// <summary>A clock that has never run. <c>BestBlockedM</c> starts at infinity so the
+        /// first blocked tick of an episode always records its own gap as the best.</summary>
+        public BlockedClock() : this(0f, float.PositiveInfinity) { }
+    }
+
+    /// <summary>
+    /// <b>One tick of the break clock.</b> It runs only while the prop is STUCK — the world is in
+    /// the way, the gap is past <see cref="BreakHoldM"/>, and the gap is <b>not closing</b>.
+    ///
+    /// <para><b>The ruling this implements (2026-09-20).</b> The break rule exists for a prop that
+    /// is stuck, not one that is dragging along shelving and still clearing. Measured on
+    /// <c>Run-PlaceTest</c>'s bot D: an eleven-metre walk down a dressed walkway with a crate
+    /// brushes floor bins and pallet stacks the whole way, and under a plain elapsed-time clock
+    /// the hold was given up mid-journey (<c>blocked=1.83m for 0.82s</c>) — costing the player the
+    /// object for doing the most ordinary thing in the game. That walk is the first thing a human
+    /// will do with this carry, so the rule had to learn the difference rather than the suite
+    /// learning to avoid it.</para>
+    ///
+    /// <para><b>"Not closing" is measured against the BEST gap of the episode, not the previous
+    /// tick.</b> A tick-to-tick comparison reads solver jitter as progress and a genuinely wedged
+    /// prop would never break; carrying the episode's minimum means only real progress — at least
+    /// <see cref="BlockedProgressM"/> — restarts the clock, and a prop that oscillates in place
+    /// still runs out of time.</para>
+    /// </summary>
+    public static BlockedClock StepBlocked(BlockedClock clock, float blockedM, bool worldInTheWay, float dt)
+    {
+        if (!worldInTheWay || blockedM <= BreakHoldM)
+            return new BlockedClock();
+        // The FIRST blocked tick of an episode counts: there is no previous best to have made
+        // progress against, and a rule that spent its first tick recording rather than counting
+        // would under-report every episode by one tick.
+        if (float.IsInfinity(clock.BestBlockedM))
+            return new BlockedClock(dt, blockedM);
+        if (blockedM <= clock.BestBlockedM - BlockedProgressM)
+            return new BlockedClock(0f, blockedM);   // it is working itself free
+        return new BlockedClock(clock.Seconds + dt, Mathf.Min(clock.BestBlockedM, blockedM));
+    }
 
     /// <summary>Has the world held this prop off its target far enough, for long enough, that
     /// the holder has lost it?</summary>

@@ -94,7 +94,7 @@ public partial class NetworkedProp : Node3D
     private float _holdDistanceM;        // along the view ray, in [_holdMinM, _holdMaxM]
     private float _holdMinM;             // derived from this prop's bulk and this holder's capsule
     private float _holdMaxM;
-    private float _blockedSec;           // how long the world has held it off its target
+    private CarryHold.BlockedClock _blocked; // how long the world has had it STUCK (not merely scraping)
 
     /// <summary>How far a full-heft item sags below the hand anchor, metres — the feel system's
     /// own <c>Interactor.CarryDroop</c> default. Here rather than on <see cref="CarrySpring"/>
@@ -211,7 +211,7 @@ public partial class NetworkedProp : Node3D
         _holdLocalToHolder = _holder != null && IsInstanceValid(_holder)
             ? _holder.GlobalTransform.AffineInverse() * propAtGrab
             : Transform3D.Identity;
-        _blockedSec = 0f;
+        _blocked = new CarryHold.BlockedClock();
         // Freeze, drop the collision LAYER, keep the world MASK, pop and cue — everything about a
         // pickup except moving the prop. Nothing snaps: see Carryable.OnPickedUpBySpring.
         Body.OnPickedUpBySpring();
@@ -428,7 +428,7 @@ public partial class NetworkedProp : Node3D
             return;
         _spring = null;
         _holder = null;
-        _blockedSec = 0f;
+        _blocked = new CarryHold.BlockedClock();
         Body.ReleaseHoldForNetworkFollow();
     }
 
@@ -684,7 +684,7 @@ public partial class NetworkedProp : Node3D
             // spring again from there; easing would drag the prop across the level.
             _springPos = target;
             _springVel = Vector3.Zero;
-            _blockedSec = 0f;
+            _blocked = new CarryHold.BlockedClock();
             Body.GlobalTransform = new Transform3D(pose, target);
             return;
         }
@@ -713,8 +713,8 @@ public partial class NetworkedProp : Node3D
         // touching the prop at all.
         float blocked = final.DistanceTo(target);
         bool worldIsInTheWay = swept.DistanceSquaredTo(resolved) > 1e-8f;
-        _blockedSec = CarryHold.StepBlockedSeconds(_blockedSec, worldIsInTheWay ? blocked : 0f, dt);
-        if (CarryHold.ShouldBreakHold(blocked, _blockedSec)
+        _blocked = CarryHold.StepBlocked(_blocked, blocked, worldIsInTheWay, dt);
+        if (CarryHold.ShouldBreakHold(blocked, _blocked.Seconds)
             && _holder.OwnerPeerId == Multiplayer.GetUniqueId()
             && PropManager.Instance is { } mgr)
         {
@@ -729,9 +729,13 @@ public partial class NetworkedProp : Node3D
             // own scripted place expected 5). A drop cannot be refused, which is the right
             // property for a transition the WORLD forced: an object torn out of your hands is a
             // drop, not a careful set-down, and the physics that torn it out takes it from here.
-            GD.Print($"[carry] hold broken prop={PropId} blocked={blocked:F2}m for {_blockedSec:F2}s");
-            _blockedSec = 0f;
-            mgr.ClientRequestDrop();
+            GD.Print($"[carry] hold broken prop={PropId} blocked={blocked:F2}m for {_blocked.Seconds:F2}s");
+            _blocked = new CarryHold.BlockedClock();
+            // RELEASE IN PLACE, not a drop and not a place. A place can be refused (the prop is
+            // wedged in whatever stopped it) and a drop applies a toss arc off the holder's
+            // facing -- which would fling the object the world just took off you. Where it is,
+            // at rest, is the honest outcome: the world has it now.
+            mgr.ClientRequestReleaseInPlace();
         }
     }
 
@@ -798,6 +802,33 @@ public partial class NetworkedProp : Node3D
             ? from + result.GetTravel()
             : to;
     }
+
+    // SWEEP-AND-SLIDE WAS TRIED HERE AND REVERTED (FEEL-1, 2026-09-20), and it is worth knowing
+    // why before anyone tries it again. The idea is sound and it is what a CharacterBody3D does
+    // for the player's own body: when the sweep is blocked, redirect the remainder along the
+    // contact face so a carried crate drags past a corner instead of jamming on it.
+    //
+    // MEASURED THREE WAYS, and every one costs the guarantee this whole packet is about.
+    // Run-CarryHoldTest's shelf penetration is 0.001 m without it, against a 0.02 m bar:
+    //   two slide iterations, default margin  -> 0.065 m
+    //   the same, margin raised to the game's own overlap tolerance (0.02 m) -> 0.065 m, unmoved
+    //   ONE slide iteration with RecoveryAsCollision TRUE on it (so depenetration counts as a
+    //     collision and the body cannot creep along the face) -> 0.058 m
+    //
+    // The third result is the one that names the cause. If the creep were the solver pushing the
+    // body along a face, counting recovery would have stopped it; it did not. The ROTATION is
+    // written before the sweep and is never itself swept, so sliding sideways moves the box to a
+    // place where its NEW orientation is already inside the pillar, and a translation test has
+    // nothing to say about that. Lateral compliance over an unswept rotation is compliance in the
+    // wrong dimension.
+    //
+    // And it did not even buy what it was for: bot D still wedged (blocked 1.20 m against 1.83 m
+    // before, still zero progress for 0.82 s), so Run-PlaceTest went from 2/3 to 0/3.
+    //
+    // THE NEXT ATTEMPT SHOULD SWEEP THE ROTATION FIRST -- test the pose change as its own motion,
+    // or refuse a rotation that would penetrate and keep last tick's basis -- and only then add
+    // lateral compliance on top. Doing them in that order is the difference between a crate that
+    // drags past a bin and a crate that is half inside one.
 
     /// <summary>
     /// <b>One tick of a held prop on a peer that is not the holder</b> -- and on the server

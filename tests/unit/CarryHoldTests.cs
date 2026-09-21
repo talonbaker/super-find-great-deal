@@ -417,6 +417,94 @@ public class CarryHoldTests
         Assert.True(CarryHold.ShouldBreakHold(CarryHold.BreakHoldM + 0.01f, CarryHold.BreakHoldSec));
     }
 
+    // ------------------------------------- the break clock: STUCK, not merely scraping past
+
+    /// <summary>A prop the world is not touching at all never accumulates, however far behind it
+    /// is — that is a lag, and a lag is the spring's business.</summary>
+    [Fact]
+    public void TheClock_DoesNotRunWhileTheWorldIsNotInTheWay()
+    {
+        var c = new CarryHold.BlockedClock();
+        c = CarryHold.StepBlocked(c, blockedM: 2f, worldInTheWay: false, dt: 0.1f);
+        Near(0f, c.Seconds, 1e-5f);
+    }
+
+    [Fact]
+    public void TheClock_DoesNotRunWhileTheGapIsUnderTheBar()
+    {
+        var c = new CarryHold.BlockedClock();
+        c = CarryHold.StepBlocked(c, CarryHold.BreakHoldM - 0.05f, worldInTheWay: true, dt: 0.1f);
+        Near(0f, c.Seconds, 1e-5f);
+    }
+
+    [Fact]
+    public void TheClock_RunsWhileThePropIsStuckAtTheSameGap()
+    {
+        var c = new CarryHold.BlockedClock();
+        for (int i = 0; i < 5; i++)
+            c = CarryHold.StepBlocked(c, 0.9f, worldInTheWay: true, dt: 0.1f);
+        Near(0.5f, c.Seconds, 1e-5f);
+    }
+
+    /// <summary><b>The ruling.</b> A crate dragging along shelving and still working itself free
+    /// is not stuck: every tick that closes the gap resets the clock, so a long scrape down an
+    /// aisle never costs the player the object.</summary>
+    [Fact]
+    public void AGapThatIsCLOSING_ResetsTheClock()
+    {
+        var c = new CarryHold.BlockedClock();
+        for (int i = 0; i < 5; i++)
+            c = CarryHold.StepBlocked(c, 0.9f, worldInTheWay: true, dt: 0.1f);
+        Assert.True(c.Seconds > 0f, "fixture: the clock should be running before the slide");
+        c = CarryHold.StepBlocked(c, 0.9f - CarryHold.BlockedProgressM * 2f, worldInTheWay: true, dt: 0.1f);
+        Near(0f, c.Seconds, 1e-5f);
+    }
+
+    [Fact]
+    public void AGapThatIsGROWING_KeepsTheClockRunning()
+    {
+        var c = new CarryHold.BlockedClock();
+        c = CarryHold.StepBlocked(c, 0.9f, worldInTheWay: true, dt: 0.1f);
+        c = CarryHold.StepBlocked(c, 1.4f, worldInTheWay: true, dt: 0.1f);
+        Near(0.2f, c.Seconds, 1e-5f);
+    }
+
+    /// <summary>Noise must not read as progress: a jitter smaller than
+    /// <see cref="CarryHold.BlockedProgressM"/> is not the prop sliding free, and a prop that is
+    /// genuinely wedged still breaks.</summary>
+    [Fact]
+    public void JitterUnderTheProgressThreshold_DoesNotResetTheClock()
+    {
+        var c = new CarryHold.BlockedClock();
+        float[] jitter = { 0.90f, 0.895f, 0.90f, 0.895f, 0.90f, 0.895f, 0.90f, 0.895f, 0.90f };
+        foreach (float g in jitter)
+            c = CarryHold.StepBlocked(c, g, worldInTheWay: true, dt: 0.1f);
+        Assert.True(CarryHold.ShouldBreakHold(0.9f, c.Seconds),
+            $"a wedged prop must still break; clock reached {c.Seconds:F2}s");
+    }
+
+    /// <summary>The whole scenario, as arithmetic: eleven metres of aisle in which the crate
+    /// scrapes, works free a little, scrapes again — and is never taken away.</summary>
+    [Fact]
+    public void ALongScrapeDownAnAisle_NeverBreaksTheHold()
+    {
+        var c = new CarryHold.BlockedClock();
+        float gap = 0.9f;
+        for (int i = 0; i < 200; i++)
+        {
+            // Blocked, but working free by 3 cm every fifth tick — the shape of dragging a crate
+            // past a floor bin while you keep walking.
+            // ...and eventually all the way free, which is what a scrape IS. A prop that stops
+            // making progress while still past the bar is STUCK and must still break -- that is
+            // JitterUnderTheProgressThreshold's case, one test up.
+            if (i % 5 == 4)
+                gap = Mathf.Max(0.30f, gap - 0.03f);
+            c = CarryHold.StepBlocked(c, gap, worldInTheWay: true, dt: 1f / 60f);
+            Assert.False(CarryHold.ShouldBreakHold(gap, c.Seconds),
+                $"the hold broke at tick {i} with the gap still closing (clock {c.Seconds:F2}s)");
+        }
+    }
+
     [Fact]
     public void BlockedSeconds_ResetsTheMomentThePropCatchesUp()
     {
