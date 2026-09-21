@@ -34,6 +34,20 @@
          A's nearest and compared. A late joiner that was right once and then drifted would
          pass an assertion about its first line alone.
 
+      4. THE THIRD PLAYER IS TOLD THEY ARE WAITING, AND CANNOT RUN THE ROUND (SOLO-1,
+         2026-09-20). C was already a third body in this suite; what changed is that a third body
+         is no longer a refusal. Its own row must read WAITING -- not the em dash HOLD-1 printed,
+         which says nothing about whether it is in this game -- and its START press must come back
+         refused with NotInThisMatch. Both are asserted on C's own evidence: the row off the
+         label it painted, the refusal off the server's own [buttons] line.
+
+         WHY IT PRESSES FROM A PARKED SPOT. RoundControls checks REACH before it checks the gate
+         (BTN-1's ordering, deliberate), so a bot that wandered off would be refused TooFarAway
+         and this assertion would be about the walk rather than about the rule. C is sent to the
+         START button with --goto-script, exactly as Run-ButtonsTest's own wrong-phase presser is,
+         and presses twice; a run in which every press came back TooFarAway says so in its own
+         words rather than reading as a broken gate.
+
     THE PRONOUN IS THE ONE THING THAT MAY DIFFER, and the comparison normalises it rather than
     ignoring the column. Each client paints its own copy of this wall, so during Holding your own
     row says "NEXT: YOU HIDE" and the other player's copy of your row says "NEXT: HIDES". That is
@@ -198,12 +212,12 @@ try {
     }
     Write-Host "        server up (pid $($server.Id))"
 
-    function Start-BoardBot([string]$Name, [int]$DurationSec) {
+    function Start-BoardBot([string]$Name, [int]$DurationSec, [string[]]$Extra = @()) {
         $out = Join-Path $script:LogDir "holdboard-$Name.out.log"
-        $p = Start-Process -FilePath $script:GodotExe -ArgumentList @(
+        $p = Start-Process -FilePath $script:GodotExe -ArgumentList (@(
             "--headless", "--path", $script:Root, "--",
             "--bot", "--address", "127.0.0.1:$Port", "--name", $Name,
-            "--duration", $DurationSec, "--world", "supermarket", "--log-clock") `
+            "--duration", $DurationSec, "--world", "supermarket", "--log-clock") + $Extra) `
             -RedirectStandardOutput $out `
             -RedirectStandardError (Join-Path $script:LogDir "holdboard-$Name.err.log") `
             -PassThru -NoNewWindow
@@ -233,7 +247,15 @@ try {
                      "NeedTwoPlayers means A and B had not both connected when the script fired.")
         $botC = $null
     } else {
-        $botC = Start-BoardBot "BoardC" $LateBotDurationSec
+        # --goto-script parks C at the START button (the same spot Run-ButtonsTest's wrong-phase
+        # presser uses) and --press fires the SHIPPED verb twice on C's own elapsed clock. Both
+        # numbers are ceilings over C's boot and walk rather than marks it has to hit: the
+        # assertion is that AT LEAST ONE press came back NotInThisMatch, so a slow walk costs a
+        # press and not the run. Neither flag can touch the board -- a refused press changes no
+        # round state at all, which is the point of it.
+        $botC = Start-BoardBot "BoardC" $LateBotDurationSec @(
+            "--goto-script", "1.2,-4.5",
+            "--press", "start@14,start@26")
         $procs += $botC.Proc
         Write-Host "        late joiner launched (pid $($botC.Proc.Id))"
     }
@@ -358,8 +380,71 @@ try {
                      "holdboard-server.out.log for whether the round reached Tally at all.")
     }
 
+    # --- 4. THE THIRD PLAYER IS WAITING, AND SAYS SO ON ITS OWN WALL (SOLO-1) -----------------
+    # Read off the ROW C painted for ITSELF. A row is "NAME . ROLE . SCORE" and C's display name
+    # is its bot name, so this finds its own line without needing its peer id.
+    $cWaiting = 0
+    $cRowsSeen = 0
+    foreach ($s in $bs) {
+        foreach ($row in @($s.Rows)) {
+            if ($row -notmatch '^BoardC') { continue }
+            $cRowsSeen++
+            if ($row -match 'WAITING') { $cWaiting++ }
+        }
+    }
+    if ($cRowsSeen -eq 0) {
+        Add-Failure ("the late joiner never painted a row for itself. Every human on the wire owns " +
+                     "a score row (HideSeekLoop folds one in at zero), so a board with no BoardC " +
+                     "row means the third peer is not on the round message at all.")
+    } elseif ($cWaiting -eq 0) {
+        Add-Failure ("the late joiner painted $cRowsSeen row(s) for itself and not one of them says " +
+                     "WAITING. A third player holds neither role and the cell is the only place " +
+                     "the board answers 'am I in this game'. Sample row: " +
+                     "$(@($bs | ForEach-Object { @($_.Rows) | Where-Object { $_ -match '^BoardC' } }) | Select-Object -First 1)")
+    }
+    # And the two who ARE playing must not read WAITING, or the word means nothing.
+    $playerWaiting = 0
+    foreach ($s in $bs) {
+        foreach ($row in @($s.Rows)) {
+            if ($row -match '^Board[AB]' -and $row -match 'WAITING') { $playerWaiting++ }
+        }
+    }
+    if ($playerWaiting -gt 0) {
+        Add-Failure ("$playerWaiting row(s) belonging to BoardA/BoardB read WAITING -- those two " +
+                     "hold the roles, so the cell is not distinguishing anything")
+    }
+
+    # --- 5. AND IT CANNOT RUN THE ROUND (SOLO-1) -----------------------------------------------
+    $buttonLines = @()
+    foreach ($line in (Get-Content $serverOut)) {
+        if ($line -match '^\[buttons\] press ') { $buttonLines += $line }
+    }
+    foreach ($line in $buttonLines) { Write-Host "        $line" -ForegroundColor DarkGray }
+
+    $notInMatch = @($buttonLines | Where-Object { $_ -match 'refused reason=NotInThisMatch' }).Count
+    $tooFar = @($buttonLines | Where-Object { $_ -match 'refused reason=TooFarAway' }).Count
+    if ($buttonLines.Count -eq 0) {
+        Add-Failure ("the late joiner's START presses never reached the server at all. A press that " +
+                     "is never made is never refused (TASK-1 section 3.3) -- read " +
+                     "holdboard-BoardC.out.log for whether --press fired, before concluding " +
+                     "anything about the gate.")
+    } elseif ($notInMatch -eq 0) {
+        Add-Failure ("none of the late joiner's $($buttonLines.Count) press(es) was refused with " +
+                     "NotInThisMatch ($tooFar came back TooFarAway). TooFarAway on every one of " +
+                     "them is a STAGING failure -- the reach check runs BEFORE the gate, so a bot " +
+                     "that did not finish its walk is answered by the wrong layer; NotInThisMatch " +
+                     "missing with nothing else present is the gate itself.")
+    }
+    if (@($buttonLines | Where-Object { $_ -match 'accepted' }).Count -gt 0) {
+        Add-Failure ("a press from the late joiner was ACCEPTED. A third player is in the room and " +
+                     "not in the match; it must not be able to start, confirm or end anybody " +
+                     "else's round.")
+    }
+
     Write-Host ""
     Write-Host "MEASURED QUANTITIES (compare these across runs, not the verdict):" -ForegroundColor White
+    Write-Host "  late joiner rows reading WAITING: $cWaiting of $cRowsSeen"
+    Write-Host "  its presses refused NotInThisMatch / TooFarAway: $notInMatch / $tooFar"
     Write-Host "  A board samples:                  $($a.Count)"
     Write-Host "  late joiner board samples:        $($bs.Count)"
     Write-Host "  pairs compared / agreed:          $compared / $agreed"
