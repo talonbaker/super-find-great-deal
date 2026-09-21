@@ -566,3 +566,73 @@ public sealed class WanderIntentSource : IIntentSource
         _target = _home + new Vector3(Mathf.Cos(angle) * dist, 0, Mathf.Sin(angle) * dist);
     }
 }
+
+/// <summary>
+/// <b>Walk between two ground points, for ever</b> — <c>--goto-patrol</c>, added by SICK-1
+/// (2026-09-20) because measuring frame pacing needs a body that is still moving thirty seconds
+/// in, and every other scripted brain in this file either stops
+/// (<see cref="ScriptedGotoIntentSource"/> latches on arrival) or has to be holding something
+/// first (<see cref="ScriptedCarryIntentSource"/>'s patrol is inside its hold phase, which is
+/// correct for the carry-drift regression it was built for and wrong here: a held object in the
+/// near field is one of the things under investigation and a measurement rig may not smuggle it
+/// in).
+///
+/// <para><b>It steers off the PREDICTED position and that is allowed</b>, because it takes no
+/// irreversible action at all: it presses nothing, latches nothing and calls back to nothing, so
+/// the worst a mispredicted turn can cost is one tick walked the wrong way, self-corrected on the
+/// next. That is the exact distinction <see cref="ScriptedGotoIntentSource"/>'s own header draws
+/// between itself and the carry source, and the rule it comes from
+/// (<c>.claude/rules/test-suite.md</c>, the arrive-latch lesson, W6-3) is worded as "must not take
+/// an irreversible ACTION on one" rather than "must not move on one".</para>
+///
+/// <para>The turn at each end has <b>no stop tick in it</b> — the goal is swapped and the new
+/// heading returned inside the same call — so a recorded run has no built-in pauses that would
+/// show up in the statistics as frames where the eye did not move. Copied deliberately from
+/// <see cref="ScriptedCarryIntentSource"/>'s patrol, whose own comment says why.</para>
+/// </summary>
+public sealed class ScriptedPatrolIntentSource : IIntentSource
+{
+    /// <summary>Waypoint tolerance, metres. The same 1.5 m <see cref="ScriptedGotoIntentSource"/>
+    /// uses, for the same reason (comfortably larger than one reconciliation's prediction error)
+    /// and restated rather than shared because that one is bounded by what it gates — a one-way
+    /// latch — and this one gates nothing but a change of heading.</summary>
+    private const float ArriveRadius = 1.5f;
+
+    /// <summary>Below this the heading vector is noise and normalising it would spin the body.</summary>
+    private const float StopMoveEpsilon = 0.01f;
+
+    private readonly Node3D _self;
+    private readonly Vector3 _a;
+    private readonly Vector3 _b;
+    private readonly bool _sprint;
+    private bool _toB = true;
+
+    public ScriptedPatrolIntentSource(Node3D self, Vector3 a, Vector3 b, bool sprint)
+    {
+        _self = self;
+        _a = a;
+        _b = b;
+        _sprint = sprint;
+    }
+
+    public MoveIntent NextIntent(double delta)
+    {
+        Vector3 goal = _toB ? _b : _a;
+        Vector3 toGoal = goal - _self.Position;
+        toGoal.Y = 0;
+        if (toGoal.Length() <= ArriveRadius)
+        {
+            _toB = !_toB;
+            goal = _toB ? _b : _a;
+            toGoal = goal - _self.Position;
+            toGoal.Y = 0;
+        }
+        return new MoveIntent
+        {
+            MoveDir = toGoal.LengthSquared() > StopMoveEpsilon * StopMoveEpsilon
+                ? toGoal.Normalized()
+                : Vector3.Zero,
+            Sprint = _sprint,
+        };
+    }
+}
