@@ -637,3 +637,89 @@ public sealed class ScriptedPatrolIntentSource : IIntentSource
         };
     }
 }
+
+/// <summary>
+/// <b>A bot whose LENS aims the game</b> (HANDS-1, 2026-09-20). Forwards every field of the inner
+/// brain's intent and replaces the aim with a real <see cref="ILookAngles"/> rig's — so where the
+/// capture harness is pointing the camera is also where the server rebuilds the aim ray and where
+/// FEEL-1's hold puts the object.
+///
+/// <para><b>Why it has to exist for a hands probe.</b> FP-1's <c>--fp-look</c> aims the LENS, and
+/// the client's own pick (<c>InteractTargeting.Pick</c>) resolves against that lens — but
+/// <c>MoveIntent.AimYaw</c>/<c>AimPitch</c> still come from the brain, and those are what
+/// <c>NetworkedProp.HoldPointNow</c> holds the object along. So a bot with a lens pointed one way
+/// and a brain walking another carries its crate somewhere off screen, which would make every
+/// capture in <c>Run-HandsSmoke</c> a photograph of nothing. Stated rather than smuggled: this is
+/// a latent inconsistency in the bot capture path generally, and this fixes it only where it is
+/// asked for — <c>--fp-look</c>'s behaviour for <c>Run-FirstPersonTest</c> is untouched.</para>
+///
+/// <para><see cref="SuppliesLook"/> is true, so <c>SandboxAvatar.IntentSource</c>'s setter leaves
+/// it alone instead of wrapping it in <see cref="TravelFacingIntentSource"/> — which would fill
+/// the aim from the walk direction and silently delete the whole point of this decorator. Same
+/// seam and the same reason as <c>HoldStressIntentSource</c>.</para>
+/// </summary>
+public sealed class LensAimIntentSource : IIntentSource
+{
+    private readonly IIntentSource _inner;
+    private readonly ILookAngles _lens;
+
+    public LensAimIntentSource(IIntentSource inner, ILookAngles lens)
+    {
+        _inner = inner;
+        _lens = lens;
+    }
+
+    /// <summary>Forwarded, never defaulted — see <see cref="IIntentSource.IsHumanInput"/>'s
+    /// decorator note. Always false here: this only ever wraps a bot brain.</summary>
+    public bool IsHumanInput => _inner.IsHumanInput;
+
+    public bool SuppliesLook => true;
+
+    public MoveIntent NextIntent(double delta) =>
+        _inner.NextIntent(delta) with { AimYaw = _lens.Yaw, AimPitch = _lens.Pitch };
+}
+
+/// <summary>
+/// <b>Walk to one spot and stand exactly there</b> — HANDS-1's probe brain
+/// (<c>--hands-selftest</c>).
+///
+/// <para><b>Why a brain of its own rather than <see cref="ScriptedGotoIntentSource"/>.</b> That
+/// one latches at an <c>ArriveRadius</c> of 1.5 m, which is correct for what it is for (a
+/// waypoint) and fatal here: every beat of the hands smoke needs a can, a crate AND a pressable
+/// inside reach from ONE standing spot, and the smallest of those reaches is
+/// <c>RoundButton.PressRadius</c> at 1.6 m measured in 3-D to a button 1.15 m up the wall — a
+/// horizontal budget of 1.11 m. A fixture whose staging depends on where a 1.5 m latch happens
+/// to cross a sphere is a fixture that goes red the day somebody re-tunes a walk. SICK-1 added
+/// <c>--goto-patrol</c> for exactly this reason one packet earlier, and wrote down that every
+/// other brain in the repo was disqualified for its measurement too.</para>
+///
+/// <para><b>It takes no irreversible action</b>, so W6-3's rule (a scripted bot may compute from
+/// a predicted position but must not act on one) does not bind: standing still is reversible and
+/// is re-decided every tick, so a prediction that was wrong simply resumes walking. Contrast
+/// <see cref="ScriptedGotoIntentSource"/>, whose arrival is a one-way latch and which therefore
+/// has to confirm on the authority.</para>
+/// </summary>
+public sealed class HandsProbeIntentSource : IIntentSource
+{
+    /// <summary>How close is "there", metres. Tight because the whole point is a standing spot
+    /// the fixture's three reaches were computed against.</summary>
+    public const float StopRadiusM = 0.15f;
+
+    private readonly Node3D _self;
+    private readonly Vector3 _target;
+
+    public HandsProbeIntentSource(Node3D self, Vector3 target)
+    {
+        _self = self;
+        _target = target;
+    }
+
+    public MoveIntent NextIntent(double delta)
+    {
+        Vector3 toTarget = _target - _self.GlobalPosition;
+        toTarget.Y = 0f;
+        return toTarget.Length() <= StopRadiusM
+            ? MoveIntent.None
+            : MoveIntent.None with { MoveDir = toTarget.Normalized() };
+    }
+}

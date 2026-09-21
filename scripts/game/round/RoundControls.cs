@@ -250,9 +250,20 @@ public partial class RoundControls : Node
     // The press
     // ------------------------------------------------------------------------------------
 
-    /// <summary>Client → server: "I pressed this button." The client's whole contribution.</summary>
-    public void ClientRequestPress(RoundButtonKind kind) =>
+    /// <summary>Client → server: "I pressed this button." The client's whole contribution.
+    ///
+    /// <para><b>And the hand moves</b> (HANDS-1, 2026-09-20). This is the ONE client-side point
+    /// every press goes through — a human's click on a <c>RoundButton</c> and a suite's
+    /// <c>--press</c> alike — so hooking the poke here is what makes it impossible to press a
+    /// button without the hand reaching for it. <c>FirstPersonHands.Local</c> is null on every
+    /// peer that built no first-person lens (a server, a headless bot), so this costs those
+    /// nothing. The hand resolves WHICH button from the avatar's own aim-aware pick, and a press
+    /// fired from across the room moves nothing, which is correct.</para></summary>
+    public void ClientRequestPress(RoundButtonKind kind)
+    {
+        Sandbox.Hands.FirstPersonHands.Local?.Poke();
         RpcId(1, MethodName.RequestPress, (byte)kind);
+    }
 
     [Rpc(MultiplayerApi.RpcMode.AnyPeer,
         TransferMode = MultiplayerPeer.TransferModeEnum.Reliable,

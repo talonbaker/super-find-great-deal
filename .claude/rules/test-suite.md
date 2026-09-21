@@ -1278,9 +1278,11 @@ that walk, and it is the only copy).
 | **7910** | **`Walk-DefinitionOfDone.ps1`** (the §8 walk, unregistered and manual) | **INT-1** |
 | **7911** | **`Run-StockTest.ps1`** (and `Capture-ShopFloor.ps1`, unregistered) | **STOCK-1** |
 | **7912** | *assigned, SOLO-1* | **SOLO-1** |
-| **7913** | *assigned, FEEL-1* | **FEEL-1** |
+| **7913** | **`Run-CarryHoldTest.ps1`** (and `Capture-CarryHold.ps1`, unregistered) | **FEEL-1** (7912 was taken by a live SOLO-1 lane) |
 | **7914** | **`Measure-CameraPacing.ps1`** (unregistered) | **SICK-1** |
-| **7915 / 7916 / 7917** | *assigned, no suite yet* | **ART-1 / PHYS-1 / HANDS-1** |
+| 7915 | *reserved, no suite -- ART-1 was assigned it and did not run* | *unused* |
+| **7916** | *assigned, PHYS-1* | **PHYS-1** |
+| **7917** | **`Run-HandsSmoke.ps1`** | **HANDS-1** (assigned in the dispatch, not computed) |
 
 Everything below 7893 is the pre-fork ladder and is unchanged: 7777, 7778, 7788, 7799, 7807,
 7809/7810, 7815, 7816, 7817, 7818, 7821, 7822, 7830, 7831, 7834.
@@ -2085,6 +2087,16 @@ should hand the numbers out" without the rule ever being written as a rule. It i
 **Assigned for this wave** (orchestrator, 2026-09-20): SOLO-1 **7912**, FEEL-1 **7913**,
 SICK-1 **7914**, ART-1 **7915**, PHYS-1 **7916**, HANDS-1 **7917**; PROBE-1 stays on 7908.
 Add your row to the ladder table when your suite lands; do not compute one.
+
+> **HANDS-1 added its row, 2026-09-20.** **udp/7917**, `tests/Run-HandsSmoke.ps1`, registered
+> last in `Run-AllTests.ps1`. It was handed out in the dispatch and never grepped for, which is
+> the rule above being followed rather than re-learned: SICK-1 (7914) and PHYS-1 (7916) were live
+> in their own worktrees while this lane ran and neither of their suites exists on this branch,
+> so a grep here would have produced 7914. **FEEL-1's own 7913 row is added to the table at the
+> same time** -- it was recorded in that lane's handoff and in its suite header but never in the
+> table, and REVIEW-1's entry above says in as many words that *a handoff is not the ladder*.
+> **This suite is the SECOND that needs a desktop session** (FP-1's is the first); see the
+> FP-1 entry above for what that costs a headless shell.
 
 **Neither lane touched the other's processes**, and the discriminator that settled it in one
 command is worth copying: `netstat -ano | grep <port>` gives a PID, and

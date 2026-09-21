@@ -1322,6 +1322,30 @@ public partial class SandboxAvatar : CharacterBody3D, IServerConfirmedBody
                     probe.Setup(probeCam, this);
                     AddChild(probe);
                 }
+                // --hands-selftest (HANDS-1): the same shape, one system over. It drives the
+                // shipped client verbs (grab / drop / ScrollHold / HeldPropLocalRotation /
+                // ClientRequestPress) rather than synthesising input, because a bot has no mouse.
+                if (net.Options.HandsSelfTest && Hands.FirstPersonHands.Local is { } liveHands)
+                {
+                    var handsProbe = new Hands.HandsSelfTest { Name = "HandsSelfTest" };
+                    handsProbe.Setup(liveHands, this, net.Options.HandsCaptureDir, net.Options.HandsProps);
+                    AddChild(handsProbe);
+                    // --hands-stand: the probe's own walk. ScriptedGotoIntentSource's 1.5 m
+                    // arrive latch cannot put a bot inside a wall button's 1.6 m press radius
+                    // (the button is 1.15 m up, leaving 1.11 m horizontally), and this fixture
+                    // needs a can, a crate AND that button reachable from one spot. See
+                    // HandsProbeIntentSource.
+                    if (net.Options.HasHandsStand)
+                        source = new HandsProbeIntentSource(this, net.Options.HandsStand);
+                    // ...and the bot's AIM follows the lens the probe is steering. Without this
+                    // the held prop rides MoveIntent.AimYaw (the walk direction) while the camera
+                    // looks somewhere else, and every capture photographs an empty room. See
+                    // LensAimIntentSource for why --fp-look alone is not enough. Applied to the
+                    // local `source` rather than to the IntentSource property, because
+                    // ConfigureAsNetworked below is what adopts it -- a write here would be
+                    // overwritten three lines later and the probe would look correct in review.
+                    source = new LensAimIntentSource(source, probeCam);
+                }
                 // --rotate-look-selftest (INT-0): the FP-1 x CARRY-1 input-routing probe. It
                 // builds its own HeldPropRotator through the shipped Attach, because the rotator
                 // is a human-branch node and this is a bot.
@@ -1382,6 +1406,18 @@ public partial class SandboxAvatar : CharacterBody3D, IServerConfirmedBody
         AddChild(camera);
         camera.Attach(this, captureMouse);
         AimCamera = camera.CameraNode;
+        // THE HANDS (HANDS-1, 2026-09-20), built here and only here, for the reason this method
+        // exists at all: the human path and the --first-person-cam capture/probe path both come
+        // through it, so a suite cannot be photographing a second pair of hands built to resemble
+        // the ones a player sees. They hang off the LENS, never off the avatar's visual rig, so
+        // AvatarVisual's layer-19 own-body cull cannot reach them.
+        Hands.FirstPersonHands hands = Hands.FirstPersonHands.Attach(camera, this);
+        if (NetworkManager.Instance?.Options.HandsPlantOffsetM is { } plant && plant != 0f)
+        {
+            hands.PlantOffsetM = plant;
+            GD.Print($"[hands] POSITIVE CONTROL: --hands-plant-offset {plant:F3} m -- every "
+                     + "attached hand is deliberately wrong by that much sideways");
+        }
         GD.Print($"[fp] first-person camera active on '{DisplayName}' — eye height " +
                  $"{Proportions.EyeHeightM:F3} m (measured={Proportions.EyesMeasured}), fov " +
                  $"{FirstPersonCamera.FovDeg:F0} deg, near {FirstPersonCamera.NearPlaneM:F2} m, " +

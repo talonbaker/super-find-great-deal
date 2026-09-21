@@ -500,6 +500,37 @@ public sealed class LaunchOptions
     /// <c>PropKind</c> grows. The material-SFX suite seeds forty mixed props in a heap with it;
     /// nobody is going to author forty.</para></summary>
     public IReadOnlyList<(Vector3 At, MpFoundation.Net.PropKind Kind)> SeedTestProps => _seedTestProps;
+
+    /// <summary><c>--hands-selftest</c> (HANDS-1): build <c>HandsSelfTest</c> beside the
+    /// first-person rig, which it implies. <c>tests/Run-HandsSmoke.ps1</c>'s driver.</summary>
+    public bool HandsSelfTest { get; private set; }
+
+    /// <summary><c>--hands-stand x,z</c>: where <c>HandsProbeIntentSource</c> walks the probe and
+    /// stands it. The fixture's three reaches — the can, the crate and the button — are all
+    /// computed from this one point.</summary>
+    public Vector3 HandsStand { get; private set; }
+
+    /// <inheritdoc cref="HandsStand"/>
+    public bool HasHandsStand { get; private set; }
+
+    /// <summary><c>--hands-props "x,y,z;x,y,z"</c>: where the fixture put the objects the probe
+    /// grabs, in order. The probe takes the nearest FREE carryable to each point, so it can never
+    /// pick up a piece of the room instead.</summary>
+    public IReadOnlyList<Vector3> HandsProps => _handsProps;
+
+    private readonly List<Vector3> _handsProps = new();
+
+    /// <summary><c>--hands-capture-dir &lt;dir&gt;</c>: where <c>HandsSelfTest</c> writes its own
+    /// frames. Separate from <c>--capture-dir</c> deliberately — this probe shoots at its OWN
+    /// phase boundaries rather than on the bot harness's elapsed clock, because DOOR-1 measured
+    /// that the offset between a bot's capture clock and the beat it is photographing moved by a
+    /// full second between two runs of one script.</summary>
+    public string HandsCaptureDir { get; private set; } = string.Empty;
+
+    /// <summary><c>--hands-plant-offset &lt;m&gt;</c>: the positive control. Pushes a sideways
+    /// error of this many metres into every attached hand, so the smoke's 1 cm bar can be proved
+    /// able to fail without editing the shipped code. 0 everywhere else.</summary>
+    public float HandsPlantOffsetM { get; private set; }
     private readonly List<(Vector3 At, MpFoundation.Net.PropKind Kind)> _seedTestProps = new();
 
     /// <summary>--seed-props-drop &lt;sec&gt;: server-only, test-only. That many seconds into the
@@ -1142,6 +1173,62 @@ public sealed class LaunchOptions
                     break;
                 case "--first-person-selftest":
                     options.FirstPersonSelfTest = true;
+                    break;
+                case "--hands-selftest":
+                    // Implies --first-person-cam: the hands hang off the first-person LENS, so a
+                    // run without one has nothing to measure. Same shape --rotate-look-selftest
+                    // uses one case below, and for the same reason.
+                    options.HandsSelfTest = true;
+                    options.FirstPersonCam = true;
+                    break;
+                case "--hands-stand":
+                {
+                    // "x,z" -- the ONE standing spot the hands fixture is staged around. A
+                    // malformed pair is DROPPED rather than defaulted to the origin, the rule
+                    // --seed-test-props states: a probe silently standing at (0,0) is a fixture
+                    // in the wrong room that then fails on its subject instead of its arguments.
+                    string[] st = Next(args, ref i).Split(',');
+                    if (st.Length >= 2
+                        && float.TryParse(st[0], NumberStyles.Float, CultureInfo.InvariantCulture, out float hx)
+                        && float.TryParse(st[1], NumberStyles.Float, CultureInfo.InvariantCulture, out float hz))
+                    {
+                        options.HandsStand = new Vector3(hx, 0f, hz);
+                        options.HasHandsStand = true;
+                    }
+                    break;
+                }
+                case "--hands-props":
+                {
+                    // "x,y,z;x,y,z" -- WHERE the fixture put the two objects the probe is about.
+                    // Named by position rather than by prop id because an authored prop's id is a
+                    // function of every other prop's node NAME (HOLD-1: three renumberings in two
+                    // days), and picked explicitly rather than as "the smallest/largest thing in
+                    // reach" because the search room's own floor bins are free carryables too --
+                    // measured on this suite's first run, where "largest in reach" came back with
+                    // Stock/Bin_0 at 1.37 m instead of the seeded crate.
+                    foreach (string triple in Next(args, ref i).Split(';',
+                                 StringSplitOptions.RemoveEmptyEntries))
+                    {
+                        string[] hp = triple.Split(',');
+                        if (hp.Length >= 3
+                            && float.TryParse(hp[0], NumberStyles.Float, CultureInfo.InvariantCulture, out float px)
+                            && float.TryParse(hp[1], NumberStyles.Float, CultureInfo.InvariantCulture, out float py)
+                            && float.TryParse(hp[2], NumberStyles.Float, CultureInfo.InvariantCulture, out float pz))
+                        {
+                            options._handsProps.Add(new Vector3(px, py, pz));
+                        }
+                    }
+                    break;
+                }
+                case "--hands-capture-dir":
+                    options.HandsCaptureDir = Next(args, ref i).Trim();
+                    break;
+                case "--hands-plant-offset":
+                    if (float.TryParse(Next(args, ref i), NumberStyles.Float,
+                            CultureInfo.InvariantCulture, out float handsPlant))
+                    {
+                        options.HandsPlantOffsetM = handsPlant;
+                    }
                     break;
                 case "--rotate-look-selftest":
                     options.RotateLookSelfTest = true;
