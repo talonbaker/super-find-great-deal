@@ -23,7 +23,8 @@
     was stopped by an immovable wall of boxes.
 
     THE BARS, in the order the phases measure them:
-      (1) UNTOUCHED IS UNTOUCHED     no seeded prop moves at all before the crate arrives.
+      (1) UNTOUCHED IS UNTOUCHED     no seeded prop moves at all in the twenty seconds
+                                     before the bot even picks the crate up.
       (2) DOMINOES                   every box tilts past 60 degrees, within 2 s of the first,
                                      on the holder's view AND on a witness's.
       (3) THE CAN ROLLS              travels at least 1 m and stops within 4 m.
@@ -45,7 +46,7 @@
 [CmdletBinding()]
 param(
     [int]$Port = 7916,
-    [double]$DurationSec = 40,
+    [double]$DurationSec = 60,
     [double]$MaxPropSpeed = 3.0,
     [double]$TiltDeg = 60,
     [double]$DominoWindowSec = 2.0,
@@ -112,14 +113,19 @@ try {
 
     Write-Host "[2/4] launching the driver and the witness..." -ForegroundColor Cyan
 
-    # PhysBot: grab CARRY-1's crate at (36, 0.22, 0), then walk STRAIGHT down its own z = 0
-    # walkway through the row and past the can (HOLD-1's rule: one point, one straight line,
-    # never diagonally). It never voluntarily drops (-1) and throws the crate 16 s after the
-    # grab, by which time the walk is long finished -- that throw is bar (6).
+    # PhysBot: walk to CARRY-1's crate at (36, 0.22, 0) and then STAND THERE FOR TWENTY SECONDS
+    # before grabbing it, which is how bar (1) gets a real untouched window. The packet asks for
+    # thirty seconds of a row standing still; twenty is what fits beside the event in one run,
+    # and the measurement is the same measurement.
+    #
+    # Then it walks STRAIGHT down its own z = 0 walkway through the row and past the can (HOLD-1's
+    # rule: one point, one straight line, never diagonally). It never voluntarily drops (-1) and
+    # throws the crate 30 s after the grab, by which time the walk is long finished and everything
+    # it knocked over has had time to settle -- that throw is bar (6).
     $physLog = Join-Path $script:LogDir "physfeel.phys.jsonl"
     $physBot = Start-Godot @("--bot", "--address", "127.0.0.1:$Port", "--name", "PhysBot",
         "--log", $physLog, "--duration", $DurationSec, "--world", "supermarket",
-        "--carry-script", "36,0.22,0,1.0,-1,16", "--carry-grab-retry", "0.6",
+        "--carry-script", "36,0.22,0,20.0,-1,30", "--carry-grab-retry", "0.6",
         "--carry-target-prop", $CrateProp,
         "--carry-walk-to", "44.0,0") "physfeel.phys"
     $procs += $physBot
@@ -212,18 +218,20 @@ if ($heldEver.Count -eq 0) {
 }
 
 # --- bar (1): untouched is untouched ------------------------------------------------------
-# The window is everything before the crate's holder first comes within 2 m of the first box:
-# genuinely "nothing has touched it yet", derived from the run rather than typed as a second.
+# THE WINDOW IS EVERYTHING BEFORE THE GRAB, and that choice is load-bearing. The obvious window
+# -- "before the holder came within 2 m of the row" -- is WRONG here, because CARRY-1's authored
+# crate Prop_3 stands at (38, 0.22, 0), squarely in this walkway: the held crate knocks THAT one
+# awake first, and a 1 kg crate shoved down the aisle can reach the row before its holder does.
+# That is P1 working, and a bar that called it a failure would be measuring the fixture.
+#
+# Before the grab nothing in the room has been touched by anything at all, so the window is
+# honest AND it is long: the bot stands beside its crate for twenty seconds first.
 $arriveT = [double]::PositiveInfinity
 foreach ($s in $physSamples) {
-    $me = @($s.peers) | Where-Object { [int]$_.id -eq [int]$s.self } | Select-Object -First 1
-    if ($null -eq $me) { continue }
-    $dx = [double]$me.x - $BoxX0
-    $dz = [double]$me.z - 0.0
-    if ([math]::Sqrt($dx * $dx + $dz * $dz) -le 2.0) { $arriveT = [double]$s.t; break }
+    if ([int]$s.heldPropId -gt 0) { $arriveT = [double]$s.t; break }
 }
 if ([double]::IsInfinity($arriveT)) {
-    $failures.Add("PhysBot never got within 2 m of the domino row -- the walk never happened, so bars 2-5 were never staged")
+    $failures.Add("PhysBot never grabbed the crate -- bars 2-5 were never staged")
     $arriveT = 0.0
 }
 
@@ -237,12 +245,14 @@ foreach ($id in ($BoxIds + $RollCanId)) {
         if ($d -gt $restWorst) { $restWorst = $d }
     }
 }
-Write-Host ("        untouched: worst movement {0:F4} m over the {1:F1} s before the crate arrived" -f $restWorst, $arriveT) -ForegroundColor DarkGray
+Write-Host ("        untouched: worst movement {0:F4} m over the {1:F1} s before the grab" -f $restWorst, $arriveT) -ForegroundColor DarkGray
+# This IS the "no wake storm at rest" bar. A [phys] wake line carries no timestamp, so counting
+# those lines could never tell a wake before the crate arrived from one after it; the props'
+# own positions over a window derived from the run can, and do.
 if ($restWorst -gt 0.01) {
     $failures.Add(("a seeded prop moved {0:F3} m before anything touched it (bar 0.01) -- a stack that drifts at rest is not a stack" -f $restWorst))
 }
 
-$wakeLinesBefore = @($serverText | Select-String -Pattern "^\[phys\] wake ").Count
 
 # --- bar (2): the dominoes ----------------------------------------------------------------
 $upBar = [math]::Cos($TiltDeg * [math]::PI / 180.0)
@@ -326,9 +336,6 @@ if ($clampLines.Count -gt $MaxClampLines) {
 }
 if ($restoreLines.Count -gt 0) {
     $failures.Add("the rest audit teleported $($restoreLines.Count) prop(s) back to a last-good pose in ordinary play -- that IS the freakout Talon described")
-}
-if ($wakeLinesBefore -gt 0) {
-    $failures.Add("$wakeLinesBefore prop(s) woke BEFORE the crate arrived -- a wake storm at rest")
 }
 if ($wakeLines.Count -eq 0) {
     $failures.Add("the server logged not one [phys] wake for the whole run -- P1's contact path never ran, so every green bar above is about something else")
