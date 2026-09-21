@@ -546,7 +546,7 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
                 // mass included, because a seeded box that was not top-heavy would not domino and
                 // the suite that measures dominoing seeds its own row.
                 LinearDamp = 0.4f;
-                AngularDamp = 1.2f;
+                AngularDamp = 0.5f;   // re-measured; see CerealBox.tscn
                 CenterOfMassMode = CenterOfMassModeEnum.Custom;
                 CenterOfMass = new Vector3(0f, 0.07f, 0f);
                 break;

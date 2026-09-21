@@ -969,8 +969,12 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
             if (node.ServerClampMotion())
             {
                 PropClampCount++;
-                GD.Print($"[phys] clamp prop={p.Id} to {node.SpeedMps:F2} m/s "
-                    + $"(cap {node.SpeedCapMps:F2}) total={PropClampCount}");
+                // The HORIZONTAL speed, not the magnitude. Printing the magnitude read
+                // "clamp prop=1 to 3.27 m/s (cap 3.00)" -- which looks like the clamp failing
+                // and is a box that is falling, because the cap deliberately does not bound the
+                // fall (see PropPhysics.MaxPropFallSpeedMps).
+                GD.Print($"[phys] clamp prop={p.Id} to {node.HorizontalSpeedMps:F2} m/s horiz "
+                    + $"({node.SpeedMps:F2} total, cap {node.SpeedCapMps:F2}) total={PropClampCount}");
             }
 
             Transform3D t = node.Body.GlobalTransform;

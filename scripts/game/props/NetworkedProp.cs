@@ -1107,6 +1107,14 @@ public partial class NetworkedProp : Node3D
     /// Reads the body, which on the server is the simulation itself.</summary>
     public float SpeedMps => IsInstanceValid(Body) ? Body.LinearVelocity.Length() : 0f;
 
+    /// <summary>This prop's horizontal speed — the component <c>PropPhysics.ClampVelocity</c>
+    /// actually bounds, and therefore the one a clamp line has to report. The magnitude is
+    /// dominated by the FALL for anything knocked off a surface, which made the log read like a
+    /// clamp that had not worked.</summary>
+    public float HorizontalSpeedMps => IsInstanceValid(Body)
+        ? new Vector3(Body.LinearVelocity.X, 0f, Body.LinearVelocity.Z).Length()
+        : 0f;
+
     /// <summary>This prop's current ceiling, metres per second — the bar, or a throw's larger
     /// allowance while its launch energy is unspent. Read by the suite so a clamp line can be
     /// checked against the cap that was actually in force.</summary>
