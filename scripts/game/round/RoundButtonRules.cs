@@ -21,13 +21,20 @@ public static class RoundButtonRules
     /// has not heard from the server yet, a wrong one. Same trap the HUD strip and every Synced
     /// flag in <c>BotHarness</c>'s sample exist for.</para>
     /// </summary>
+    /// <remarks>
+    /// <b><c>HumanCount</c> was removed at SOLO-1 (2026-09-20)</b> rather than left unread. The
+    /// START lamp was the only thing that consulted it (<c>HumanCount == 2</c>, mirroring the
+    /// loop's old "exactly two humans"), and that condition put the lamp OUT for both players the
+    /// moment a third person walked into the room — and would have put it out for a solo tester
+    /// too. "Both role slots are filled" is the same question asked of the two ids that actually
+    /// decide it, and it is right in all three cases.
+    /// </remarks>
     public readonly record struct LampFacts(
         bool Synced,
         HideSeekPhase Phase,
         int SelfPeerId,
         int HiderPeerId,
         int SeekerPeerId,
-        int HumanCount,
         bool HiderHoldsRackProp,
         bool HiderHoldsTarget);
 
@@ -54,7 +61,21 @@ public static class RoundButtonRules
     public static PressRefusal Gate(RoundButtonKind kind, HideSeekPhase phase, int presserPeerId,
         int hiderPeerId, int seekerPeerId)
     {
-        _ = seekerPeerId;   // taken for symmetry; End is deliberately either player's button.
+        // NOT IN THIS MATCH, checked before the per-kind rules so all three buttons answer a
+        // waiting player alike (SOLO-1, 2026-09-20). It is the TRUE sentence for a third or later
+        // joiner and neither of the two below is: the phase is right, so NotNow would be a lie,
+        // and NotYourButton is the hider/seeker distinction, which is a different fact about a
+        // person who IS playing.
+        //
+        // Guarded on both roles being dealt, because a round with vacant slots must not answer
+        // every player "you are not in this match" -- that is a peer that has simply not synced,
+        // and a dead button with a confident wrong reason on it is worse than a dark one.
+        if (hiderPeerId != 0 && seekerPeerId != 0 && presserPeerId != 0
+            && presserPeerId != hiderPeerId && presserPeerId != seekerPeerId)
+        {
+            return PressRefusal.NotInThisMatch;
+        }
+
         switch (kind)
         {
             case RoundButtonKind.Start:
@@ -90,14 +111,14 @@ public static class RoundButtonRules
     /// itself between the three buttons.
     ///
     /// <list type="bullet">
-    /// <item><b>START</b> — Holding, exactly two humans, both roles filled, and the hider is
+    /// <item><b>START</b> — Holding, both roles filled, you are in one of them, and the hider is
     /// holding something off the rack. Exactly the conditions <c>HideSeekLoop</c>'s Holding
-    /// branch accepts on.</item>
+    /// branch accepts on, plus the one the button owes a waiting player.</item>
     /// <item><b>CONFIRM</b> — Hiding, and you are the hider, and your hands are empty of the
     /// target. Reachability is NOT in here and cannot be: it is a server-side physics
     /// measurement that never crosses the wire (see <see cref="RoundLamp.Lit"/>'s doc).</item>
-    /// <item><b>END</b> — Together. There is nothing else to get wrong; the loop commits the
-    /// tally unconditionally.</item>
+    /// <item><b>END</b> — Together, and you are in this match. The loop commits the tally
+    /// unconditionally, so the only thing to get wrong is lighting it at a spectator.</item>
     /// </list>
     /// </summary>
     public static RoundLamp Lamp(RoundButtonKind kind, in LampFacts f)
@@ -107,9 +128,14 @@ public static class RoundButtonRules
 
         return kind switch
         {
+            // BOTH ROLE SLOTS FILLED, and this peer in one of them. Not a human count: a third
+            // body in the room must not put the two players' lamp out (SOLO-1), and a solo
+            // session fills both slots with one peer, which this reads correctly without
+            // knowing the flag exists.
             RoundButtonKind.Start =>
-                f.Phase == HideSeekPhase.Holding && f.HumanCount == 2
+                f.Phase == HideSeekPhase.Holding
                 && f.HiderPeerId != 0 && f.SeekerPeerId != 0 && f.HiderHoldsRackProp
+                && InThisMatch(f)
                     ? RoundLamp.Lit : RoundLamp.Dark,
 
             RoundButtonKind.Confirm =>
@@ -119,11 +145,19 @@ public static class RoundButtonRules
                     ? RoundLamp.Lit : RoundLamp.Dark,
 
             RoundButtonKind.End =>
-                f.Phase == HideSeekPhase.Together ? RoundLamp.Lit : RoundLamp.Dark,
+                f.Phase == HideSeekPhase.Together && InThisMatch(f)
+                    ? RoundLamp.Lit : RoundLamp.Dark,
 
             _ => RoundLamp.Dark,
         };
     }
+
+    /// <summary>Is the peer reading this lamp one of the two the round is about? (SOLO-1.) A
+    /// round whose roles are not dealt yet excludes nobody — same guard, same reason, as
+    /// <see cref="Gate"/>'s.</summary>
+    private static bool InThisMatch(in LampFacts f) =>
+        f.HiderPeerId == 0 || f.SeekerPeerId == 0
+        || f.SelfPeerId == f.HiderPeerId || f.SelfPeerId == f.SeekerPeerId;
 
     /// <summary>
     /// <b>Reading the round's answer to a press that was forwarded.</b> Called on the server one

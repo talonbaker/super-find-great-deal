@@ -23,52 +23,56 @@ public class RoundButtonTests
     private const int Hider = 11;
     private const int Seeker = 22;
 
+    /// <summary><c>humans</c> went at SOLO-1 (2026-09-20): the lamp asks the two ROLE IDS whether
+    /// the round can start, never the size of the room — a third person standing in it must not
+    /// put both players' START out. See <see cref="RoundButtonRules.LampFacts"/>.</summary>
     private static RoundButtonRules.LampFacts Facts(HideSeekPhase phase, int self,
-        int humans = 2, bool rack = false, bool target = false, bool synced = true) =>
-        new(synced, phase, self, Hider, Seeker, humans, rack, target);
+        bool rack = false, bool target = false, bool synced = true) =>
+        new(synced, phase, self, Hider, Seeker, rack, target);
 
     // =========================================================================================
     // The lamp
     // =========================================================================================
 
     /// <summary>The affordance's whole point: START is lit exactly when the loop's Holding branch
-    /// would accept. Two humans, both roles filled, hider holding something off the rack.</summary>
+    /// would accept. Both roles filled, hider holding something off the rack.</summary>
     [Fact]
     public void StartLamp_LitOnlyWhenTheLoopWouldAccept()
     {
         Assert.Equal(RoundLamp.Lit, RoundButtonRules.Lamp(RoundButtonKind.Start,
-            Facts(HideSeekPhase.Holding, Hider, humans: 2, rack: true)));
+            Facts(HideSeekPhase.Holding, Hider, rack: true)));
         // The seeker sees the same lamp. It is a fact about the ROUND, not about who is looking:
         // either player may press Start, so a lamp that was dark for one of the two people in
         // front of it would be lying to one of them.
         Assert.Equal(RoundLamp.Lit, RoundButtonRules.Lamp(RoundButtonKind.Start,
-            Facts(HideSeekPhase.Holding, Seeker, humans: 2, rack: true)));
+            Facts(HideSeekPhase.Holding, Seeker, rack: true)));
     }
 
     [Theory]
-    // The four ways a Start would be refused, each one Dark before the press.
-    [InlineData(HideSeekPhase.Holding, 1, true)]    // one human
-    [InlineData(HideSeekPhase.Holding, 3, true)]    // three humans — exactly two, not at least
-    [InlineData(HideSeekPhase.Holding, 2, false)]   // empty hands
-    [InlineData(HideSeekPhase.Hiding, 2, true)]     // the round is already running
-    [InlineData(HideSeekPhase.Seeking, 2, true)]
-    [InlineData(HideSeekPhase.Together, 2, true)]
-    [InlineData(HideSeekPhase.Tally, 2, true)]
-    public void StartLamp_DarkWheneverAPressWouldBeRefused(HideSeekPhase phase, int humans, bool rack)
+    // Every way a Start would be refused, each one Dark before the press. The human COUNT is no
+    // longer one of them (SOLO-1): a room with one person in it has no seeker to fill the second
+    // slot, and a room with three has both filled, so the two role ids answer all of it.
+    [InlineData(HideSeekPhase.Holding, false)]   // empty hands
+    [InlineData(HideSeekPhase.Hiding, true)]     // the round is already running
+    [InlineData(HideSeekPhase.Seeking, true)]
+    [InlineData(HideSeekPhase.Together, true)]
+    [InlineData(HideSeekPhase.Tally, true)]
+    public void StartLamp_DarkWheneverAPressWouldBeRefused(HideSeekPhase phase, bool rack)
     {
         Assert.Equal(RoundLamp.Dark, RoundButtonRules.Lamp(RoundButtonKind.Start,
-            Facts(phase, Hider, humans, rack)));
+            Facts(phase, Hider, rack)));
     }
 
     /// <summary>A vacant role is Dark even with two bodies in the room — the loop refuses that
-    /// case with <c>NeedTwoPlayers</c>, so the lamp must agree.</summary>
+    /// case with <c>NeedTwoPlayers</c>, so the lamp must agree. This is also the one-player case
+    /// on a shipping launch: one human means no seeker id.</summary>
     [Fact]
     public void StartLamp_DarkWhenARoleIsVacant()
     {
         var noHider = new RoundButtonRules.LampFacts(true, HideSeekPhase.Holding, Seeker,
-            0, Seeker, 2, true, false);
+            0, Seeker, true, false);
         var noSeeker = new RoundButtonRules.LampFacts(true, HideSeekPhase.Holding, Hider,
-            Hider, 0, 2, true, false);
+            Hider, 0, true, false);
         Assert.Equal(RoundLamp.Dark, RoundButtonRules.Lamp(RoundButtonKind.Start, noHider));
         Assert.Equal(RoundLamp.Dark, RoundButtonRules.Lamp(RoundButtonKind.Start, noSeeker));
     }
@@ -121,7 +125,7 @@ public class RoundButtonTests
     public void EveryLamp_IsDarkBeforeTheRoundHasSynced()
     {
         var unsynced = new RoundButtonRules.LampFacts(false, HideSeekPhase.Holding, Hider,
-            Hider, Seeker, 2, true, false);
+            Hider, Seeker, true, false);
         Assert.Equal(RoundLamp.Dark, RoundButtonRules.Lamp(RoundButtonKind.Start, unsynced));
         Assert.Equal(RoundLamp.Dark, RoundButtonRules.Lamp(RoundButtonKind.Confirm, unsynced));
         Assert.Equal(RoundLamp.Dark, RoundButtonRules.Lamp(RoundButtonKind.End, unsynced));

@@ -221,7 +221,7 @@ public partial class RoundControls : Node
         HideSeekDriver? driver = HideSeekDriver.Instance;
         if (driver is not { Synced: true })
             return new RoundButtonRules.LampFacts(false, HideSeekPhase.Holding, selfPeerId,
-                0, 0, 0, false, false);
+                0, 0, false, false);
 
         HideSeekView view = driver.View;
         RoundControls? self = Instance;
@@ -241,7 +241,6 @@ public partial class RoundControls : Node
             SelfPeerId: selfPeerId,
             HiderPeerId: view.HiderPeerId,
             SeekerPeerId: view.SeekerPeerId,
-            HumanCount: view.Scores?.Count ?? 0,
             HiderHoldsRackProp: rackProp,
             HiderHoldsTarget: holdsTarget);
     }

@@ -79,7 +79,13 @@ public static class RoundRooms
         {
             HideSeekPhase.Holding => SupermarketWorld.HoldingRoom,
             HideSeekPhase.Hiding => isHider ? SupermarketWorld.SearchRoom : SupermarketWorld.HoldingRoom,
-            HideSeekPhase.Seeking => isHider ? SupermarketWorld.TaskRoom : SupermarketWorld.SearchRoom,
+            // THE SEEKING HALF WINS WHEN ONE PEER HOLDS BOTH ROLES (SOLO-1, 2026-09-20). This
+            // table is supposed to be derivable from phase and role precisely so it never has to
+            // disagree with a position -- and with --solo it did: `isHider ? task : search` put
+            // the solo player in the TASK room while HideSeekDriver had teleported its body to
+            // the SEARCH room. The driver is the authority on where the body went and it skips
+            // the hider's move when hider == seeker, so this reads the same way round.
+            HideSeekPhase.Seeking => isSeeker ? SupermarketWorld.SearchRoom : SupermarketWorld.TaskRoom,
             // Both: the door has burst and the vestibule is inside the task room. See the list
             // above — Vestibule stays a teleport destination key and is not a room here.
             HideSeekPhase.Together => SupermarketWorld.TaskRoom,

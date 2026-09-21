@@ -199,6 +199,13 @@ public partial class HideSeekDriver : Node
                      + $"tally {_tuning.TallySec:0}s, match {_tuning.MatchRoundsOrFloor} round(s) "
                      + $"(match tally {_tuning.MatchTallySec:0}s), "
                      + $"channel {NetProfile.RoundChannel}");
+            // SOLO-1. Named on its own line and greppable, on --round-script's rule: a dev flag
+            // that changes who may start a round has to be visible in any log anybody ever reads
+            // back, and "the round started with one player" is otherwise indistinguishable from a
+            // gate that stopped working.
+            if (_tuning.Solo)
+                GD.Print("[round] DEV --solo armed — ONE player may run the whole round, holding "
+                         + "both roles in sequence. Two or more present and this changes nothing.");
         }
     }
 
@@ -377,7 +384,15 @@ public partial class HideSeekDriver : Node
                              + (card.EndedByDisconnect ? " endedByDisconnect" : string.Empty));
                 break;
             case HideSeekPhase.Seeking:
-                MoveTo(_state.HiderPeerId, SupermarketWorld.TaskRoom, 0);
+                // ONE PEER, ONE DESTINATION (SOLO-1). In a solo session the same peer holds both
+                // roles and its Seeking room is the SEARCH room: it goes back to find the thing it
+                // just hid, and the task room stays empty for the burst to open onto. Deciding
+                // both moves and letting the second overwrite the first would not do — the task
+                // move lands immediately and the search move is then refused inside RoomTeleport's
+                // 800 ms cooldown, so the only player in the game would spend most of a second in
+                // the wrong room before the retry queue fetched them back.
+                if (_state.HiderPeerId != _state.SeekerPeerId)
+                    MoveTo(_state.HiderPeerId, SupermarketWorld.TaskRoom, 0);
                 MoveTo(_state.SeekerPeerId, SupermarketWorld.SearchRoom, 0);
                 break;
             case HideSeekPhase.Together:

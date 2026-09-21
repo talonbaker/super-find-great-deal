@@ -49,9 +49,17 @@ public static class HoldingBoardModel
     /// disagreeing would be visible on the wall the moment it happened.</summary>
     public const string Sep = " · ";
 
-    /// <summary>What a row says when its peer holds neither role. An em dash, not "NONE" and not
-    /// blank: a blank cell reads as a readout that failed and a word reads as a third role.</summary>
-    public const string NoRole = "—";
+    /// <summary>
+    /// <b>What a row says when its peer holds neither role</b> (SOLO-1, 2026-09-20).
+    ///
+    /// <para>HOLD-1 printed an em dash here, on the argument that a blank cell reads as a readout
+    /// that failed and a word reads as a third role. The first half stands; the second turned out
+    /// to be the wrong worry once a third player could actually stand in the room. <b>WAITING is
+    /// not a third role, it is the absence of one, and it is the question the reader actually
+    /// has</b> — am I in this game? — which a dash does not answer. The board's
+    /// <see cref="StatusLine"/> says how they get in.</para>
+    /// </summary>
+    public const string Waiting = "WAITING";
 
     /// <summary>
     /// <b>How many rows the panel is authored to hold.</b> The world declares four
@@ -111,6 +119,67 @@ public static class HoldingBoardModel
         Math.Max((view.Scores?.Count ?? 0) - MaxRows, 0);
 
     /// <summary>
+    /// <b>How many humans on the wire hold neither role</b> (SOLO-1). Derived from the two role
+    /// ids the message has carried since ROUND-1 — <b>nothing was added to the wire for
+    /// this</b>, so no <c>NetProfile.ProtocolVersion</c> bump is owed by this packet.
+    ///
+    /// <para>0 in every two-player session and 0 in a solo one, where the single peer holds both
+    /// slots. It counts the whole roster rather than the four rows the panel can show, because
+    /// "how many people are waiting" is a fact about the room and not about the furniture.</para>
+    /// </summary>
+    public static int WaitingCount(in HideSeekView view)
+    {
+        if (view.Scores is null)
+            return 0;
+        int waiting = 0;
+        foreach (KeyValuePair<int, int> row in view.Scores)
+            if (row.Key != view.HiderPeerId && row.Key != view.SeekerPeerId)
+                waiting++;
+        return waiting;
+    }
+
+    /// <summary>
+    /// <b>The small line under the rows: who the board could not show, and who is not in this
+    /// match</b> (SOLO-1 extends HOLD-1's overflow line rather than taking a label of its own).
+    ///
+    /// <code>
+    /// 1 WAITING · NEXT FREE SEAT IS YOURS
+    /// +1 MORE · 3 WAITING · NEXT FREE SEAT IS YOURS
+    /// </code>
+    ///
+    /// <para><b>Why here and not in the footer.</b> The footer is the last CARD — a fact about a
+    /// round that has finished — and it already shrinks to <see cref="HoldingBoardLayout.MinScale"/>
+    /// on the longest line the wire can produce, so a second clause on it would make the result
+    /// of the match unreadable to say something about the room. This line is a fact about the ROWS
+    /// and sits with them; it is the same slot the overflow count already used, for the same
+    /// reason.</para>
+    ///
+    /// <para><b>And it says how the wait ENDS.</b> "WAITING" with no exit beside it is the
+    /// <c>docs/INTERACTION-BIBLE.md</c> §5 failure one level up from a button: it names the state
+    /// and not the thing to do about it. For the MVP a waiting player is dealt in the moment a
+    /// seat opens — <c>HideSeekLoop</c>'s Holding repair fills a vacant role from the roster on
+    /// the next round — so that is what it says. Empty when everybody is playing, on the same
+    /// test-the-string contract every other copy function here has.</para>
+    /// </summary>
+    public static string StatusLine(in HideSeekView view)
+    {
+        int overflow = Overflow(view);
+        int waiting = WaitingCount(view);
+        if (overflow == 0 && waiting == 0)
+            return string.Empty;
+
+        var parts = new List<string>(3);
+        if (overflow > 0)
+            parts.Add($"+{overflow} MORE");
+        if (waiting > 0)
+        {
+            parts.Add($"{waiting} {Waiting}");
+            parts.Add("NEXT FREE SEAT IS YOURS");
+        }
+        return string.Join(Sep, parts);
+    }
+
+    /// <summary>
     /// <b>What this peer is doing, or about to do.</b>
     ///
     /// <para><b>During Holding the cell is the NEXT round's role, announced</b>, and no
@@ -131,7 +200,7 @@ public static class HoldingBoardModel
         bool hider = peerId != 0 && peerId == view.HiderPeerId;
         bool seeker = peerId != 0 && peerId == view.SeekerPeerId;
         if (!hider && !seeker)
-            return NoRole;
+            return Waiting;
 
         if (view.Phase != HideSeekPhase.Holding)
             return hider ? "HIDES" : "SEEKS";

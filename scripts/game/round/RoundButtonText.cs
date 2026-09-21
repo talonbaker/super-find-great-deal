@@ -59,6 +59,12 @@ public static class RoundButtonText
 
         PressRefusal.NotYourButton => "ONLY THE HIDER CAN PRESS THIS",
         PressRefusal.TooFarAway => "STEP CLOSER TO THE BUTTON",
+
+        // SOLO-1. One sentence for all three buttons, unlike NotNow above, because the fact is
+        // the same whichever one they walked up to: they are not in this match. It says the exit
+        // as well as the state -- the wait ends at the next free seat -- which is the half
+        // INTERACTION-BIBLE Sec.5 is about and the half "NOT IN THIS MATCH" alone would miss.
+        PressRefusal.NotInThisMatch => "YOU'RE UP NEXT ROUND — WAIT HERE",
         _ => string.Empty,
     };
 }
