@@ -283,6 +283,20 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
 
         Transform3D at = node.Body.GlobalTransform;
         RestAudit.Result audit = RestAudit.Audit(node, at, PlaceOverlapToleranceM, DepenetrateMaxM);
+
+        // PHYS-1 (2026-09-20), ruling P3: THE AUDIT NEVER TELEPORTS A PROP THE PLAYER IS LOOKING
+        // AT MOVING. Talon: "I want to know they won't freak out and make other objects jump
+        // around randomly" -- and a prop snapping back to a pose it held ten seconds ago, half a
+        // metre in front of the person who just nudged it, is that sentence exactly, even though
+        // every line of REACH-1 is working as designed.
+        //
+        // DEPENETRATION IS NOT GATED and that is deliberate: pushing a crate 4 cm out of a wall
+        // is the common case, it keeps the prop where the player left it, and gating it would
+        // regress the defect REACH-1 exists to fix. Only the LAST-GOOD RESTORE waits.
+        if (IsRestore(audit.Outcome) && !MayRestoreNow(propId, node))
+            return audit;
+        ClearStuckClock(propId);
+
         NoteAudit(propId, audit);
         Transform3D settled = audit.Corrected ? audit.To : at;
         _registry.SetResting(propId, settled);
@@ -327,6 +341,160 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
         node.BeginLooseServer(impulse);
     }
 
+    // --- PHYS-1 (P3): the audit's restore, gated -------------------------------------------
+
+    /// <summary>When each prop's current run of unfixable audits began, in engine milliseconds.
+    /// Absent = not stuck. Cleared by any audit that passed or depenetrated, and by the prop
+    /// leaving Loose, so the clock measures one episode rather than a lifetime.</summary>
+    private readonly System.Collections.Generic.Dictionary<int, ulong> _stuckSinceMsec = new();
+
+    /// <summary>The last time each waiting prop printed its <c>[phys] rest-wait</c> line. The
+    /// settle latch re-audits a waiting prop every <see cref="SettleTicks"/> ticks — three times
+    /// a second — and a prop a player is standing next to can wait indefinitely by design, so the
+    /// line is throttled to one a second per prop. Throttled rather than dropped: "the audit
+    /// wanted to move this and did not" is the whole evidence P3 leaves behind.</summary>
+    private readonly System.Collections.Generic.Dictionary<int, ulong> _stuckLoggedMsec = new();
+
+    /// <summary>Outcomes that MOVE the prop somewhere it was not — the ones P3 gates.
+    /// <see cref="RestAudit.Outcome.Stuck"/> is included because it writes the last-good
+    /// transform too; its only difference from a restore is that the pose it restores to is known
+    /// to be bad as well.</summary>
+    private static bool IsRestore(RestAudit.Outcome outcome) =>
+        outcome is RestAudit.Outcome.RestoredLastGood or RestAudit.Outcome.Stuck;
+
+    private void ClearStuckClock(int propId)
+    {
+        _stuckSinceMsec.Remove(propId);
+        _stuckLoggedMsec.Remove(propId);
+    }
+
+    /// <summary>
+    /// <b>P3's two conditions, asked of one prop.</b> Advances this prop's stuck clock, measures
+    /// the nearest avatar's grab ray, and answers whether the restore may happen now.
+    ///
+    /// <para>A refusal leaves the prop exactly as it is — still Loose if it was Loose, so the
+    /// settle latch brings it back here in another <see cref="SettleTicks"/> ticks and it
+    /// restores itself the moment either condition clears. Nothing is dropped and nothing is
+    /// retried by a timer of its own.</para>
+    /// </summary>
+    private bool MayRestoreNow(int propId, NetworkedProp node)
+    {
+        ulong now = Time.GetTicksMsec();
+        if (!_stuckSinceMsec.TryGetValue(propId, out ulong since))
+        {
+            since = now;
+            _stuckSinceMsec[propId] = since;
+        }
+        float stuckSec = (now - since) / 1000f;
+        float nearest = NearestGrabRayM(node.Body.GlobalPosition);
+        if (PropRestGate.MayRestoreLastGood(stuckSec, nearest))
+            return true;
+
+        // One line a second, naming both quantities, because the two reasons to wait want
+        // different responses from whoever reads the log: a clock that is still climbing is the
+        // solver being given its second, and a player 0.4 m away is the design refusing on
+        // purpose.
+        if (!_stuckLoggedMsec.TryGetValue(propId, out ulong lastLog) || now - lastLog >= 1000)
+        {
+            _stuckLoggedMsec[propId] = now;
+            GD.Print($"[phys] rest-wait prop={propId} stuck={stuckSec:F2}s "
+                + $"nearestGrabRay={(float.IsPositiveInfinity(nearest) ? "none" : $"{nearest:F2}m")} "
+                + $"(needs >={PropRestGate.StuckHoldSec:F2}s and >{PropRestGate.PlayerAttentionM:F2}m)");
+        }
+        return false;
+    }
+
+    /// <summary>Distance from <paramref name="point"/> to the closest point on any live avatar's
+    /// grab ray, or <see cref="float.PositiveInfinity"/> when there are no avatars — an empty
+    /// room reads as FAR, never as zero, which is what lets the seeker's room correct itself
+    /// while the hider is elsewhere.
+    ///
+    /// <para>The ray is rebuilt from the avatar's replicated aim (yaw + pitch through
+    /// <c>AimQuery</c>), never from a camera node, for the reason
+    /// <c>SandboxAvatar.AimedSurfaceWithinPlaceReach</c> gives: the server has no camera and the
+    /// aim is the thing that is actually replicated.</para></summary>
+    private static float NearestGrabRayM(Vector3 point)
+    {
+        float nearest = float.PositiveInfinity;
+        foreach (SandboxAvatar a in SandboxAvatar.Live)
+        {
+            if (!GodotObject.IsInstanceValid(a) || !a.IsInsideTree())
+                continue;
+            Vector3 dir = MpFoundation.Game.Aim.AimQuery.DirectionFromYawPitch(a.AimYaw, a.AimPitch);
+            float d = PropRestGate.DistanceToGrabRay(point, a.AimOriginGlobalPosition, dir, GrabRange);
+            if (d < nearest)
+                nearest = d;
+        }
+        return nearest;
+    }
+
+    // --- PHYS-1 (P1): the wake funnel --------------------------------------------------------
+
+    /// <summary>How many times <see cref="ServerClampMotion"/>'s per-tick backstop has reduced a
+    /// prop's velocity this session. P2 asks for this to be ~0 in ordinary play, which is a claim
+    /// only a counter can support; the suite reads it and the server prints it.</summary>
+    public long PropClampCount { get; private set; }
+
+    /// <summary>How many resting props have been woken by a contact this session (P1). Read at
+    /// rest by the suite: a wake storm in an untouched room would be 0 here and must stay 0.</summary>
+    public long PropWakeCount { get; private set; }
+
+    /// <summary>
+    /// <b>Server-only: something moving touched <paramref name="struck"/> — wake it if it is a
+    /// RESTING networked prop</b> (P1). The single funnel for all three contact sources: the
+    /// holder's own hold sweep, a loose prop's <c>body_entered</c>, and an avatar's slide
+    /// collision.
+    ///
+    /// <para><b>Every decision that is not "was there a contact" lives here</b>, on the server,
+    /// in the class that owns prop authority — the physical body reports the contact and knows
+    /// nothing else. Held props are refused by <c>PropRegistry.Wake</c> itself (waking something
+    /// in a hand would take it off a player without any of the release funnel's broadcasts), and
+    /// a prop that is already Loose needs no wake because it is already simulating: the solver is
+    /// what moves it, and re-waking it would zero the velocity it already has.</para>
+    /// </summary>
+    /// <param name="struck">The body that was hit.</param>
+    /// <param name="moverMassKg">Mass of the thing that hit it. 0 for a kinematic body nobody
+    /// weighed, which <c>PropPhysics.WakeSpeed</c> reads as "the target's equal".</param>
+    /// <param name="approachSpeedMps">Closing speed along the contact normal.</param>
+    /// <param name="pushDirection">Which way the shove goes. Need not be normalised.</param>
+    /// <param name="atWorld">Where the contact happened — the impulse's application point, and
+    /// therefore the lever that makes a box topple rather than slide.</param>
+    public void ServerBumpProp(Carryable struck, float moverMassKg, float approachSpeedMps,
+        Vector3 pushDirection, Vector3 atWorld)
+    {
+        if (!_isServer || !PropPhysics.ShouldWake(approachSpeedMps))
+            return;
+        if (!GodotObject.IsInstanceValid(struck) || struck.GetParent() is not NetworkedProp target)
+            return;
+        if (!_registry.TryGet(target.PropId, out PropState s) || s.Mode != PropMode.Resting)
+            return;
+
+        float targetMass = struck.MassKg > 0f ? struck.MassKg : 1f;
+        Vector3 impulse = PropPhysics.ContactImpulse(pushDirection, moverMassKg, targetMass,
+            approachSpeedMps);
+        if (impulse.LengthSquared() <= 0f)
+            return;
+
+        Transform3D at = struck.GlobalTransform;
+        if (!_registry.Wake(target.PropId, at))
+            return;
+        ClearStuckClock(target.PropId);
+        PropWakeCount++;
+        // One line per wake, naming the speed it was woken at against the bar. Wakes are rare by
+        // construction (a resting prop wakes once and is then Loose until it settles), so this is
+        // not a per-tick log; and it is the evidence for BOTH halves of P1 -- that a contact woke
+        // something, and that nothing left with more than the bar. "0 wakes over 30 s untouched"
+        // is a claim the suite makes by counting these.
+        GD.Print($"[phys] wake prop={target.PropId} at={approachSpeedMps:F2} m/s "
+            + $"-> {impulse.Length() / targetMass:F2} m/s total={PropWakeCount}");
+        // PropRelease.Bumped (PHYS-1). Nobody dropped, placed or threw this: it was knocked. The
+        // byte is spent on the same every-peer path every other release verb uses, so the sound
+        // layer can give a knock its own voice without a second message.
+        Rpc(MethodName.ApplyPropState, target.PropId, (int)PropMode.Loose, 0, at,
+            (int)PropRelease.Bumped);
+        target.WakeFromContactServer(impulse, atWorld);
+    }
+
     /// <summary>Books one audit and logs the ones that acted. A passing audit is silent by
     /// design: 150 props settling after a shove would otherwise print 150 lines saying nothing
     /// happened, and the line that matters would be invisible inside them.</summary>
@@ -351,7 +519,29 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
     // --- Loose-physics tuning (server-only; see the _PhysicsProcess loop below) -----------
     /// <summary>Below this linear speed squared (~0.2 m/s), a Loose prop is considered
     /// candidate-at-rest and starts accumulating settle ticks.</summary>
-    private const float SettleSpeedSq = 0.04f;
+    // PHYS-1 (2026-09-20): written as the square of the named speed rather than as the literal
+    // 0.04f it was, so it and SettleSpinSq below cannot drift apart by hand. The value moves by
+    // 3e-9 and nothing observable depends on a settle threshold to nine decimal places.
+    private const float SettleSpeedSq = SettleSpeedMps * SettleSpeedMps;
+
+    /// <summary><b>The same settle question asked of the spin</b> (PHYS-1, P4, 2026-09-20), rad/s
+    /// squared. Without it a can that is still rolling — or a sphere rocking into a shelf lip at
+    /// almost no linear speed — latches to Resting and freezes kinematic mid-motion on every
+    /// peer, which is precisely the opposite of "cans roll around".
+    ///
+    /// <para><b>Derived from <see cref="SettleSpeedSq"/> through the smallest prop's radius, not
+    /// picked.</b> The linear gate is 0.2 m/s; a can (<c>Carryable.CanRadiusM</c>, 35 mm) rolling
+    /// at 0.2 m/s turns at 0.2/0.035 = 5.71 rad/s, so that is the spin a settling can genuinely
+    /// has and the two gates close at the same physical moment. Anything blunter would either
+    /// freeze a roll or leave a prop that has stopped jittering forever un-latched.</para></summary>
+    private const float SettleSpinSq =
+        (SettleSpeedMps / Carryable.CanRadiusM) * (SettleSpeedMps / Carryable.CanRadiusM);
+
+    /// <summary>The linear settle speed itself, m/s — <see cref="SettleSpeedSq"/>'s root, named so
+    /// <see cref="SettleSpinSq"/> can be written as the arithmetic that derives it rather than as
+    /// a second literal that has to be kept in step by hand.</summary>
+    private const float SettleSpeedMps = 0.2f;
+
     /// <summary>Consecutive slow ticks (~0.3s at 60 Hz) required before latching to Resting —
     /// long enough that a prop resting on an unstable stack or mid-bounce doesn't false-latch.</summary>
     private const int SettleTicks = 18;
@@ -719,6 +909,18 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
                 continue;
             }
 
+            // PHYS-1 (P2): THE BACKSTOP, before the transform is sampled so what is streamed is
+            // what the prop is actually doing. The real bound is at the impulse
+            // (PropPhysics.WakeSpeed clamps every wake to the bar); this catches the energy a
+            // SOLVER can invent out of a deep overlap or a wedge, which is the event a player
+            // reads as "it freaked out". The counter is the evidence that it is ~0 in play.
+            if (node.ServerClampMotion())
+            {
+                PropClampCount++;
+                GD.Print($"[phys] clamp prop={p.Id} to {node.SpeedMps:F2} m/s "
+                    + $"(cap {node.SpeedCapMps:F2}) total={PropClampCount}");
+            }
+
             Transform3D t = node.Body.GlobalTransform;
             _registry.SetLooseTransform(p.Id, t);
             // 30 Hz + skip-unchanged: don't re-broadcast a transform that hasn't meaningfully
@@ -733,7 +935,20 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
                 _lastStreamed[p.Id] = t;
             }
 
-            if (node.Body.LinearVelocity.LengthSquared() < SettleSpeedSq)
+            // PHYS-1 (P4): A CAN MUST NOT "SLEEP" MID-ROLL.
+            //
+            // The linear gate alone latches a prop that is still visibly turning: a can rolling
+            // the last half-metre of its travel crosses 0.2 m/s well before it stops, and a
+            // sphere or a cylinder settling into a shelf lip rocks in place at almost no linear
+            // speed at all. Latching there freezes it kinematic mid-motion on every peer, which
+            // is the opposite of "cans roll around" and reads as the physics giving up.
+            //
+            // SettleSpinSq is the same question asked of the other degree of freedom, and the
+            // number is derived from the linear one through the smallest prop's radius rather
+            // than picked: a 35 mm can rolling at the linear settle speed turns at 0.2/0.035 =
+            // 5.7 rad/s, so anything at or above that is still a roll.
+            if (node.Body.LinearVelocity.LengthSquared() < SettleSpeedSq
+                && node.Body.AngularVelocity.LengthSquared() < SettleSpinSq)
             {
                 int c = _looseSettle.GetValueOrDefault(p.Id) + 1;
                 _looseSettle[p.Id] = c;
@@ -1457,6 +1672,14 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
         Vector3 impulse = fwd * forwardSpeed + Vector3.Up * upSpeed;
         Transform3D at = node.Body.GlobalTransform;
         _registry.Release(propId, at, release);
+        ClearStuckClock(propId);
+        // PHYS-1 (P2): A THROW IS THE ONE EXCEPTION TO THE BAR, and it is granted by the VERB
+        // rather than inferred from the velocity. CARRY-1's throw leaves the hand at 7.5 m/s
+        // forward and 3.2 m/s up, so a prop judged only by its speed would be clamped in the
+        // first tick of every throw. The allowance lasts exactly as long as the launch energy
+        // does (PropPhysics.ThrowEnergySpent) and covers only the prop that was thrown.
+        if (release == PropRelease.Thrown)
+            node.NoteThrownServer();
         Rpc(MethodName.ApplyPropState, propId, (int)PropMode.Loose, 0, at, (int)release);
         node.BeginLooseServer(impulse);
     }

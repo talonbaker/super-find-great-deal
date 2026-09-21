@@ -1,7 +1,8 @@
-[gd_scene load_steps=8 format=3 uid="uid://dealbox0sfgdmvp"]
+[gd_scene load_steps=9 format=3 uid="uid://dealbox0sfgdmvp"]
 
 [ext_resource type="Script" path="res://scripts/game/sandbox/Carryable.cs" id="1_carryable"]
 [ext_resource type="Script" path="res://scripts/game/sandbox/feel/Interactable.cs" id="2_interactable"]
+[ext_resource type="PhysicsMaterial" path="res://assets/physics/cardboard.tres" id="3_physmat"]
 
 [sub_resource type="BoxMesh" id="BoxMesh_cereal"]
 size = Vector3(0.19, 0.28, 0.06)
@@ -49,6 +50,14 @@ script = ExtResource("1_carryable")
 kind = 3
 material = 2
 tint = Color(0.78, 0.26, 0.2, 1)
+; PHYS-1 (2026-09-20). IDENTICAL to CerealBox.tscn's, centre of mass included -- see that file for
+; why the box is top-heavy and DealCan.tscn for why a deal object must match its twin to the
+; digit. tests/unit/DealPrefabTests.cs asserts every line below against the plain twin.
+physics_material_override = ExtResource("3_physmat")
+linear_damp = 0.4
+angular_damp = 1.2
+center_of_mass_mode = 1
+center_of_mass = Vector3(0, 0.07, 0)
 
 [node name="Visual" type="Node3D" parent="."]
 

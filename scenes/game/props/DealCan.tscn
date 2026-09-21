@@ -1,7 +1,8 @@
-[gd_scene load_steps=8 format=3 uid="uid://dealcan0sfgdmvp"]
+[gd_scene load_steps=9 format=3 uid="uid://dealcan0sfgdmvp"]
 
 [ext_resource type="Script" path="res://scripts/game/sandbox/Carryable.cs" id="1_carryable"]
 [ext_resource type="Script" path="res://scripts/game/sandbox/feel/Interactable.cs" id="2_interactable"]
+[ext_resource type="PhysicsMaterial" path="res://assets/physics/tin.tres" id="3_physmat"]
 
 [sub_resource type="CylinderMesh" id="CylinderMesh_can"]
 top_radius = 0.035
@@ -71,6 +72,16 @@ script = ExtResource("1_carryable")
 kind = 2
 material = 1
 tint = Color(0.74, 0.76, 0.79, 1)
+; PHYS-1 (2026-09-20). IDENTICAL to Can.tscn's, to the digit, for the reason this prefab's header
+; already gives: a deal can that rolled further, stopped sooner or gripped harder than its
+; forty-seven neighbours would be findable by watching it move, and the near-miss would stop being
+; a near-miss. The table and the reasoning are in Can.tscn and assets/physics/README.md; this file
+; carries the values so the two prefabs are one object with one band added.
+; tests/unit/DealPrefabTests.cs asserts every line below against the plain twin.
+physics_material_override = ExtResource("3_physmat")
+linear_damp = 0.3
+angular_damp = 0.25
+can_sleep = false
 
 [node name="Visual" type="Node3D" parent="."]
 

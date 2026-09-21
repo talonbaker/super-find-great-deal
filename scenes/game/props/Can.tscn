@@ -1,7 +1,8 @@
-[gd_scene load_steps=6 format=3 uid="uid://can0sfgdmvp"]
+[gd_scene load_steps=7 format=3 uid="uid://can0sfgdmvp"]
 
 [ext_resource type="Script" path="res://scripts/game/sandbox/Carryable.cs" id="1_carryable"]
 [ext_resource type="Script" path="res://scripts/game/sandbox/feel/Interactable.cs" id="2_interactable"]
+[ext_resource type="PhysicsMaterial" path="res://assets/physics/tin.tres" id="3_physmat"]
 
 [sub_resource type="CylinderMesh" id="CylinderMesh_can"]
 top_radius = 0.035
@@ -51,6 +52,30 @@ script = ExtResource("1_carryable")
 kind = 2
 material = 1
 tint = Color(0.74, 0.76, 0.79, 1)
+; PHYS-1 (2026-09-20), ruling P4 -- THE ROW OF THE MATERIAL TABLE THAT MAKES A CAN ROLL.
+; Every line here is a NATIVE RigidBody3D property, which is the half of the .tscn that actually
+; arrives through a nested PackedScene instance (see the `mass` note above). Friction and bounce
+; are on the shared PhysicsMaterial; what cannot live there is below.
+;
+; angular_damp 0.25 is the lowest of any prop in the game and it is the whole of "cans roll
+; around": at a box's 1.2 a nudged can turns a third of a revolution and stops dead, which reads
+; as the floor being made of tar. linear_damp 0.30 is what guarantees it eventually STOPS -- an
+; undamped roll decays only through contact and Produce.tscn already recorded a sphere leaving the
+; room. v0/d puts a 1 m/s nudge at about 3.3 m of travel, inside PHYS-1's "at least 1 m, stopped
+; within 4 m" bar and measured there rather than trusted.
+;
+; can_sleep = false, and ONLY on the can. Godot's sleep thresholds are project-wide and are tuned
+; for bodies that have arrived, not for a cylinder rolling slowly down an aisle; a can put to
+; sleep mid-roll freezes in place in front of the player. The cost is nothing, because a prop is
+; a live rigid body only while it is Loose, and the server's own settle latch -- which PHYS-1
+; taught to watch the SPIN as well as the speed (PropManager.SettleSpinSq) -- is what decides a
+; roll is over.
+;
+; No centre-of-mass override: a can is not top-heavy, and P4 says so in as many words.
+physics_material_override = ExtResource("3_physmat")
+linear_damp = 0.3
+angular_damp = 0.25
+can_sleep = false
 
 [node name="Visual" type="Node3D" parent="."]
 

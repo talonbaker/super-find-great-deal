@@ -1277,6 +1277,8 @@ that walk, and it is the only copy).
 | **7909** | **`Run-HoldingBoardTest.ps1`** (and `Capture-HoldingBoard.ps1`, unregistered) | **HOLD-1** |
 | **7910** | **`Walk-DefinitionOfDone.ps1`** (the §8 walk, unregistered and manual) | **INT-1** |
 | **7911** | **`Run-StockTest.ps1`** (and `Capture-ShopFloor.ps1`, unregistered) | **STOCK-1** |
+| **7913** | **`Run-CarryHoldTest.ps1`** (and `Capture-CarryHold.ps1`, unregistered) | **FEEL-1** |
+| **7916** | **`Run-PhysicsFeelTest.ps1`** | **PHYS-1** |
 
 Everything below 7893 is the pre-fork ladder and is unchanged: 7777, 7778, 7788, 7799, 7807,
 7809/7810, 7815, 7816, 7817, 7818, 7821, 7822, 7830, 7831, 7834.
@@ -2058,3 +2060,39 @@ Two of this packet's own instruments were wrong before the feature was, and both
 stayed green under that plant** -- which is the useful half: the capsule projection and the world
 sweep are independent guarantees, so a single plant cannot flatter both, and a red in one says
 which mechanism moved.
+
+## PHYS-1 (2026-09-20): udp/7916, and a suite whose bars are an ANGLE and a distance
+
+`tests/Run-PhysicsFeelTest.ps1` claims **udp/7916** and is registered last in
+`tests/Run-AllTests.ps1`. The number was **assigned by the orchestrator in the dispatch**, which
+is the rule FEEL-1's section above states in capitals; nothing here was computed from a snapshot
+of `tests/`. Its row is in the one ladder table.
+
+### How to read a red
+
+Its failures are **readings**, in the carry family's tradition, and they separate cleanly:
+
+| The line | What it is |
+|---|---|
+| `STAGING: PhysBot never held prop N -- closest approach X m` | the walk, not the physics. Read X against the CLIENT's 1.5 m `PickupRadius` in 3D exactly as REVIEW-1's entry says: inside it and motionless is a press that found nothing; several metres out is the four-corridor mis-walk, and no constant reaches that |
+| `not one of the five boxes tilted past 60 deg` | **the subject.** A resting prop is an immovable wall again — `PropManager.ServerBumpProp` is not being reached, or `PropRegistry.Wake` is refusing |
+| `only N of 5 boxes went over` | the chain stopped part way: the shove is arriving but is too small, or the boxes are no longer top-heavy (`center_of_mass_mode` lost off `CerealBox.tscn` is the way that happens silently) |
+| `the row took Xs to go over` | each box is being knocked by the CRATE rather than by its neighbour — check whether the row's pitch still sits inside a falling box's 0.28 m of reach |
+| `the can travelled X m` | the material table. `assets/physics/tin.tres`'s friction or `Can.tscn`'s `angular_damp` moved |
+| `prop N was seen at X m/s` / `the clamp bit N times` | P2. The impulse clamp is in `PropPhysics.WakeSpeed`; the per-tick backstop is `NetworkedProp.ServerClampMotion` |
+| `the rest audit teleported N prop(s)` | P3's gate (`PropRestGate`) is not holding, or a prop is genuinely unfixable |
+| `the server logged not one [phys] wake` | **read this one first whatever else is red.** Every other bar is then green for the wrong reason |
+
+**The line to grep on a green run** is printed unconditionally:
+`PHYS1BARS restWorst=… fastestUnheld=… clamps=… restores=… wakes=… waits=…`.
+
+### A frozen body is trivially stable, so "the stack is stable at rest" is not the bar
+
+A `Resting` prop in this game is `Freeze = true, FreezeMode = Kinematic` on every peer, so a row
+of five boxes standing untouched for thirty seconds proves only that the latch works — it is true
+by construction and would stay true with every line of PHYS-1 reverted. The suite measures it
+anyway (bar 1, as a movement of at most 1 cm before anything arrives, which catches a stack that
+drifts because something woke it early), and it puts the weight on the honest half instead:
+**every prop the crate knocks over must be back at Resting by the end of the run** (bar 5). A
+woken prop that never settles is the one case where P1 and the rest audit cannot both hold, and
+that bar is what would say so.

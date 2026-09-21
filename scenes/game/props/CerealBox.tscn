@@ -1,7 +1,8 @@
-[gd_scene load_steps=6 format=3 uid="uid://cerealbox0sfgdmvp"]
+[gd_scene load_steps=7 format=3 uid="uid://cerealbox0sfgdmvp"]
 
 [ext_resource type="Script" path="res://scripts/game/sandbox/Carryable.cs" id="1_carryable"]
 [ext_resource type="Script" path="res://scripts/game/sandbox/feel/Interactable.cs" id="2_interactable"]
+[ext_resource type="PhysicsMaterial" path="res://assets/physics/cardboard.tres" id="3_physmat"]
 
 [sub_resource type="BoxMesh" id="BoxMesh_cereal"]
 size = Vector3(0.19, 0.28, 0.06)
@@ -41,6 +42,27 @@ script = ExtResource("1_carryable")
 kind = 3
 material = 2
 tint = Color(0.78, 0.26, 0.2, 1)
+; PHYS-1 (2026-09-20), ruling P4 -- THE ROW THAT MAKES A ROW OF BOXES DOMINO.
+; Native properties only; friction (0.75, the highest of the carryables) is on the shared
+; PhysicsMaterial and is the other half of this.
+;
+; THE CENTRE OF MASS IS THE DESIGN. A 0.19 x 0.28 x 0.06 box standing on its smallest face is
+; already tippy; moving its centre of mass to y = +0.07 -- a quarter of its height above the
+; geometric centre, i.e. three quarters of the way up -- is what makes a NUDGE enough, which is
+; what Talon asked for ("accidentally hit a bunch of boxes"). center_of_mass_mode 1 is CUSTOM;
+; without it the vector below is ignored and the body computes its own from the collider.
+; PHYS-1 applies a wake impulse at the CONTACT POINT rather than at the centre of mass
+; (NetworkedProp.WakeFromContactServer), so the lever and the top-heaviness compose: a box struck
+; high goes over, a box struck at the base slides a little.
+;
+; angular_damp 1.2 against the can's 0.25 -- five times -- so a box that has fallen stops flat
+; instead of rocking on its corner for a second and a half. linear_damp 0.4: cardboard on a board
+; does not glide.
+physics_material_override = ExtResource("3_physmat")
+linear_damp = 0.4
+angular_damp = 1.2
+center_of_mass_mode = 1
+center_of_mass = Vector3(0, 0.07, 0)
 
 [node name="Visual" type="Node3D" parent="."]
 

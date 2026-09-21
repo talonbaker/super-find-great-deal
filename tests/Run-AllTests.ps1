@@ -229,6 +229,15 @@ try {
         # other reason it belongs at the end. About half a minute.
         @{ Name = "Carry: hold (FEEL-1)"; Script = "Run-CarryHoldTest.ps1" }
 
+        # PHYS-1 (2026-09-20), appended last on the same standing rule -- it launches bots, so it
+        # takes part in the join-index spawn dealing. udp/7916, ASSIGNED by the orchestrator in
+        # the dispatch (the ladder table is a record of what is claimed, never a source of free
+        # numbers -- this repo has paid for that four times). It is the gate on Talon's #8: a
+        # resting prop is no longer an immovable wall, so a carried crate driven into a row of
+        # cereal boxes knocks them over like dominoes and a can rolls; and nothing it wakes may
+        # exceed 3 m/s, teleport itself, or leave the room. About fifty seconds.
+        @{ Name = "Physics: feel (PHYS-1)"; Script = "Run-PhysicsFeelTest.ps1" }
+
         # WHAT WAS REMOVED HERE AT THE FORK (BASE-1, 2026-09-19), so a reader of an old handoff
         # can tell "deleted" from "lost": the bubble-test world, the shared bubble counter and the
         # last-bubble celebration, the TV portal, the Puffin Lab, the watcher's night gate, the

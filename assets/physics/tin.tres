@@ -1,0 +1,18 @@
+[gd_resource type="PhysicsMaterial" format=3 uid="uid://phystin0sfgdmvp"]
+
+; PHYS-1 (2026-09-20). A CAN, and this is the one row of the table Talon named out loud:
+; "cans should roll around." Friction 0.25 against the floor's default 1.0 combines to 0.25 --
+; low enough that a nudge becomes a roll instead of a scrape, and high enough that a can set down
+; on a shelf does not slide off it on its own.
+;
+; The only prop in the game with any BOUNCE. 0.10 is a ping rather than a bounce: a tin dropped on
+; a board hops a centimetre and settles, which is what tin does. Anything higher and a knocked can
+; leaves the aisle, which Produce.tscn already recorded as a worse bug than a quiet one.
+;
+; NOT `rough`/`absorbent`: those make this material's number WIN at a contact instead of combining,
+; and a can is not the thing that should decide how a contact behaves -- the surface it is on is.
+[resource]
+friction = 0.25
+rough = false
+bounce = 0.1
+absorbent = false

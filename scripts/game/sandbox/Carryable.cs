@@ -316,6 +316,28 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
     /// computed here because the relative-contact-speed rule lives here.</para></summary>
     public System.Action<float>? ImpactReporter { get; set; }
 
+    /// <summary><b>Where a contact with ANOTHER PROP goes, whether or not it was loud enough to
+    /// hear</b> (PHYS-1, 2026-09-20, ruling P1). Set by <c>NetworkedProp</c> beside
+    /// <see cref="ImpactReporter"/>; null on every offline/sandbox body, which is unchanged.
+    ///
+    /// <para><b>The same signal, a second consumer — not a second monitor.</b> P1's wording is
+    /// exact about this: <c>ContactMonitor</c> and <c>body_entered</c> already exist on this class
+    /// for sound, and a resting prop that has to be woken is the same contact the sound layer is
+    /// already being told about. What differs is the GATES. The impact fire is behind a 0.4 s
+    /// per-body cooldown and a 2 m/s audibility floor, and neither is a fact about whether the
+    /// thing that got hit should move: a can rolled into a pyramid at 1 m/s is inaudible and must
+    /// still knock it over, and the second can of a collapsing stack is inside the first's cooldown
+    /// and must still be knocked. So this reports from ABOVE both gates, with
+    /// <c>PropPhysics.WakeSpeedThresholdMps</c> — a seventh of the audibility floor — as its
+    /// own.</para>
+    ///
+    /// <para><b>What it is NOT.</b> It is not the wake itself and it carries no decision: the
+    /// arguments are the other body and the speed, and the server's prop layer decides whether
+    /// that body is a resting networked prop, whether it may be woken, and with what. This file
+    /// stays the physical body and keeps knowing nothing about netcode, exactly as
+    /// <see cref="ImpactReporter"/>'s own note says.</para></summary>
+    public System.Action<Carryable, float>? BumpReporter { get; set; }
+
     /// <summary>In someone's hands, by either of the two mechanisms: the anchor chase
     /// (<see cref="_holder"/>) or the holder-side feel spring (<see cref="_springHeld"/>, CARRY-1).
     ///
@@ -929,6 +951,26 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
 
     private void OnBodyEntered(Node body)
     {
+        // PHYS-1 (2026-09-20), ruling P1: THE WAKE IS REPORTED FIRST, ABOVE BOTH SOUND GATES.
+        //
+        // The two early-outs below are correct for AUDIO and wrong for physics, and both cases
+        // are exactly the ones Talon named:
+        //   IsHeld            -- a held crate driven into a row of boxes is the domino case, and
+        //                        a held body's contacts are precisely what must move them. (A
+        //                        SPRING-held prop is frozen kinematic and Godot asks it nothing,
+        //                        so the holder's own sweep handles that one; this arm is what
+        //                        covers a prop held by the anchor chase and any future holder.)
+        //   _thunkCooldown    -- the second can of a collapsing stack is inside the first can's
+        //                        0.4 s cooldown and must still be knocked over.
+        // And ThunkSpeedThreshold (2 m/s) is an AUDIBILITY floor: a can nudged into a pyramid at
+        // 1 m/s is silent and must still bring it down. The wake has its own, far lower gate
+        // (PropPhysics.WakeSpeedThresholdMps).
+        //
+        // Only prop-on-prop: a wall has nothing to wake, and the reporter itself is only ever set
+        // on a networked prop's body by NetworkedProp, which drops everything off the server.
+        if (BumpReporter is { } bump && body is Carryable hitProp)
+            bump(hitProp, RelativeContactSpeed(body));
+
         if (IsHeld || _thunkCooldown > 0)
             return;
         float relativeSpeed = RelativeContactSpeed(body);

@@ -1662,6 +1662,10 @@ public partial class SandboxAvatar : CharacterBody3D, IServerConfirmedBody
             ApplyStateToNode(_state);
         else
             _state = AvatarMotor.Step(this, _state, intent, speedFactor, AvatarMotor.TickDelta, out ev);
+        // PHYS-1 (P1): a HOST is a player, and its own avatar is driven here rather than through
+        // ServerTick. The wake is refused off-server inside PropManager, so on a pure client this
+        // line costs one null-ish check and does nothing.
+        WakeBumpedProp(ev);
         _ring.RecordPrediction(_seq, _state, _aim.Stance, _aim.SteadyElapsedSec);
 
         float dt = (float)delta;
@@ -2051,7 +2055,11 @@ public partial class SandboxAvatar : CharacterBody3D, IServerConfirmedBody
             AimPitch = e.Intent.AimPitch;
             float authoritativeSpeedFactor = carrySpeedFactor * _aim.SpeedFactor;
             _state = AvatarMotor.Step(this, _state, e.Intent, authoritativeSpeedFactor,
-                AvatarMotor.TickDelta, out _);
+                AvatarMotor.TickDelta, out StepEvents serverEv);
+            // PHYS-1 (P1): THE AUTHORITATIVE STEP IS WHERE A REMOTE PLAYER KNOCKS A SHELF OVER.
+            // Deliberately NOT in Reconcile's replay loop above, which re-steps inputs that were
+            // already simulated once -- a rewind must not knock the same stack down twice.
+            WakeBumpedProp(serverEv);
 
             // Latch a genuine Interact rising edge for the assist verbs (see
             // TakeServerInteractEdge). Derived here, inside the loop over consumed entries, so it
@@ -2839,6 +2847,44 @@ public partial class SandboxAvatar : CharacterBody3D, IServerConfirmedBody
     /// a friend did nothing at all. A person is not a shelf; they are not somewhere you set a
     /// thing down, and they will not be standing there in a second.</para>
     /// </summary>
+    /// <summary>
+    /// <b>This body walked into something — if it was a resting prop, knock it</b> (PHYS-1,
+    /// 2026-09-20, ruling P1: a Resting prop touched by a moving body, "a held prop, a Loose prop,
+    /// an avatar", wakes).
+    ///
+    /// <para><b>Off the motor's existing bump scan, so there is no new query and no new monitor.</b>
+    /// <c>AvatarMotor.Step</c> already walks this step's slide collisions to find the hardest
+    /// non-floor contact for the bump sound; PHYS-1 adds only the collider's identity to what that
+    /// scan reports. Nothing in the motor reacts to it, which keeps that file's "bumps are
+    /// cosmetic-only" rule intact.</para>
+    ///
+    /// <para><b>Server only, and that is what makes it replay-safe.</b> The motor is run by client
+    /// prediction and again by server reconciliation; if a wake could be caused by either, a
+    /// rewind would knock the same shelf over twice. <c>PropManager.ServerBumpProp</c> refuses
+    /// anything off the server, and this guard states the same thing at the call site so the
+    /// reason is readable here.</para>
+    ///
+    /// <para>The mass handed over is the BODY's, not the player's: a person leaning on a can is
+    /// not a person's worth of momentum arriving at it, and the motor is a kinematic controller
+    /// with no mass of its own. <c>PropPhysics.WakeSpeed</c> reads 0 as "the target's equal",
+    /// which makes a walked-into can leave at about half the walking speed — a shove, not a
+    /// launch.</para>
+    /// </summary>
+    private void WakeBumpedProp(in StepEvents ev)
+    {
+        if (ev.BumpCollider is not Carryable struck)
+            return;
+        if (MpFoundation.Game.Props.PropManager.Instance is not { } mgr)
+            return;
+        // The SERVER gate is PropManager's own (ServerBumpProp refuses off-server), which is the
+        // single place prop authority is decided; restating it here would be a second copy of the
+        // rule. What that gate buys is stated above: a client's predicted step and a rewind's
+        // replay both reach this line and both do nothing.
+        Vector3 toward = struck.GlobalPosition - GlobalPosition;
+        mgr.ServerBumpProp(struck, moverMassKg: 0f, approachSpeedMps: ev.BumpImpact,
+            pushDirection: toward, atWorld: ev.BumpPosition);
+    }
+
     private bool AimedSurfaceWithinPlaceReach(NetworkedProp held)
     {
         if (!IsInsideTree())
