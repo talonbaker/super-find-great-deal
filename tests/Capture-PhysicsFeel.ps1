@@ -62,8 +62,11 @@ New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 #      teleport; Measure-ShopFloor's shots walk with --goto-script and never saw this.
 # So the camera stays where join order puts the first peer, SearchSpawn_0 at (35.5, 1.1, 0), told
 # to walk to exactly that point so BotHarness never wanders, and the FIXTURE is placed in front of
-# it: the z = 0 walkway 2.5-3.3 m east, offset to z = +0.4 (screen right for a camera looking +X)
-# so CARRY-1's crate at (36, 0.22, 0) sits below the frame rather than in it. Yaw -90 looks +X
+# it: the z = 0 walkway 3.2-4.5 m east, offset to z = +0.55 (screen right for a camera looking +X).
+# The fourth run of this harness had the row at x = 38.0, z = 0.4 and CARRY-1's crate Prop_3 at
+# (37.9, 0) hid it: the frames show a yellow crate mid-aisle with one cardboard corner behind it.
+# CARRY-1's four crates stand at z = 0 between x = 36 and 38, so the fixtures start a metre past
+# the last of them and a further 0.15 m to the right. Yaw -90 looks +X
 # (Measure-ShopFloor's ShopEast; a run of this harness at +90 photographed the drop-off bin behind
 # the camera); pitch -20 puts a floor-level fixture at 3 m in the centre of a 1.04 m eye.
 # The shove clock starts when the server's PropManager starts stepping and --capture-at counts
@@ -81,16 +84,16 @@ New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 #   roll     one can, seeded on its side, rolled EAST at the packet's 1 m/s at 8.5 s, away from
 #            the camera down the open walkway.
 # Edge-on (yaw 90) at a pitch of 0.10: the domino geometry Run-PhysicsFeelTest derives and measures.
-$DominoSeed = "38.00,0.14,0.4,box,0,90;38.10,0.14,0.4,box,0,90;38.20,0.14,0.4,box,0,90;38.30,0.14,0.4,box,0,90;38.40,0.14,0.4,box,0,90"
+$DominoSeed = "39.20,0.14,0.55,box,0,90;39.30,0.14,0.55,box,0,90;39.40,0.14,0.55,box,0,90;39.50,0.14,0.55,box,0,90;39.60,0.14,0.55,box,0,90"
 # A 3-2-1 pyramid of cans standing on the floor plus the shove can in front of it. Rows are
 # 0.075 m apart (a can is 0.07 m across, so they touch); the upper rows sit in the valleys.
-$PyramidSeed = ("38.80,0.06,0.325,can;38.80,0.06,0.400,can;38.80,0.06,0.475,can;" +
-                "38.80,0.18,0.363,can;38.80,0.18,0.437,can;" +
-                "38.80,0.30,0.400,can;" +
-                "37.30,0.035,0.4,can,90")
-$RollSeed = "37.50,0.035,0.4,can,90"
+$PyramidSeed = ("40.00,0.06,0.475,can;40.00,0.06,0.550,can;40.00,0.06,0.625,can;" +
+                "40.00,0.18,0.513,can;40.00,0.18,0.587,can;" +
+                "40.00,0.30,0.550,can;" +
+                "38.50,0.035,0.55,can,90")
+$RollSeed = "38.70,0.035,0.55,can,90"
 $CamAt = "35.5,0"
-$LookEast = "-90,-20"
+$LookEast = "-90,-13"
 $passes = @(
     @{ Name = "domino";  Bot = "DominoCam";  Seed = $DominoSeed;
        Shove = "1,2.8,0,0,8,0,0,-8";
