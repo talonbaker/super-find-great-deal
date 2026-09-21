@@ -158,6 +158,26 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
         _ => DefaultProfilePath,
     };
 
+    /// <summary><b>The same classification, pointed at the FEEL instead of at the sound</b>
+    /// (PHYS-1, 2026-09-20). One `PropMaterial` picks both, which is the whole point of
+    /// `assets/physics/README.md`'s table: a prop that sounds like tin and behaves like cardboard
+    /// would be two classifications of one object that nothing keeps in step.
+    ///
+    /// <para><b>Why the code-built path needs this at all.</b> An AUTHORED prefab carries its
+    /// `physics_material_override` in its own `.tscn` and never reaches here. A prop built in
+    /// code — <c>--seed-test-props</c>, the offline sandbox — has no `.tscn` and would otherwise
+    /// get Godot's bare defaults. <c>Produce.tscn</c>'s own header already records what that
+    /// costs: <i>"the two birth paths have to agree or the seeded fixture stops being the same
+    /// object as the shelved product, which is the whole reason the dimensions are shared
+    /// constants."</i> It was written about damping; it is just as true of friction.</para></summary>
+    public static string PhysicsMaterialPathFor(PropMaterial material) => material switch
+    {
+        PropMaterial.Tin => "res://assets/physics/tin.tres",
+        PropMaterial.Cardboard => "res://assets/physics/cardboard.tres",
+        PropMaterial.Produce => "res://assets/physics/produce.tres",
+        _ => "res://assets/physics/wood.tres",
+    };
+
     /// <summary>The material each shape is made of, when nothing says otherwise. Pure, and public
     /// so the Godot-free suite can pin the mapping — this is the table SHELF-1 will rely on when
     /// it fills the aisles.</summary>
@@ -512,11 +532,23 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
                 };
                 collider = new CylinderShape3D { Radius = CanRadiusM, Height = CanHeightM };
                 Mass = CanMassKg;
+                // PHYS-1 (2026-09-20): Can.tscn's own lines, to the digit. See the class-level
+                // note on PhysicsMaterialPathFor for why a code-built prop has to carry them.
+                LinearDamp = 0.3f;
+                AngularDamp = 0.25f;
+                CanSleep = false;
                 break;
             case Shape.Box:
                 mesh = new BoxMesh { Size = BoxSizeM };
                 collider = new BoxShape3D { Size = BoxSizeM };
                 Mass = BoxMassKg;
+                // PHYS-1 (2026-09-20): CerealBox.tscn's own lines, to the digit -- the centre of
+                // mass included, because a seeded box that was not top-heavy would not domino and
+                // the suite that measures dominoing seeds its own row.
+                LinearDamp = 0.4f;
+                AngularDamp = 1.2f;
+                CenterOfMassMode = CenterOfMassModeEnum.Custom;
+                CenterOfMass = new Vector3(0f, 0.07f, 0f);
                 break;
             case Shape.Produce:
                 mesh = new SphereMesh { Radius = ProduceRadiusM, Height = ProduceRadiusM * 2f };
@@ -534,8 +566,17 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
             default:
                 mesh = new BoxMesh { Size = new Vector3(0.44f, 0.44f, 0.44f) };
                 collider = new BoxShape3D { Size = new Vector3(0.44f, 0.44f, 0.44f) };
+                // PHYS-1 (2026-09-20): Crate.tscn's own lines. Mass is left at the engine default
+                // 1.0 here exactly as it is there.
+                LinearDamp = 0.3f;
+                AngularDamp = 1.0f;
                 break;
         }
+        // PHYS-1 (2026-09-20): and the CONTACT half of the material table, resolved from the same
+        // PropMaterial that picks this prop's sound. An authored prefab sets its own
+        // physics_material_override in its .tscn and never reaches BuildShape at all.
+        PhysicsMaterialOverride ??=
+            GD.Load<PhysicsMaterial>(PhysicsMaterialPathFor(ResolveMaterial()));
         var meshInstance = new MeshInstance3D { Mesh = mesh, MaterialOverride = _material };
         _visual.AddChild(meshInstance);
         AddChild(new CollisionShape3D { Shape = collider });

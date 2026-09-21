@@ -600,6 +600,9 @@ public partial class NetworkedProp : Node3D
 
     public override void _PhysicsProcess(double delta)
     {
+        // PHYS-1: a wake queued last tick is spent HERE, now that the unfreeze has taken. First,
+        // and before any early-out, because every branch below can return.
+        ApplyPendingImpulse();
         // The holder's own spring wins, on the holder's peer only, and runs on the SERVER too
         // when the host is the one carrying (a host is a player; its held prop deserves the same
         // hand as everybody else's). The early-out below is specifically about the loose STREAM,
@@ -1014,11 +1017,45 @@ public partial class NetworkedProp : Node3D
         ClearSpring();
         _speedCapMps = PropPhysics.MaxPropSpeedMps;
         Body.RejoinPhysicsSilently();
+        // QUEUED FOR THE NEXT TICK, NOT APPLIED NOW, AND THE FIRST RUN OF THE SUITE IS WHY.
+        //
+        // `Freeze = false` takes effect when the physics server next steps the body; an impulse
+        // applied before that is integrated into a state the unfreeze then re-initialises, and
+        // it is silently lost. MEASURED, on the first live run of tests/Run-PhysicsFeelTest.ps1:
+        // the server logged `[phys] wake prop=1017 at=4.30 m/s -> 2.58 m/s` NINETY-SEVEN times
+        // -- wake, nothing moves, settle, wake again -- and the crate travelled 0.093 m in
+        // forty seconds. Every counter said the feature worked.
+        //
+        // The reason the release funnel never hit this is that it does not use an impulse at
+        // all: Carryable.Release WRITES LinearVelocity, and a written velocity survives the
+        // unfreeze where an accumulated impulse does not. Writing the velocity here instead
+        // would work and would throw away the thing P4 needs -- the impulse is applied at the
+        // CONTACT POINT, and that lever is what tips a top-heavy cereal box rather than sliding
+        // it. So the lever is kept and the impulse waits one tick (16 ms, invisible).
+        _pendingImpulse = impulse;
+        _pendingImpulseAt = atWorld;
+        _hasPendingImpulse = true;
+    }
+
+    private Vector3 _pendingImpulse;
+    private Vector3 _pendingImpulseAt;
+    private bool _hasPendingImpulse;
+
+    /// <summary>Spend a queued wake impulse, on the first server tick after the body was
+    /// unfrozen. See <see cref="WakeFromContactServer"/> for why it cannot be spent at the
+    /// wake.</summary>
+    private void ApplyPendingImpulse()
+    {
+        if (!_hasPendingImpulse)
+            return;
+        _hasPendingImpulse = false;
+        if (!IsInstanceValid(Body) || Body.Freeze)
+            return;   // re-frozen between the wake and now: grabbed, reset, or settled
         // The offset ApplyImpulse wants is relative to the CENTRE OF MASS, in world space.
         // Body.CenterOfMass is the body-local one -- the authored value on a prefab whose
         // center_of_mass_mode is Custom (PHYS-1 makes the cereal box top-heavy that way), and
         // zero on every prop whose collider is centred on its origin, which is all the others.
-        Body.ApplyImpulse(impulse, atWorld - Body.GlobalTransform * Body.CenterOfMass);
+        Body.ApplyImpulse(_pendingImpulse, _pendingImpulseAt - Body.GlobalTransform * Body.CenterOfMass);
     }
 
     /// <summary>Server-only: this prop was just THROWN, so it rides

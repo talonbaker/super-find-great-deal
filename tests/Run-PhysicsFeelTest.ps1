@@ -63,11 +63,11 @@ $ErrorActionPreference = "Stop"
 # a pitch of 0.21 m leaves the gap the packet names and a falling box (0.28 m of reach) still
 # arrives at its neighbour. y = 0.14 stands it on the floor.
 $BoxPitch = 0.21
-$BoxX0 = 41.00
+$BoxX0 = 42.00
 $BoxIds = 1..5                 # --seed-test-props assigns ids from 1 in seed order
 $RollCanId = 6
 $CratePropPath = "SearchRoom/Prop_0"    # CARRY-1's crate at world (36, 0.22, 0)
-$CanX = 43.50
+$CanX = 44.50
 
 # The search room is the supermarket seam's +40 x block. Anything outside this envelope has left
 # the room, which is the "cannot clip through walls or the floor" half of the bar.
@@ -127,7 +127,7 @@ try {
         "--log", $physLog, "--duration", $DurationSec, "--world", "supermarket",
         "--carry-script", "36,0.22,0,20.0,-1,30", "--carry-grab-retry", "0.6",
         "--carry-target-prop", $CrateProp,
-        "--carry-walk-to", "44.0,0") "physfeel.phys"
+        "--carry-walk-to", "45.2,0") "physfeel.phys"
     $procs += $physBot
     Start-Sleep -Milliseconds 400
 
@@ -176,7 +176,7 @@ function Get-PropRows($Samples, [int]$PropId) {
         if ($null -eq $p) { continue }
         $qx = [double]$p.qx; $qz = [double]$p.qz
         $out += [pscustomobject]@{
-            T = [double]$s.t
+            T = [double]$s.t / 1000.0   # BotHarness stamps MILLISECONDS; every bar here is in seconds
             X = [double]$p.x; Y = [double]$p.y; Z = [double]$p.z
             Holder = [int]$p.holder
             Spd = [double]$p.spd
@@ -228,7 +228,7 @@ if ($heldEver.Count -eq 0) {
 # honest AND it is long: the bot stands beside its crate for twenty seconds first.
 $arriveT = [double]::PositiveInfinity
 foreach ($s in $physSamples) {
-    if ([int]$s.heldPropId -gt 0) { $arriveT = [double]$s.t; break }
+    if ([int]$s.heldPropId -gt 0) { $arriveT = [double]$s.t / 1000.0; break }
 }
 if ([double]::IsInfinity($arriveT)) {
     $failures.Add("PhysBot never grabbed the crate -- bars 2-5 were never staged")
@@ -312,10 +312,17 @@ foreach ($view in $views) {
 }
 
 # --- bar (4): no freakout -----------------------------------------------------------------
+# SCOPED TO THE FIXTURE, and the first run is why. Judged over EVERY prop in the world this bar
+# reported `prop 1014 was seen at 8.95 m/s` -- which was the crate PhysBot had just THROWN, at
+# exactly the speed CARRY-1's throw leaves the hand at. A throw is P2's one named exception, so
+# the bar was correct about the number and wrong about the prop. The six seeded props are never
+# held and never thrown, so they are the population the "nothing gets flung" claim is about.
+$fixtureIds = @($BoxIds + $RollCanId)
 $fastest = 0.0; $fastestId = 0
 foreach ($view in $views) {
     foreach ($s in $view.Samples) {
         foreach ($p in @($s.props)) {
+            if ($fixtureIds -notcontains [int]$p.id) { continue }
             if ([int]$p.holder -ne 0) { continue }
             $spd = [double]$p.spd
             if ($spd -gt $fastest) { $fastest = $spd; $fastestId = [int]$p.id }
@@ -364,6 +371,11 @@ $escapes = @()
 foreach ($view in $views) {
     foreach ($s in $view.Samples) {
         foreach ($p in @($s.props)) {
+            # The fixture only. The envelope below is the SEARCH room's, and the world also holds
+            # the holding room's and the task room's props -- the first run flagged 64 samples of
+            # `prop 1000 at (-0.60, 1.09, -4.60)`, which is a holding-room prop sitting exactly
+            # where its level put it.
+            if ($fixtureIds -notcontains [int]$p.id) { continue }
             $x = [double]$p.x; $y = [double]$p.y; $z = [double]$p.z
             if ($x -lt $RoomMinX -or $x -gt $RoomMaxX -or
                 $z -lt $RoomMinZ -or $z -gt $RoomMaxZ -or
