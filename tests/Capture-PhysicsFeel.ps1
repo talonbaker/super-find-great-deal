@@ -83,27 +83,60 @@ New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 #            into the base of the 3-2-1 stack.
 #   roll     one can, seeded on its side, rolled EAST at the packet's 1 m/s at 8.5 s, away from
 #            the camera down the open walkway.
-# Edge-on (yaw 90) at a pitch of 0.10: the domino geometry Run-PhysicsFeelTest derives and measures.
-$DominoSeed = "39.20,0.14,0.55,box,0,90;39.30,0.14,0.55,box,0,90;39.40,0.14,0.55,box,0,90;39.50,0.14,0.55,box,0,90;39.60,0.14,0.55,box,0,90"
+# THE FIFTH RUN OF THIS HARNESS PHOTOGRAPHED THE PHYSICS AND IT WAS STILL UNREADABLE, for two
+# reasons that are worth more than the frames (INT-2B, measured 2026-09-21, from the v5 run's own
+# JSONL and a pixel diff of its PNGs):
+#   1. THE CAPTURE CLOCK IS NOT THE PROP CLOCK, and they are ~3.15 s apart. --capture-at fires on
+#      BotHarness._elapsed, which starts when the harness enters _Process (LaunchOptions:
+#      "the bot's own seconds since entering"); the JSONL's t is Time.GetTicksMsec(), from process
+#      start. In v5 the bot's first sample was t=3154 ms, so mark 6.5 s was prop-clock 9.65 s.
+#      The row's five boxes went from 0.0 deg (t=7.68 s) to 66/66/66/68/90 deg (t=9.21 s) -- so
+#      EVERY ONE of the nine marks landed after the row had already settled, and all nine frames
+#      were byte-for-byte the same picture. A mark grid computed against a server-clock shove
+#      must have the connect-and-load time subtracted, or be wide enough to not care.
+#   2. A FIXTURE 3.7-4.1 m AWAY IS ABOUT 25 PIXELS. Diffing DominoCam-7s against -9.5s changed
+#      2426 px and every one of them was the highlighted deal can on the right shelf (x 902-951);
+#      the region the row projects into changed by EXACTLY ZERO. The yellow crate that dominates
+#      those frames is CARRY-1's Prop_3 (1017) at (38, 0.22, 0), 2.5 m out.
+# So the fixtures move to 1.4-2.1 m and the mark grid is both earlier and wider.
+# CARRY-1's crates are the constraint: 1014 at (36, 0.22, 0) and 1017 at (38, 0.22, 0), each a
+# 0.44 m cube at z = 0, which leaves a clear band at x in (36.22, 37.78) on the camera's axis.
+# AND THE DOMINO ROW NOW FALLS ACROSS THE VIEW, NOT AWAY FROM IT. A row laid along X in front of
+# a camera looking down X is seen end-on -- the nearest box hides the other four and the topple
+# is straight away from the lens, which is the one direction a chain cannot be read in. The row
+# is laid along Z and shoved along +Z (screen right) instead: same geometry, same bars, broadside.
+# At yaw 0 a box's 0.06 m depth lies along Z, so yaw 0 is edge-on to a +Z shove exactly as yaw 90
+# is to a +X one. The topple spin about X: w = +8 rad/s carries the top toward +Z (X_hat cross
+# Y_hat = +Z_hat), mirroring the -8 about Z that PHYS-2 measured for a +X shove.
+# Eye height is 1.06 m, solved from the v5 frames rather than assumed: crate 1017's centre lands
+# 46 px below centre at pitch -13 and 2.5 m, which puts the eye at 1.06. Each pitch below aims at
+# its own fixture's centre.
+$DominoSeed = "37.20,0.14,-0.25,box;37.20,0.14,-0.15,box;37.20,0.14,-0.05,box;37.20,0.14,0.05,box;37.20,0.14,0.15,box"
 # A 3-2-1 pyramid of cans standing on the floor plus the shove can in front of it. Rows are
 # 0.075 m apart (a can is 0.07 m across, so they touch); the upper rows sit in the valleys.
-$PyramidSeed = ("40.00,0.06,0.475,can;40.00,0.06,0.550,can;40.00,0.06,0.625,can;" +
-                "40.00,0.18,0.513,can;40.00,0.18,0.587,can;" +
-                "40.00,0.30,0.550,can;" +
-                "38.50,0.035,0.55,can,90")
-$RollSeed = "38.70,0.035,0.55,can,90"
+# x = 37.40 with the shove can at 36.60: both inside the clear band between CARRY-1's two crates,
+# with 0.8 m of run-up, which is over the 0.5 m the can needs to be rolling before it arrives.
+$PyramidSeed = ("37.40,0.06,-0.075,can;37.40,0.06,0.000,can;37.40,0.06,0.075,can;" +
+                "37.40,0.18,-0.037,can;37.40,0.18,0.037,can;" +
+                "37.40,0.30,0.000,can;" +
+                "36.60,0.035,0.000,can,90")
+# The roll starts 1.1 m from the lens and travels AWAY down the aisle, offset to z = +0.55 so it
+# passes CARRY-1's crate 1017 (z +/- 0.22) instead of stopping against it.
+$RollSeed = "36.60,0.035,0.55,can,90"
 $CamAt = "35.5,0"
-$LookEast = "-90,-13"
+# Marks: earlier by the ~3.15 s of finding 1 AND widened, so the grid straddles the fall whether
+# the connect-and-load offset is that or zero. 0.5 s steps (DOOR-1: a 0.1 s grid queues).
+$Marks = "3,3.5,4,4.5,5,5.5,6,6.5,7,8,9"
 $passes = @(
-    @{ Name = "domino";  Bot = "DominoCam";  Seed = $DominoSeed;
-       Shove = "1,2.8,0,0,8,0,0,-8";
-       Marks = "6.5,7,7.5,8,8.5,9,9.5,10,10.5"; Duration = 16 }
-    @{ Name = "pyramid"; Bot = "PyramidCam"; Seed = $PyramidSeed;
+    @{ Name = "domino";  Bot = "DominoCam";  Seed = $DominoSeed;  Look = "-90,-28";
+       Shove = "1,0,0,2.8,8,8,0,0";
+       Marks = $Marks; Duration = 16 }
+    @{ Name = "pyramid"; Bot = "PyramidCam"; Seed = $PyramidSeed; Look = "-90,-25";
        Shove = "7,2.0,0,0,8.5,0,0,-57.14";
-       Marks = "7.5,8,8.5,9,9.5,10,10.5,11,12"; Duration = 16 }
-    @{ Name = "roll";    Bot = "RollCam";    Seed = $RollSeed;
+       Marks = $Marks; Duration = 16 }
+    @{ Name = "roll";    Bot = "RollCam";    Seed = $RollSeed;    Look = "-90,-24";
        Shove = "1,1.0,0,0,8.5,0,0,-28.57";
-       Marks = "7.5,8,8.5,9,9.5,10,11,12"; Duration = 16 }
+       Marks = $Marks; Duration = 16 }
 )
 
 Write-Host "=== physics-feel captures -> $OutDir ===" -ForegroundColor White
@@ -129,10 +162,24 @@ try {
             Write-Fail "server never reported listening on udp/$Port; see $serverOut"
         }
         # Windowed, so Start-Godot (which always injects --headless) is bypassed deliberately.
+        # --gpu-index 1 IS LOAD-BEARING FOR THE CAPTURE GRID, and it is STALL-1's finding spent on
+        # this harness (INT-2B, 2026-09-21). Godot picks device #0, the RTX 4070, which has NO
+        # DISPLAY ATTACHED on this machine; every frame is then copied across to the Intel UHD 770
+        # that owns the screen, and a windowed client runs at about 4 fps with a ~0.5 s stall once
+        # a second (STALL-1 table rows 2 vs 3: 255.851 ms -> 2.837 ms median, 269 stalls -> 0).
+        # Measured consequence HERE, by correlating each PNG's mtime against the bot's own JSONL
+        # clock: a 0.5 s mark grid came out 1.5-2.0 s apart and the FIRST mark of the run, typed
+        # 3 s, actually fired at prop-clock 10.93 s. The row's whole fall takes 1.5 s (tilt 0 deg
+        # at t=7.62 s, 57 deg at 8.38, 66.9 deg at 9.14), so it fell BETWEEN two marks and all
+        # eleven frames were the settled pile -- which is what the fourth and fifth runs of this
+        # harness were really photographing, and why their frames were identical to the byte.
+        # An ENGINE flag, so it goes before the bare -- (the rule this file's header already
+        # states). The server stays headless and is unaffected.
         $botArgs = @(
+            "--gpu-index", "1",
             "--path", $script:Root, "--",
             "--bot", "--address", "127.0.0.1:$Port", "--name", $pass.Bot,
-            "--windowed", "--first-person-cam", "--fp-look", $LookEast,
+            "--windowed", "--first-person-cam", "--fp-look", $pass.Look,
             "--goto-script", $CamAt,
             "--capture-dir", $OutDir, "--capture-at", $pass.Marks,
             "--world", "supermarket", "--duration", $pass.Duration,
