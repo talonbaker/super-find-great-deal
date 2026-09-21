@@ -60,10 +60,65 @@ public interface ILookAngles
 /// </summary>
 public partial class FirstPersonCamera : Node3D, ILookAngles
 {
-    /// <summary>Vertical field of view, degrees. 75 is the third-person rig's own resting lens
-    /// (<c>SandboxCamera.DefaultFov</c>) and the conventional first-person default; wider reads as
-    /// speed and is exactly the channel this rig is not allowed to use.</summary>
+    /// <summary><b>VERTICAL</b> field of view, degrees. 75 is the third-person rig's own resting
+    /// lens (<c>SandboxCamera.DefaultFov</c>) and the conventional first-person default; wider
+    /// reads as speed and is exactly the channel this rig is not allowed to use.
+    ///
+    /// <para><b>Vertical, and that word is load-bearing</b> (SICK-1, 2026-09-20).
+    /// <c>Camera3D.KeepAspect</c> defaults to <c>KeepHeight</c>, so this number is the vertical
+    /// angle and the HORIZONTAL one — the number every FPS settings menu in the world means by
+    /// "FOV" — is <c>2·atan(tan(fov/2)·aspect)</c>. At 75 that is <b>107°</b> horizontal on a
+    /// 16:9 window and <b>123°</b> on Talon's 3440×1440 fullscreen. Both are at or past the wide
+    /// end of what shipped first-person games offer, so "75 is narrow" is an artefact of reading
+    /// a vertical number as a horizontal one. <see cref="FovDeg"/> is the live value and
+    /// <c>--fov</c> moves it; this constant is the default it starts at.</para></summary>
     public const float DefaultFovDeg = 75f;
+
+    /// <summary><b>The live vertical FOV</b>, degrees — <c>--fov &lt;deg&gt;</c>. Static because
+    /// it is a display preference of the whole process, exactly like
+    /// <see cref="InterpolateToRenderFrame"/>, and because the lens it applies to is built inside
+    /// <see cref="Attach"/> where no launch option is in scope. Clamped by
+    /// <c>LaunchOptions</c> on the way in, not here.</summary>
+    public static float FovDeg { get; set; } = DefaultFovDeg;
+
+    /// <summary>
+    /// <b>Interpolate the eye between physics ticks</b> — <c>--cam-interp 0|1</c>.
+    ///
+    /// <para><b>Off</b> is the shipped 2026-09-19 behaviour: the lens is a child of the avatar and
+    /// takes its world position from parentage, so it moves exactly once per physics tick (60 Hz)
+    /// however fast the screen refreshes. <b>On</b>, <see cref="_Process"/> writes the eye's world
+    /// position itself, <see cref="CameraPacing.EyePosition"/> of the last two physics samples at
+    /// <c>Engine.GetPhysicsInterpolationFraction()</c>.</para>
+    ///
+    /// <para><b>Why not the project-wide <c>physics/common/physics_interpolation</c> setting.</b>
+    /// That flag interpolates EVERY <c>Node3D</c> in the process, and three systems in this repo
+    /// already do their own per-render-frame smoothing of a transform they own —
+    /// <c>SandboxAvatar.RemoteFrame</c> for remote proxies, <c>NetworkedProp</c>'s loose-body
+    /// slerp, <c>Carryable</c>'s anchor chase. Interpolating a node that is already being written
+    /// every frame is the documented way to get a node that lags its own writes, and all three
+    /// files belong to other live lanes. This does the same arithmetic on the one node that needs
+    /// it, in the one file this lane owns, and reaches nothing else.</para>
+    ///
+    /// <para><b>It also fixes the second bug for free.</b> The samples are taken from
+    /// <c>SandboxAvatar.RenderGlobalPosition</c>, which is what that property's own contract asks
+    /// for in as many words — "everything cosmetic that tracks the avatar per frame … must read
+    /// this, not <c>GlobalPosition</c>". Parentage gave the lens the RAW body, so a reconciliation
+    /// correction of up to <c>MaxVisualErrorM</c> = 2 m landed on the player's eyes as an instant
+    /// jump while the body mesh, the blob shadow, the nameplate and the carried object all drained
+    /// it smoothly. The first-person lens was the one tracker in the repo not reading it.</para>
+    ///
+    /// <para><b>Default ON, and the numbers that moved it</b> (SICK-1, 2026-09-20,
+    /// <c>docs/qa/2026-09-20-sick-1/</c>). Order-controlled, four 30 s runs under
+    /// <c>--net-sim 80,5,15</c> so corrections land in both arms: OFF, corrections of 0.206 /
+    /// 0.356 / 0.243 / 0.197 m produced eye steps of 0.190 / 0.380 / 0.242 / 0.190 m — the
+    /// correction lands on the player's eyes ONE FOR ONE. ON, a <b>1.504 m</b> correction
+    /// produced a <b>0.118 m</b> eye step, which is two ticks of ordinary walking. And with the
+    /// screen not locked to the physics rate, the share of render frames on which the view did
+    /// not move at all goes from <b>96.3%</b> to <b>0.0%</b> (windowed, vsync off, ~2 100 fps;
+    /// the headless control at 145 fps measured 58.5% against the 58.6% that 1 − 60/R
+    /// predicts).</para>
+    /// </summary>
+    public static bool InterpolateToRenderFrame { get; set; } = true;
 
     /// <summary>Near clip, metres. 5 cm rather than Godot's 0.05-default-by-coincidence: a
     /// first-person lens sits inside the player's own collision capsule, so anything further out
@@ -111,6 +166,17 @@ public partial class FirstPersonCamera : Node3D, ILookAngles
     private SandboxAvatar? _target;
     private float _pitch;
 
+    // --- The eye's two physics samples (SICK-1) ---------------------------------------------
+    //
+    // Written in _PhysicsProcess, read in _Process. The camera is a CHILD of the avatar and Godot
+    // runs _PhysicsProcess in tree order, parent before child, so by the time this samples, the
+    // avatar's OwnerTick/ServerTick/OfflineTick for this tick has already run and _visualError has
+    // already been drained -- i.e. RenderGlobalPosition is final for the tick. That ordering is
+    // what makes a sample here the tick's answer rather than the previous tick's.
+    private Vector3 _eyePrevTick;
+    private Vector3 _eyeThisTick;
+    private bool _haveEyeSamples;
+
     // --- The transient kick (DOOR-1) --------------------------------------------------------
     //
     // A kick is an OFFSET applied when the basis is written, and it is never folded back into
@@ -145,7 +211,7 @@ public partial class FirstPersonCamera : Node3D, ILookAngles
         {
             Name = "Lens",
             Current = true,
-            Fov = DefaultFovDeg,
+            Fov = FovDeg,
             Near = NearPlaneM,
             // Deliberately no CameraAttributes: SandboxCamera's near-field DOF blur starts at
             // 0.35 m, which in first person is the hands and everything they carry.
@@ -157,9 +223,36 @@ public partial class FirstPersonCamera : Node3D, ILookAngles
         _camera.SetCullMaskValue(AvatarVisual.FirstPersonHiddenLayer, false);
         target.HideOwnBodyFromFirstPerson();
         Local = this;
+        // Both samples start on the same point, so the first render frame after Attach lerps
+        // between a position and itself rather than sweeping in from wherever this node's
+        // uninitialised transform happened to be.
+        _eyeThisTick = _eyePrevTick = EyeWorldNow();
+        _haveEyeSamples = true;
         ApplyLookBasis();
+        ApplyEyePosition(0f);
+        // THE READ-BACK, not the intent (the house rule DisplaySettings states for window mode).
+        // The horizontal figure is printed because it is the one a player means by "FOV" and the
+        // one that can be compared with any other game; see DefaultFovDeg for the arithmetic.
+        GD.Print($"[fp-lens] fov {FovDeg:F1} deg vertical = "
+                 + $"{Mathf.RadToDeg(HorizontalFovRad(FovDeg, ViewportAspect())):F1} deg horizontal "
+                 + $"at aspect {ViewportAspect():F3} (keep_aspect={_camera.KeepAspect}), "
+                 + $"near {NearPlaneM:F2} m, cam-interp {InterpolateToRenderFrame}");
         if (captureMouse)
             Input.MouseMode = Input.MouseModeEnum.Captured;
+    }
+
+    /// <summary>Horizontal FOV from a vertical one, radians in and radians out. Pure, and here
+    /// rather than inline so the log line and any test compute the same number.</summary>
+    public static float HorizontalFovRad(float verticalFovDeg, float aspect) =>
+        2f * Mathf.Atan(Mathf.Tan(Mathf.DegToRad(verticalFovDeg) * 0.5f) * aspect);
+
+    private float ViewportAspect()
+    {
+        Viewport vp = GetViewport();
+        if (vp == null)
+            return 16f / 9f;
+        Vector2 size = vp.GetVisibleRect().Size;
+        return size.Y > 0f ? size.X / size.Y : 16f / 9f;
     }
 
     public override void _ExitTree()
@@ -229,12 +322,50 @@ public partial class FirstPersonCamera : Node3D, ILookAngles
         AdvanceKick(delta);
         if (_target == null || !GodotObject.IsInstanceValid(_target))
             return;
-        // Read the eyeline live rather than caching it at Attach: an avatar re-measures its own
-        // body whenever its appearance rebuilds, which for a networked spawn lands a beat AFTER
-        // the camera attaches (the avatar-key synchronizer catching up to the authority's pick).
-        // Same reasoning as SandboxCamera.FocusHeight.
-        Position = _target.Proportions.AimAnchorLocal;
+        ApplyEyePosition((float)Engine.GetPhysicsInterpolationFraction());
         ApplyLookBasis();
+    }
+
+    /// <summary><b>Samples the eye once per physics tick</b> so <see cref="_Process"/> has two
+    /// ends to interpolate between. Runs after the avatar's own tick — see the fields it writes.
+    /// Sampled whether or not <see cref="InterpolateToRenderFrame"/> is on, so flipping the flag
+    /// mid-run (a settings toggle, a future A/B in the pause menu) can never read a stale pair.</summary>
+    public override void _PhysicsProcess(double delta)
+    {
+        if (_target == null || !GodotObject.IsInstanceValid(_target))
+            return;
+        Vector3 now = EyeWorldNow();
+        _eyePrevTick = _haveEyeSamples ? _eyeThisTick : now;
+        _eyeThisTick = now;
+        _haveEyeSamples = true;
+    }
+
+    /// <summary>The eye's world position as of the last physics tick: the avatar's RENDER
+    /// position plus its measured eyeline.
+    ///
+    /// <para>Read live rather than cached at <see cref="Attach"/>: an avatar re-measures its own
+    /// body whenever its appearance rebuilds, which for a networked spawn lands a beat AFTER the
+    /// camera attaches (the avatar-key synchronizer catching up to the authority's pick). Same
+    /// reasoning as <c>SandboxCamera.FocusHeight</c>.</para>
+    ///
+    /// <para><c>RenderGlobalPosition</c>, not <c>GlobalPosition</c> — see
+    /// <see cref="InterpolateToRenderFrame"/>. The eyeline is rotated by the body's basis rather
+    /// than added on Y, which is the same answer today (the offset is (0, eye, 0) and the body
+    /// only ever yaws) and stays the right one if a proportion ever gains an X or Z term.</para></summary>
+    private Vector3 EyeWorldNow() =>
+        _target!.RenderGlobalPosition + _target.GlobalTransform.Basis * _target.Proportions.AimAnchorLocal;
+
+    /// <summary>Writes the eye. Interpolating, this is a GLOBAL write and parentage no longer
+    /// supplies the position; not interpolating, it is the shipped local-offset write, byte for
+    /// byte, so <c>--cam-interp 0</c> is genuinely the old build and not an approximation of it.</summary>
+    private void ApplyEyePosition(float fraction)
+    {
+        if (!InterpolateToRenderFrame || !_haveEyeSamples)
+        {
+            Position = _target!.Proportions.AimAnchorLocal;
+            return;
+        }
+        GlobalPosition = CameraPacing.EyePosition(_eyePrevTick, _eyeThisTick, fraction);
     }
 
     /// <summary>Cancels the body's yaw and writes the look. <c>Basis.FromEuler</c>'s default YXZ

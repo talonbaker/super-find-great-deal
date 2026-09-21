@@ -145,6 +145,31 @@ public partial class NetworkManager : Node
         // footstep for every avatar in earshot, and its doc promises that path allocates
         // nothing. See ActorFx.LogSfx.
         Game.Presentation.ActorFx.LogSfx = Options.LogSfx;
+        ApplyComfortOptions(Options);
+    }
+
+    /// <summary>
+    /// <b>SICK-1's comfort flags, latched once</b> — the same "read the option here, not at the
+    /// point of use" idiom as <c>ActorFx.LogSfx</c> above and for the same reason: the lens is
+    /// built inside <c>SandboxAvatar.AttachFirstPersonCamera</c>, where no launch option is in
+    /// scope, and the frame settings are process-wide facts that must be true before the first
+    /// frame is drawn rather than whenever a camera happens to attach.
+    ///
+    /// <para><b>Inert headless.</b> Every suite bot in the repo but one runs
+    /// <c>--headless</c>, where there is no swap chain to set a present mode on; the vsync and
+    /// fps calls are skipped rather than allowed to no-op, so a headless log never carries a
+    /// line claiming a display setting was applied to a process with no display.</para>
+    /// </summary>
+    private static void ApplyComfortOptions(LaunchOptions options)
+    {
+        Game.Sandbox.FirstPersonCamera.InterpolateToRenderFrame = options.CameraInterpolation;
+        Game.Sandbox.FirstPersonCamera.FovDeg = options.FovDeg;
+        Engine.MaxFps = options.MaxFps;
+        if (DisplayServer.GetName() == "headless")
+            return;
+        DisplayServer.WindowSetVsyncMode(options.Vsync
+            ? DisplayServer.VSyncMode.Enabled
+            : DisplayServer.VSyncMode.Disabled);
     }
 
     public override void _Ready() => ConfigureAuth();

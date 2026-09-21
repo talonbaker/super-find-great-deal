@@ -1262,6 +1262,13 @@ public partial class SandboxAvatar : CharacterBody3D, IServerConfirmedBody
                 ? BuildScriptedSort(net)
                 : net.Options.CarryScript
                 ? BuildScriptedCarry(net)
+                // --goto-patrol: walk between two points for ever. Checked BEFORE --goto-script
+                // because the two are alternative walk brains and a launch line that asked for
+                // both wants the one that does not stop (SICK-1's frame-pacing runs need a body
+                // still walking thirty seconds in).
+                : net.Options.GotoPatrol
+                ? new ScriptedPatrolIntentSource(this, net.Options.GotoPatrolA, net.Options.GotoPatrolB,
+                    net.Options.GotoSprint)
                 : net.Options.GotoScript
                     // --goto-script: walk to a point (sprinting if asked) and stand there.
                     ? new ScriptedGotoIntentSource(this, net.Options.GotoTarget, net.Options.GotoSprint)
@@ -1363,8 +1370,24 @@ public partial class SandboxAvatar : CharacterBody3D, IServerConfirmedBody
         AimCamera = camera.CameraNode;
         GD.Print($"[fp] first-person camera active on '{DisplayName}' — eye height " +
                  $"{Proportions.EyeHeightM:F3} m (measured={Proportions.EyesMeasured}), fov " +
-                 $"{FirstPersonCamera.DefaultFovDeg:F0} deg, near {FirstPersonCamera.NearPlaneM:F2} m, " +
+                 $"{FirstPersonCamera.FovDeg:F0} deg, near {FirstPersonCamera.NearPlaneM:F2} m, " +
                  $"own body hidden on render layer {AvatarVisual.FirstPersonHiddenLayer}");
+        // SICK-1: --pacing-log. Built HERE because this is the one construction site both the
+        // human path and the capture/probe path take, so the instrument can never end up
+        // measuring a camera that is not the one under test. A sibling of the camera rather than
+        // a child of it, at a process priority that puts it after every default-priority node, so
+        // the lens position it samples is the lens position this frame ACTUALLY rendered at.
+        string pacingLog = NetworkManager.Instance?.Options.PacingLogPath ?? string.Empty;
+        if (pacingLog.Length > 0)
+            AddChild(new CameraPacingProbe
+            {
+                Name = "CameraPacingProbe",
+                Camera = camera,
+                CsvPath = pacingLog,
+                DurationSec = NetworkManager.Instance!.Options.PacingSec,
+                TurnDegPerSec = NetworkManager.Instance.Options.PacingTurnDegPerSec,
+                Label = NetworkManager.Instance.Options.PacingLabel,
+            });
         return camera;
     }
 

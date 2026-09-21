@@ -87,6 +87,58 @@ public sealed class LaunchOptions
     /// next real launch does.</para></summary>
     public bool Windowed { get; private set; }
 
+    // --- SICK-1 (2026-09-20): the comfort flags ----------------------------------------------
+    //
+    // Talon, riding the MVP for the first time: "The game is making me motion sick already."
+    // These five are the A/B surface that answer came with. Their defaults ARE the shipped
+    // build — every one of them is the value the measurement in
+    // docs/agents/handoffs/2026-09-20-SICK-1.md chose — so a launch with none of them given is
+    // the recommended configuration and each flag is how you get the other one back.
+
+    /// <summary><c>--cam-interp 0|1</c>, default <b>1</b>. Interpolate the first-person eye
+    /// between physics ticks instead of moving it once per tick. 0 is the 2026-09-19 build.
+    /// See <see cref="Game.Sandbox.FirstPersonCamera.InterpolateToRenderFrame"/>.
+    /// <b>Default 1</b>, on the measurement in that property's own doc.</summary>
+    public bool CameraInterpolation { get; private set; } = true;
+
+    /// <summary><c>--fov &lt;deg&gt;</c>, default
+    /// <see cref="Game.Sandbox.FirstPersonCamera.DefaultFovDeg"/>. <b>VERTICAL</b> degrees —
+    /// see that constant for why the horizontal number is the one a player means, and what this
+    /// one comes to on each aspect.</summary>
+    public float FovDeg { get; private set; } = Game.Sandbox.FirstPersonCamera.DefaultFovDeg;
+
+    /// <summary><c>--vsync 0|1</c>, default <b>1</b> (the engine default this project has always
+    /// had, restated so it can be turned off for a measurement).</summary>
+    public bool Vsync { get; private set; } = true;
+
+    /// <summary><c>--max-fps &lt;n&gt;</c>, 0 = uncapped (the default). A cap is only a comfort
+    /// setting on a machine where the frame time is not steady; with vsync on it is redundant.</summary>
+    public int MaxFps { get; private set; }
+
+    /// <summary><c>--pacing-log &lt;path&gt;</c>: the SICK-1 per-frame instrument's CSV. Empty
+    /// means no instrument is built at all — see <see cref="Game.Sandbox.CameraPacingProbe"/>.</summary>
+    public string PacingLogPath { get; private set; } = "";
+
+    /// <summary><c>--pacing-sec &lt;s&gt;</c>: how long to record. 30 s is the packet's window.</summary>
+    public double PacingSec { get; private set; } = 30.0;
+
+    /// <summary><c>--pacing-turn &lt;degPerSec&gt;</c>: a constant scripted look turn during the
+    /// recording, so yaw-step variance is measured under the stimulus that produces it.</summary>
+    public float PacingTurnDegPerSec { get; private set; }
+
+    /// <summary><c>--pacing-label &lt;name&gt;</c>: what the summary line calls this run.</summary>
+    public string PacingLabel { get; private set; } = "run";
+
+    /// <summary><c>--goto-patrol x1,z1,x2,z2</c>: ping-pong between two ground points for ever,
+    /// no hold required. See <see cref="Game.Sandbox.ScriptedPatrolIntentSource"/>.</summary>
+    public bool GotoPatrol { get; private set; }
+
+    /// <summary>First patrol end, world ground coordinates.</summary>
+    public Vector3 GotoPatrolA { get; private set; }
+
+    /// <summary>Second patrol end, world ground coordinates.</summary>
+    public Vector3 GotoPatrolB { get; private set; }
+
     /// <summary>--capture-dir &lt;dir&gt; + --capture-at &lt;sec[,sec…]&gt;: a WINDOWED bot saves its
     /// own viewport to &lt;dir&gt;/&lt;name&gt;-&lt;sec&gt;s.png at each listed elapsed time, then carries on to
     /// its normal duration/exit. This is the in-engine capture path for anything only a real
@@ -1096,6 +1148,52 @@ public sealed class LaunchOptions
                 case "--windowed":
                     options.Windowed = true;
                     break;
+
+                // --- SICK-1 (2026-09-20): the comfort flags -------------------------------
+                //
+                // Every one of these exists so Talon can A/B on his own machine WITHOUT a
+                // rebuild, which is the packet's requirement and the reason none of them is a
+                // settings-menu row yet: a knob nobody has ridden does not deserve a UI.
+                case "--cam-interp":
+                    options.CameraInterpolation = ParseOnOff(Next(args, ref i),
+                        options.CameraInterpolation);
+                    break;
+                case "--fov":
+                {
+                    // Clamped, not validated-and-refused: the flag exists to be swept by hand
+                    // during an A/B, and a typo that would make the lens unusable should land on
+                    // the nearest usable lens rather than end the launch. The bounds are the two
+                    // ends of what the arithmetic in FirstPersonCamera.DefaultFovDeg keeps sane:
+                    // 50 deg vertical is 83 deg horizontal on 16:9, 110 is 140.
+                    if (double.TryParse(Next(args, ref i), NumberStyles.Float,
+                            CultureInfo.InvariantCulture, out double fovDeg))
+                        options.FovDeg = Mathf.Clamp((float)fovDeg, 50f, 110f);
+                    break;
+                }
+                case "--vsync":
+                    options.Vsync = ParseOnOff(Next(args, ref i), true);
+                    break;
+                case "--max-fps":
+                    if (int.TryParse(Next(args, ref i), NumberStyles.Integer,
+                            CultureInfo.InvariantCulture, out int maxFps) && maxFps >= 0)
+                        options.MaxFps = maxFps;
+                    break;
+                case "--pacing-log":
+                    options.PacingLogPath = Next(args, ref i);
+                    break;
+                case "--pacing-sec":
+                    if (double.TryParse(Next(args, ref i), NumberStyles.Float,
+                            CultureInfo.InvariantCulture, out double pacingSec) && pacingSec > 0)
+                        options.PacingSec = pacingSec;
+                    break;
+                case "--pacing-turn":
+                    if (double.TryParse(Next(args, ref i), NumberStyles.Float,
+                            CultureInfo.InvariantCulture, out double turnDeg))
+                        options.PacingTurnDegPerSec = (float)turnDeg;
+                    break;
+                case "--pacing-label":
+                    options.PacingLabel = Next(args, ref i);
+                    break;
                 case "--capture-dir":
                     options.CaptureDir = Next(args, ref i);
                     break;
@@ -1746,6 +1844,25 @@ public sealed class LaunchOptions
                 case "--goto-sprint":
                     options.GotoSprint = true;
                     break;
+                case "--goto-patrol":
+                {
+                    // x1,z1,x2,z2 — the SAME shape as --carry-patrol, on purpose: two ground
+                    // points, ping-pong for ever, no hold required. SICK-1's frame-pacing runs
+                    // need a body that is still walking thirty seconds in. See
+                    // ScriptedPatrolIntentSource.
+                    string[] parts = Next(args, ref i).Split(',');
+                    if (parts.Length >= 4
+                        && double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out double gpx1)
+                        && double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out double gpz1)
+                        && double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out double gpx2)
+                        && double.TryParse(parts[3], NumberStyles.Float, CultureInfo.InvariantCulture, out double gpz2))
+                    {
+                        options.GotoPatrol = true;
+                        options.GotoPatrolA = new Vector3((float)gpx1, 0f, (float)gpz1);
+                        options.GotoPatrolB = new Vector3((float)gpx2, 0f, (float)gpz2);
+                    }
+                    break;
+                }
                 // --- end --goto ------------------------------------------------------------
             }
         }
@@ -1816,6 +1933,17 @@ public sealed class LaunchOptions
         i++;
         return i < args.Length ? args[i] : "";
     }
+
+    /// <summary><c>0|1</c> (also <c>off|on</c>, <c>false|true</c>) for the SICK-1 comfort flags.
+    /// An unparseable value returns <paramref name="fallback"/>, which for every one of them is
+    /// the shipped default — so <c>--cam-interp</c> with a fat-fingered argument gives the
+    /// default build rather than silently the other one.</summary>
+    private static bool ParseOnOff(string value, bool fallback) => value.Trim().ToLowerInvariant() switch
+    {
+        "0" or "off" or "false" or "no" => false,
+        "1" or "on" or "true" or "yes" => true,
+        _ => fallback,
+    };
 
     /// <summary><c>--seed-test-props</c>'s optional kind field, by NAME (SFX-1). Case- and
     /// whitespace-insensitive, and it fails rather than defaulting — see the parse site for why
