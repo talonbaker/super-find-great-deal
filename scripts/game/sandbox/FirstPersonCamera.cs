@@ -107,11 +107,18 @@ public partial class FirstPersonCamera : Node3D, ILookAngles
     /// jump while the body mesh, the blob shadow, the nameplate and the carried object all drained
     /// it smoothly. The first-person lens was the one tracker in the repo not reading it.</para>
     ///
-    /// <para><b>Default OFF in this commit, on purpose.</b> This commit is the instrument and
-    /// the candidate; nothing about the shipped build may move before the measurement that
-    /// justifies it exists. SICK-1's next commit moves the default and carries the numbers.</para>
+    /// <para><b>Default ON, and the numbers that moved it</b> (SICK-1, 2026-09-20,
+    /// <c>docs/qa/2026-09-20-sick-1/</c>). Order-controlled, four 30 s runs under
+    /// <c>--net-sim 80,5,15</c> so corrections land in both arms: OFF, corrections of 0.206 /
+    /// 0.356 / 0.243 / 0.197 m produced eye steps of 0.190 / 0.380 / 0.242 / 0.190 m — the
+    /// correction lands on the player's eyes ONE FOR ONE. ON, a <b>1.504 m</b> correction
+    /// produced a <b>0.118 m</b> eye step, which is two ticks of ordinary walking. And with the
+    /// screen not locked to the physics rate, the share of render frames on which the view did
+    /// not move at all goes from <b>96.3%</b> to <b>0.0%</b> (windowed, vsync off, ~2 100 fps;
+    /// the headless control at 145 fps measured 58.5% against the 58.6% that 1 − 60/R
+    /// predicts).</para>
     /// </summary>
-    public static bool InterpolateToRenderFrame { get; set; }
+    public static bool InterpolateToRenderFrame { get; set; } = true;
 
     /// <summary>Near clip, metres. 5 cm rather than Godot's 0.05-default-by-coincidence: a
     /// first-person lens sits inside the player's own collision capsule, so anything further out

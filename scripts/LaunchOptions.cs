@@ -98,8 +98,8 @@ public sealed class LaunchOptions
     /// <summary><c>--cam-interp 0|1</c>, default <b>1</b>. Interpolate the first-person eye
     /// between physics ticks instead of moving it once per tick. 0 is the 2026-09-19 build.
     /// See <see cref="Game.Sandbox.FirstPersonCamera.InterpolateToRenderFrame"/>.
-    /// <b>Default 0 until the measurement lands</b> — see that property.</summary>
-    public bool CameraInterpolation { get; private set; }
+    /// <b>Default 1</b>, on the measurement in that property's own doc.</summary>
+    public bool CameraInterpolation { get; private set; } = true;
 
     /// <summary><c>--fov &lt;deg&gt;</c>, default
     /// <see cref="Game.Sandbox.FirstPersonCamera.DefaultFovDeg"/>. <b>VERTICAL</b> degrees —

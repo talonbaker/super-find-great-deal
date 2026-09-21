@@ -55,6 +55,12 @@ public partial class CameraPacingProbe : Node
     private readonly List<float> _stepM = new(16384);
     private readonly List<float> _yawStepDeg = new(16384);
     private readonly List<Vector3> _eye = new(16384);
+    // The owner's undrained reconciliation offset this frame (SandboxAvatar.VisualErrorM) and the
+    // raw body position beside it. Recorded because "the eye jumped" and "the eye jumped BECAUSE a
+    // correction landed that every other tracker absorbed" are different findings, and only the
+    // second one names a fix. See the class doc of SandboxAvatar.RenderGlobalPosition.
+    private readonly List<float> _visErr = new(16384);
+    private readonly List<Vector3> _body = new(16384);
 
     private ulong _lastUsec;
     private double _elapsed;
@@ -98,6 +104,9 @@ public partial class CameraPacingProbe : Node
             return;
         Vector3 p = lens.GlobalPosition;
         float yawDeg = Mathf.RadToDeg(Camera.Yaw);
+        SandboxAvatar? body = Camera.Target;
+        float visErr = body != null && GodotObject.IsInstanceValid(body) ? body.VisualErrorM : 0f;
+        Vector3 bodyPos = body != null && GodotObject.IsInstanceValid(body) ? body.GlobalPosition : Vector3.Zero;
 
         // The first frame has no predecessor, so it has no step and its "frame time" is however
         // long _Ready happened to be from it. Dropped rather than recorded as a zero step, which
@@ -109,6 +118,8 @@ public partial class CameraPacingProbe : Node
             _yawStepDeg.Add(Mathf.Abs(yawDeg - _lastYawDeg));
         }
         _eye.Add(p);
+        _visErr.Add(visErr);
+        _body.Add(bodyPos);
         _lastYawDeg = yawDeg;
         _primed = true;
 
@@ -122,6 +133,18 @@ public partial class CameraPacingProbe : Node
     {
         _done = true;
         CameraPacing.Summary s = CameraPacing.Summarize(_frameMs, _stepM, _yawStepDeg);
+        float peakVisErr = 0f;
+        int corrections = 0;
+        for (int i = 1; i < _visErr.Count; i++)
+        {
+            if (_visErr[i] > peakVisErr)
+                peakVisErr = _visErr[i];
+            // A correction LANDING is the frame the offset grows; it shrinks on every other frame
+            // as OwnerTick drains it. Counting the growths counts the pops rather than the frames
+            // spent recovering from them.
+            if (_visErr[i] > _visErr[i - 1] + 0.05f)
+                corrections++;
+        }
 
         string? dir = Path.GetDirectoryName(CsvPath);
         if (!string.IsNullOrEmpty(dir))
@@ -129,12 +152,14 @@ public partial class CameraPacingProbe : Node
         using (var w = new StreamWriter(File.Open(CsvPath, FileMode.Create, System.IO.FileAccess.Write,
                    FileShare.Read)))
         {
-            w.WriteLine("frame,frame_ms,eye_x,eye_y,eye_z,step_m,yaw_step_deg");
+            w.WriteLine("frame,frame_ms,eye_x,eye_y,eye_z,step_m,yaw_step_deg,visual_error_m,body_x,body_z");
             for (int i = 0; i < _frameMs.Count; i++)
             {
                 Vector3 e = _eye[i + 1];
+                Vector3 b = _body[i + 1];
                 w.WriteLine(string.Create(CultureInfo.InvariantCulture,
-                    $"{i},{_frameMs[i]:F4},{e.X:F5},{e.Y:F5},{e.Z:F5},{_stepM[i]:F6},{_yawStepDeg[i]:F5}"));
+                    $"{i},{_frameMs[i]:F4},{e.X:F5},{e.Y:F5},{e.Z:F5},{_stepM[i]:F6},{_yawStepDeg[i]:F5}"
+                    + $",{_visErr[i + 1]:F5},{b.X:F5},{b.Z:F5}"));
             }
         }
 
@@ -149,6 +174,7 @@ public partial class CameraPacingProbe : Node
                  + $"zero_step={s.ZeroStepFraction * 100f:F1}% "
                  + $"step_mean={s.MeanStepM * 1000f:F3}mm step_sd={s.StepStdDevM * 1000f:F3}mm "
                  + $"yaw_sd={s.YawStepStdDevDeg:F4}deg "
+                 + $"pops={corrections} peak_verr={peakVisErr:F3}m "
                  + $"| prs={Performance.GetMonitor(Performance.Monitor.TimeProcess) * 1000.0:F3}ms "
                  + $"fms={(fps > 0.0 ? 1000.0 / fps : 0.0):F3}ms "
                  + $"draws={(int)Performance.GetMonitor(Performance.Monitor.RenderTotalDrawCallsInFrame)} "
