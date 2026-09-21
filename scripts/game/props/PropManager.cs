@@ -372,7 +372,118 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
         // produces is the impact when it lands, which SFX-2's PropImpact event carries.
         Rpc(MethodName.ApplyPropState, propId, (int)PropMode.Loose, 0, at, (int)PropRelease.None);
         node.BeginLooseServer(impulse, angular);
+        ServerWakeIsland(propId, node);
     }
+
+    /// <summary>A Resting prop whose world-axis box is within this of a waking prop's wakes with
+    /// it, metres. 0.15 is what a domino row needs: a 0.28 m box passes its balance point at
+    /// 24 degrees and its top-front corner has travelled 0.11 m by then, so the boxes in a row
+    /// that falls are ~0.11 m apart and the next one must be dynamic before that corner lands
+    /// on it. Anything further apart is reached by a contact, which wakes it the ordinary way.
+    /// Measured against boxes at 2 cm (a book stack: the whole row slid 8/6/4/2 cm and nothing
+    /// tilted, which is correct physics for touching boxes) and at 11 cm.</summary>
+    public const float WakeIslandGapM = 0.15f;
+
+    /// <summary>The most props one wake event may wake around itself. A stocked shelf run is
+    /// contiguous at 0.09 m pitch, so without a cap one bump would wake the whole board; sixteen
+    /// is more than any row a player can knock over in one motion and each costs exactly one
+    /// settle audit 0.3 s later.</summary>
+    public const int WakeIslandMax = 16;
+
+    /// <summary>
+    /// <b>A prop that wakes wakes its neighbours, so that what it then hits is a body and not a
+    /// wall</b> (PHYS-2, 2026-09-21).
+    ///
+    /// <para><b>Why the contact wake alone could not make a domino row fall, measured three
+    /// ways.</b> A Resting prop is <c>Freeze = true, Kinematic</c> on every peer — infinite mass
+    /// to the solver. So the first touch between a moving box and its frozen neighbour is
+    /// resolved as box-against-wall in the very step that reports it: the mover is stopped dead,
+    /// the wake then hands the neighbour <c>ContactImpulse</c>'s share of a speed the mover no
+    /// longer has, and the neighbour goes on to do the same to the next. <c>Run-PhysicsFeelTest</c>
+    /// logged it as <c>wake prop=2 at=2.77 -> 1.66</c>, <c>prop=3 1.65 -> 0.99</c>,
+    /// <c>prop=4 0.57 -> 0.34</c>, three runs, byte-identical, not one box past 60 degrees.
+    /// Projecting the pre-step velocity, striking at the leading edge and giving the mover its
+    /// momentum back after the wake (all three are in this tree and each is right on its own)
+    /// moved nothing, because the frozen neighbour still takes the first step of every contact
+    /// and there is no second step: by the time it is dynamic the mover has been stopped.</para>
+    ///
+    /// <para><b>So the neighbours are woken BEFORE they are struck.</b> The moment a prop wakes —
+    /// by a shove, a contact, a held crate or an avatar — every Resting prop within
+    /// <see cref="WakeIslandGapM"/> of it wakes too, with no impulse at all, and the wave runs on
+    /// through their neighbours. A domino row is therefore dynamic end to end when the first box
+    /// arrives, the engine resolves every contact between two real masses at the real contact
+    /// point, and the boxes fall over the way boxes do. A prop that was woken and never touched
+    /// sits still under gravity, crosses the settle latch 0.3 s later and freezes again —
+    /// exactly one rest audit, which is what an island wake costs.</para>
+    ///
+    /// <para><b>What it is not.</b> It is not P1's wake and is not counted as one: it prints
+    /// <c>[phys] wake-island</c> (no space after <c>wake</c>, so the suite's contact-wake count
+    /// does not see it), it spends no impulse, it does not touch the 800 ms contact cooldown,
+    /// and it fires only on a wake event — a room where nothing has been touched sees none, so
+    /// P1's "0 wakes over 30 s untouched" bar is untouched too. The broadcast is
+    /// <see cref="PropRelease.None"/>, the same as a settle: nobody knocked these, so nothing
+    /// clanks.</para>
+    /// </summary>
+    private void ServerWakeIsland(int seedId, NetworkedProp seed)
+    {
+        if (!_isServer || seed.Body == null)
+            return;
+        int woken = 0;
+        _islandQueue.Clear();
+        _islandQueue.Enqueue((seedId, seed.Body.GlobalPosition, WorldExtentsOf(seed.Body)));
+        while (_islandQueue.Count > 0 && woken < WakeIslandMax)
+        {
+            (int fromId, Vector3 at, Vector3 ext) = _islandQueue.Dequeue();
+            foreach (PropState p in _registry.AllValues)
+            {
+                if (woken >= WakeIslandMax)
+                    break;
+                if (p.Id == fromId || p.Mode != PropMode.Resting)
+                    continue;
+                NetworkedProp? node = NodeFor(p.Id);
+                if (node == null || !GodotObject.IsInstanceValid(node) || node.Body == null)
+                    continue;
+                Vector3 there = node.Body.GlobalPosition;
+                Vector3 otherExt = WorldExtentsOf(node.Body);
+                // The gap between the two world-axis boxes: the largest per-axis separation
+                // beyond the sum of the extents, negative when they overlap on every axis.
+                float gap = Mathf.Max(Mathf.Max(
+                    Mathf.Abs(there.X - at.X) - ext.X - otherExt.X,
+                    Mathf.Abs(there.Y - at.Y) - ext.Y - otherExt.Y),
+                    Mathf.Abs(there.Z - at.Z) - ext.Z - otherExt.Z);
+                if (gap > WakeIslandGapM)
+                    continue;
+                Transform3D pose = node.Body.GlobalTransform;
+                if (!_registry.Wake(p.Id, pose))
+                    continue;
+                ClearStuckClock(p.Id);
+                PropIslandWakeCount++;
+                woken++;
+                GD.Print($"[phys] wake-island prop={p.Id} near={fromId} gap={Mathf.Max(0f, gap):F3}m total={PropIslandWakeCount}");
+                Rpc(MethodName.ApplyPropState, p.Id, (int)PropMode.Loose, 0, pose, (int)PropRelease.None);
+                node.WakeFromContactServer(Vector3.Zero, there);
+                _islandQueue.Enqueue((p.Id, there, otherExt));
+            }
+        }
+    }
+
+    /// <summary>A prop's half-extents along the world axes at its current orientation -- the
+    /// same arithmetic the bounds audit uses (<see cref="PropPhysics.BoxExtents"/> on the
+    /// collider's local half-size), so an island is measured on the shapes and not on the
+    /// generous bounding spheres FEEL-1 sized for a hand.</summary>
+    private static Vector3 WorldExtentsOf(Carryable body)
+    {
+        Shape3D? shape = body.GetNodeOrNull<CollisionShape3D>("CollisionShape3D")?.Shape;
+        return shape != null
+            ? PropPhysics.BoxExtents(body.GlobalTransform.Basis, PlacementIntegrity.HalfExtentsOf(shape))
+            : Vector3.One * body.BoundingRadiusM;
+    }
+
+    private readonly System.Collections.Generic.Queue<(int Id, Vector3 At, Vector3 Ext)> _islandQueue = new();
+
+    /// <summary>Island wakes this server has spent, beside <see cref="PropWakeCount"/>. Counted
+    /// separately on purpose: a contact wake is P1's evidence, an island wake is its precondition.</summary>
+    public int PropIslandWakeCount { get; private set; }
 
     // --- PHYS-1 (P3): the audit's restore, gated -------------------------------------------
 
@@ -513,15 +624,19 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
     /// <param name="pushDirection">Which way the shove goes. Need not be normalised.</param>
     /// <param name="atWorld">Where the contact happened — the impulse's application point, and
     /// therefore the lever that makes a box topple rather than slide.</param>
-    public void ServerBumpProp(Carryable struck, float moverMassKg, float approachSpeedMps,
+    public Vector3 ServerBumpProp(Carryable struck, float moverMassKg, float approachSpeedMps,
         Vector3 pushDirection, Vector3 atWorld)
     {
+        // RETURNS THE IMPULSE IT SPENT, or zero when nothing woke (PHYS-2, 2026-09-21). The one
+        // caller that needs the number is a Loose prop that has just struck a frozen one and
+        // wants to know how much of its own momentum it should still have -- see
+        // NetworkedProp.ReportBump. The other two callers ignore it, as they did the void.
         if (!_isServer || !PropPhysics.ShouldWake(approachSpeedMps))
-            return;
+            return Vector3.Zero;
         if (!GodotObject.IsInstanceValid(struck) || struck.GetParent() is not NetworkedProp target)
-            return;
+            return Vector3.Zero;
         if (!_registry.TryGet(target.PropId, out PropState s) || s.Mode != PropMode.Resting)
-            return;
+            return Vector3.Zero;
 
         // A SUSTAINED PRESS IS ONE CONTACT, NOT ONE PER SETTLE, and the first live run of
         // Run-PhysicsFeelTest is why this exists. A bot walked into a crate and stopped there --
@@ -553,7 +668,7 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
             bool hasMoved = _lastWokeAt.TryGetValue(target.PropId, out Vector3 wokeFrom)
                 && wokeFrom.DistanceSquaredTo(herePos) > WakeMovedM * WakeMovedM;
             if (!hasMoved)
-                return;
+                return Vector3.Zero;
         }
         _lastWokeMsec[target.PropId] = now;
         _lastWokeAt[target.PropId] = herePos;
@@ -562,11 +677,11 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
         Vector3 impulse = PropPhysics.ContactImpulse(pushDirection, moverMassKg, targetMass,
             approachSpeedMps);
         if (impulse.LengthSquared() <= 0f)
-            return;
+            return Vector3.Zero;
 
         Transform3D at = struck.GlobalTransform;
         if (!_registry.Wake(target.PropId, at))
-            return;
+            return Vector3.Zero;
         ClearStuckClock(target.PropId);
         PropWakeCount++;
         // One line per wake, naming the speed it was woken at against the bar. Wakes are rare by
@@ -582,6 +697,8 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
         Rpc(MethodName.ApplyPropState, target.PropId, (int)PropMode.Loose, 0, at,
             (int)PropRelease.Bumped);
         target.WakeFromContactServer(impulse, atWorld);
+        ServerWakeIsland(target.PropId, target);
+        return impulse;
     }
 
     /// <summary>The half of <see cref="NoteAudit"/> that is about the QUERIES an audit issued
@@ -779,9 +896,12 @@ public partial class PropManager : Node, Sail.Game.Run.IMapScopedSlice
         // caller written before it is unchanged.
         if (NetworkManager.Instance?.Options.SeedTestProps is { Count: > 0 } seeded)
         {
-            foreach ((Vector3 at, PropKind kind) in seeded)
+            foreach ((Vector3 at, PropKind kind, float rollXDeg, float yawYDeg) in seeded)
             {
-                NetworkedProp? spawned = ServerSpawn(kind, PlaceAt(at));
+                Transform3D pose = rollXDeg == 0f && yawYDeg == 0f
+                    ? PlaceAt(at)
+                    : new Transform3D(Basis.FromEuler(new Vector3(Mathf.DegToRad(rollXDeg), Mathf.DegToRad(yawYDeg), 0f)), at);
+                NetworkedProp? spawned = ServerSpawn(kind, pose);
                 if (spawned != null)
                     _seededIds.Add(spawned.PropId);
             }

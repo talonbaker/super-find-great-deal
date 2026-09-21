@@ -72,19 +72,25 @@ param(
     # at 1 m/s on the floor travels at least 1 m".
     [double]$RowShoveMps = 2.8,
     [double]$CanShoveMps = 1.0,
-    # THE CAN IS LAID ON ITS SIDE FIRST, AND THAT IS PHYSICS RATHER THAN CONVENIENCE. A can
-    # standing on its end does not roll when you push it: tipping needs friction > r/h_com =
-    # 0.035/0.06 = 0.58 and tin's is 0.25, so it SKIDS -- mu*g = 2.45 m/s^2, i.e. 0.20 m from
-    # 1 m/s against a 1 m bar. --seed-test-props spawns a code-built can upright and carries no
-    # rotation, so the only deterministic way to get a can onto its side is to say so.
-    #
-    # A spin about +X maps the can's +Y axis onto +Z, which is the orientation a can rolling
-    # along X has to have. 6 rad/s carries the 90 degrees in about 0.26 s.
-    [double]$CanLayRadPerSec = 6.0,
+    # THE HEAD OF THE ROW IS KNOCKED OVER, NOT SLID (PHYS-2, 2026-09-21, measured). A box given
+    # 2.8 m/s and no spin slides 2 cm into its frozen neighbour and passes the velocity on as a
+    # slide: the funnel woke 2, 3 and 4 at 1.66, 0.99 and 0.34 m/s and not one tilted, because a
+    # box hit through its centre translates. A hand that knocks a box hits it high, and the
+    # number for that is a forward pitch: -8 rad/s about Z tips the top toward +X (the row runs
+    # east) and its top-front edge is then what strikes the next box -- see
+    # PropPhysics.StrikePoint for where the impulse lands from there on.
+    [double]$RowTopplePitchRadPerSec = -8.0,
+    # THE CAN IS SEEDED ON ITS SIDE, AND THAT IS PHYSICS RATHER THAN CONVENIENCE. A can standing
+    # on its end does not roll when you push it: tipping needs friction > r/h_com = 0.035/0.06 =
+    # 0.58 and tin's is 0.25, so it SKIDS -- mu*g = 2.45 m/s^2, i.e. 0.20 m from 1 m/s against a
+    # 1 m bar. PHYS-2 first tried laying it down with a spin about +X and measured that fail for
+    # the same reason (the base skids out from under the spin; tilt peaked at 1 degree, three
+    # runs), so --seed-test-props grew a fifth field: degrees of roll about X. 90 puts the can's
+    # axis along Z, which is the orientation a can rolling along X has to have.
+    [double]$CanRollXDeg = 90,
     # On the SERVER's clock (the same one --seed-props-drop uses), which leads every bot's by the
     # connect delay. Nothing below correlates the two: see bar (1).
     [double]$RowShoveAtSec = 40,
-    [double]$CanLayAtSec = 44,
     [double]$CanShoveAtSec = 48,
     # How long the row must stand still before the suite strikes it, in the BOT's own clock. The
     # packet asks for thirty seconds; the schedule above buys between twenty-five and thirty-five
@@ -101,10 +107,20 @@ param(
 $ErrorActionPreference = "Stop"
 . "$PSScriptRoot\_Common.ps1"
 
-# The row: five boxes, 2 cm of air between them. A cereal box is 0.19 m wide and 0.28 m tall, so
-# a pitch of 0.21 m leaves the gap the packet names and a falling box (0.28 m of reach) still
-# arrives at its neighbour.
-$BoxPitch = 0.21
+# THE ROW STANDS EDGE-ON, LIKE DOMINOES DO -- PHYS-2 (2026-09-21), and every number here was
+# measured before it was typed. A cereal box is 0.19 wide x 0.28 tall x 0.06 deep with its centre
+# of mass 0.21 m up (CerealBox.tscn). Struck across its 0.19 m WIDTH it has to tip 24 degrees
+# (atan(0.095/0.21)) before it is committed, and the row is then:
+#   at 2 cm of air   a stack of books -- struck at 2.8 m/s it slid 8/6/4/2 cm as a block and
+#                    nothing tilted (three runs). PHYS-1's 5/5 was two avatars walking THROUGH it.
+#   at 11 cm of air  a lean that stalls -- box 1 reached 52 degrees, box 2 23, box 3 7, and all
+#                    three came to rest leaning on the next and froze there (33 / 20 / 4). A
+#                    stubby block hands its neighbour a lean, not a fall.
+# Struck across its 0.06 m DEPTH the same box is committed at 8 degrees, which is a domino: so the
+# boxes are seeded with their broad face across the row (the sixth seed field, yaw 90) at a pitch
+# of 0.10 m -- 4 cm of air, and a box falling through 8 degrees has swung its top corner 0.04 m,
+# so each one is committed before it touches the next and touches it high.
+$BoxPitch = 0.10
 $BoxX0 = 42.30
 $BoxIds = 1..5                 # --seed-test-props assigns ids from 1 in seed order
 $RollCanId = 6
@@ -154,7 +170,7 @@ $RowZ = -2.0
 # anything touched it", which was true of the crate and false of the bot's own shoulder.
 # Starting at 42.30 puts the whole fixture past the spawn (capsule radius ~0.36 m reaches 41.86),
 # so the outbound leg never sees it and the return leg walks the length of it.
-$CanY = 0.06                  # a can's half-height, on its end
+$CanY = 0.035                 # a can's RADIUS: it is seeded lying on its side (see $CanRollXDeg)
 # At the east end of the bays (they span x 35.4-44.6), shoved EAST into the open cross-aisle. The
 # floor bin at x = 46.4 is 1.8 m away, which is past where a can nudged at 1 m/s can reach and is
 # also a backstop if it is not: a can that stops against the bin is still inside the net-4 m bar.
@@ -169,21 +185,19 @@ $RoomMinY = -0.5; $RoomMaxY = 6.0
 $seed = @()
 for ($i = 0; $i -lt 5; $i++) {
     $x = [math]::Round($BoxX0 + $i * $BoxPitch, 2)
-    $seed += "$x,$RowY,$RowZ,box"
+    $seed += "$x,$RowY,$RowZ,box,0,90"
 }
-$seed += "$CanX,$CanY,$RowZ,can"
+$seed += "$CanX,$CanY,$RowZ,can,$CanRollXDeg"
 $seedArg = ($seed -join ";")
 
-# The three events this run stages, as numbers rather than as a bot's walk:
-#   1. the row's head, shoved EAST into the rest of the row;
-#   2. the can, tipped onto its side (no velocity, spin about +X only) -- see $CanLayRadPerSec;
-#   3. the can, rolled EAST down the open cross-aisle at the packet's own 1 m/s.
-# The spin on (3) is pure rolling for a 0.035 m radius: v = omega x r, so omega_z = -v/r. Getting
+# The two events this run stages, as numbers rather than as a bot's walk:
+#   1. the row's head, knocked EAST into the rest of the row (velocity plus a forward pitch);
+#   2. the can, already on its side, rolled EAST down the open cross-aisle at the packet's 1 m/s.
+# The spin on (2) is pure rolling for a 0.035 m radius: v = omega x r, so omega_z = -v/r. Getting
 # it wrong costs a few centimetres of skid and friction then sorts it out; getting it ABSENT
 # costs the whole bar, because a can pushed without spin slides.
 $RollRadPerSec = [math]::Round(-$CanShoveMps / 0.035, 2)
-$shoveArg = ("$ShovedBoxId,$RowShoveMps,0,0,$RowShoveAtSec;" +
-             "$RollCanId,0,0,0,$CanLayAtSec,$CanLayRadPerSec,0,0;" +
+$shoveArg = ("$ShovedBoxId,$RowShoveMps,0,0,$RowShoveAtSec,0,0,$RowTopplePitchRadPerSec;" +
              "$RollCanId,$CanShoveMps,0,0,$CanShoveAtSec,0,0,$RollRadPerSec")
 
 Write-Host "=== physics feel: dominoes fall, cans roll, nothing freaks out ===" -ForegroundColor White
@@ -211,7 +225,7 @@ try {
         Write-Fail "the server did not seed all six fixture props; see $serverOut"
     }
     Write-Host "        server up (pid $($server.Id)), row at x=$BoxX0..$([math]::Round($BoxX0 + 4 * $BoxPitch,2)) z=$RowZ y=$RowY, can at x=$CanX"
-    Write-Host "        the shove is this suite's: row head prop $ShovedBoxId at $RowShoveMps m/s (t=$RowShoveAtSec s); can prop $RollCanId laid down at t=$CanLayAtSec s then rolled at $CanShoveMps m/s / $RollRadPerSec rad/s (t=$CanShoveAtSec s), server clock"
+    Write-Host "        the shove is this suite's: row head prop $ShovedBoxId at $RowShoveMps m/s pitched $RowTopplePitchRadPerSec rad/s (t=$RowShoveAtSec s); can prop $RollCanId seeded on its side, rolled at $CanShoveMps m/s / $RollRadPerSec rad/s (t=$CanShoveAtSec s), server clock"
 
     $CrateProp = Get-AuthoredPropId $serverOut $CratePropPath
     Write-Host "        the carried crate is authored prop $CrateProp (from the server's adoption log)"
@@ -341,10 +355,10 @@ if ($heldEver.Count -eq 0) {
 # server prints one line per shove it spends, so that is what is checked, and it is checked before
 # anything is judged.
 $shoveLines = @($serverText | Select-String -Pattern "^\[phys\] shove ")
-if ($shoveLines.Count -lt 3) {
-    Write-Fail ("STAGING: the server logged $($shoveLines.Count) [phys] shove line(s), expected 3 " +
-        "(the row's head, the can laid on its side, the can rolled). Nothing below is about " +
-        "physics -- the fixture never fired. See $serverOut")
+if ($shoveLines.Count -lt 2) {
+    Write-Fail ("STAGING: the server logged $($shoveLines.Count) [phys] shove line(s), expected 2 " +
+        "(the row's head knocked, the can rolled). Nothing below is about physics -- the " +
+        "fixture never fired. See $serverOut")
 }
 foreach ($l in $shoveLines) { Write-Host "        $l" -ForegroundColor DarkGray }
 

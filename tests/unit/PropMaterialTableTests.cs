@@ -143,14 +143,16 @@ public class PropMaterialTableTests
                 $"{f} authors can_sleep; sleep is suspended per episode in code, not per prefab");
     }
 
-    /// <summary>Tin is the only voice with any bounce: a can pings off a board, and cardboard,
-    /// fruit and wood do not. A bouncy cereal box is a freakout by another name.</summary>
+    /// <summary>Nothing bounces. PHYS-1 gave tin a 0.10 "ping" and PHYS-2 measured it turning
+    /// <c>Run-StockTest</c> red three times out of three (a can released at its exact resting
+    /// pose read 0.032 m of board penetration against a 0.020 m tolerance; bounce 0.0 alone
+    /// cleared it) — see <c>tin.tres</c>'s own note. A bouncy cereal box is a freakout by
+    /// another name, and so, it turns out, is a bouncy can in a hole.</summary>
     [Fact]
-    public void OnlyTinBounces()
+    public void NothingBounces()
     {
-        Assert.True(MaterialFloat(Material("tin.tres"), "bounce") > 0f);
-        foreach (string other in new[] { "cardboard.tres", "produce.tres", "wood.tres" })
-            Assert.Equal(0f, MaterialFloat(Material(other), "bounce"));
+        foreach (string m in new[] { "tin.tres", "cardboard.tres", "produce.tres", "wood.tres" })
+            Assert.Equal(0f, MaterialFloat(Material(m), "bounce"));
     }
 
     // --- Every prop carries one, and it is the one its VOICE says ---------------------------

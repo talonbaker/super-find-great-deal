@@ -447,8 +447,19 @@ public sealed class LaunchOptions
     /// second copy of the wire contract and would go quietly wrong the first time
     /// <c>PropKind</c> grows. The material-SFX suite seeds forty mixed props in a heap with it;
     /// nobody is going to author forty.</para></summary>
-    public IReadOnlyList<(Vector3 At, MpFoundation.Net.PropKind Kind)> SeedTestProps => _seedTestProps;
-    private readonly List<(Vector3 At, MpFoundation.Net.PropKind Kind)> _seedTestProps = new();
+    /// <summary>Each entry: where, what kind, and (PHYS-2, 2026-09-21) how far it is rolled about
+    /// its own X axis in degrees -- <c>90</c> puts a can on its side with its axis along Z, which
+    /// is the only way a fixture can START with a can that rolls along X. Spinning an upright can
+    /// over was measured not to work: friction 0.25 is under r/h = 0.58, so the spin skids the
+    /// base out and the can wobbles and stands (tilt peaked at 1 degree, three runs). Zero for
+    /// every caller that does not say, so nothing older changes.</summary>
+    /// <para>And a sixth: yaw about Y in degrees, so a row of cereal boxes can stand EDGE-ON to
+    /// the direction they are struck. A 0.19 x 0.28 x 0.06 box tips over its 0.19 m width at
+    /// atan(0.095/0.21) = 24 degrees and over its 0.06 m depth at 8 -- the first is a stubby block
+    /// that leans on its neighbour and stops (measured: 52 / 23 / 7 degrees and frozen there), the
+    /// second is a domino.</para></summary>
+    public IReadOnlyList<(Vector3 At, MpFoundation.Net.PropKind Kind, float RollXDeg, float YawYDeg)> SeedTestProps => _seedTestProps;
+    private readonly List<(Vector3 At, MpFoundation.Net.PropKind Kind, float RollXDeg, float YawYDeg)> _seedTestProps = new();
 
     /// <summary>--seed-props-drop &lt;sec&gt;: server-only, test-only. That many seconds into the
     /// session, release every <c>--seed-test-props</c> prop from Resting into Loose, once, so the
@@ -1563,7 +1574,24 @@ public sealed class LaunchOptions
                             if (!TryParsePropKind(parts[3], out kind))
                                 continue;
                         }
-                        options._seedTestProps.Add((new Vector3((float)sx, (float)sy, (float)sz), kind));
+                        // Optional fifth field: roll about X, degrees. Malformed -> the entry is
+                        // DROPPED like any other malformed field here, not defaulted: a can
+                        // meant to lie down and quietly standing is a fixture that lies.
+                        float rollXDeg = 0f;
+                        if (parts.Length >= 5 && parts[4].Trim().Length > 0)
+                        {
+                            if (!double.TryParse(parts[4], NumberStyles.Float, CultureInfo.InvariantCulture, out double rx))
+                                continue;
+                            rollXDeg = (float)rx;
+                        }
+                        float yawYDeg = 0f;
+                        if (parts.Length >= 6 && parts[5].Trim().Length > 0)
+                        {
+                            if (!double.TryParse(parts[5], NumberStyles.Float, CultureInfo.InvariantCulture, out double yy))
+                                continue;
+                            yawYDeg = (float)yy;
+                        }
+                        options._seedTestProps.Add((new Vector3((float)sx, (float)sy, (float)sz), kind, rollXDeg, yawYDeg));
                     }
                     break;
                 }

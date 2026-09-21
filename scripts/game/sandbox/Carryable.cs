@@ -841,7 +841,9 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
 
         // Before the physics server integrates this step — see ApproachSpeedMps for why the
         // velocity read inside body_entered is the wrong number for a landing.
-        ApproachSpeedMps = LinearVelocity.Length();
+        ApproachVelocity = LinearVelocity;
+        ApproachAngularVelocity = AngularVelocity;
+        ApproachSpeedMps = ApproachVelocity.Length();
 
         if (!_homeSet)
         {
@@ -926,6 +928,8 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
             _visual.Scale = Vector3.One;
             _material.EmissionEnergyMultiplier = _baseGlow;
             ApproachSpeedMps = 0f;
+            ApproachVelocity = Vector3.Zero;
+            ApproachAngularVelocity = Vector3.Zero;
         }
     }
 
@@ -963,6 +967,26 @@ public partial class Carryable : RigidBody3D, ICarryable, IHighlightable
     /// impulse applied by the time the signal is emitted, so the handler reads a body that has
     /// stopped. Half the impacts in a game working is exactly the kind of bug that ships.</para></summary>
     public float ApproachSpeedMps { get; private set; }
+
+    /// <summary>The VECTOR <see cref="ApproachSpeedMps"/> is the length of — this body's velocity
+    /// as it entered the current physics step.
+    ///
+    /// <para><b>PHYS-2 (2026-09-21): the wake funnel needed the vector, not the number, and the
+    /// row of dominoes did not fall until it had it.</b> <c>NetworkedProp.ReportBump</c> projects
+    /// the mover's velocity onto the line of centres so a graze is not a shove — the right idea,
+    /// computed from <c>LinearVelocity</c> inside <c>body_entered</c>, which is the one-sided
+    /// failure the paragraph above describes: a cereal box shoved at 2.8 m/s into a FROZEN
+    /// neighbour 2 cm away has its whole velocity absorbed in the step that reports the contact,
+    /// so the projection read ~0, <c>ShouldWake</c> said no, and the head of the row slid 3 cm and
+    /// stopped dead — measured three times, `wakes=0` for the row on every run. PHYS-1's 5/5 was
+    /// two BOTS walking through the row (its own commit says so: "one mover could not do it");
+    /// box-on-box never propagated. Projecting THIS vector instead is the whole fix.</para></summary>
+    public Vector3 ApproachVelocity { get; private set; }
+
+    /// <summary>The angular half of <see cref="ApproachVelocity"/>, sampled at the same
+    /// instant, for the same consumer: a box pitched into its neighbour has its spin eaten by
+    /// the frozen contact along with its speed, and gets both back when the neighbour wakes.</summary>
+    public Vector3 ApproachAngularVelocity { get; private set; }
 
     /// <summary><b>The speed that actually matters at a contact</b> (SFX-1): this body's velocity
     /// relative to what it hit, when what it hit is another rigid body, and its own velocity

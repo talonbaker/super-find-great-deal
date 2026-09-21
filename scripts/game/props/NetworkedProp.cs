@@ -994,17 +994,62 @@ public partial class NetworkedProp : Node3D
     /// from a shove — the property <c>PropPhysics.WakeSpeedThresholdMps</c> leans on. The reported
     /// speed is used only where that line is degenerate (two bodies at the same point, which the
     /// solver is about to separate anyway).</para>
+    ///
+    /// <para><b>The velocity projected is the one this body CARRIED INTO the step
+    /// (<see cref="Carryable.ApproachVelocity"/>), not <c>LinearVelocity</c></b> — PHYS-2,
+    /// 2026-09-21. By the time <c>body_entered</c> fires, a head-on contact with a frozen prop has
+    /// already had its normal impulse applied and <c>LinearVelocity</c> reads the STOPPED body:
+    /// a box shoved at 2.8 m/s into its neighbour projected to ~0, nothing woke, and the row stood.
+    /// <c>Carryable.ApproachSpeedMps</c> already existed for SFX-2's identical problem one signal
+    /// over; the vector beside it is what this consumer needed. The live velocity is kept as a
+    /// floor for the case the pre-step sample is stale (a body that was frozen at the top of the
+    /// step and thrown inside it).</para>
     /// </summary>
     private void ReportBump(Carryable other, float reportedSpeed)
     {
         if (!IsServer || PropManager.Instance is not { } mgr || !IsInstanceValid(other))
             return;
         Vector3 toward = other.GlobalPosition - Body.GlobalPosition;
+        Vector3 mover = Body.ApproachVelocity.LengthSquared() >= Body.LinearVelocity.LengthSquared()
+            ? Body.ApproachVelocity
+            : Body.LinearVelocity;
         float approach = toward.LengthSquared() > 1e-8f
-            ? PropPhysics.ApproachSpeed(Body.LinearVelocity, other.LinearVelocity, toward)
+            ? PropPhysics.ApproachSpeed(mover, other.LinearVelocity, toward)
             : reportedSpeed;
-        mgr.ServerBumpProp(other, Body.Mass > 0f ? (float)Body.Mass : 0f, approach, toward,
-            other.GlobalPosition);
+        // WHERE the impulse lands is the difference between a domino and a shuffle -- PHYS-2. A
+        // box's support point toward the struck prop is its leading edge (high, when it is
+        // toppling; the face's centre, when it is sliding); a sphere's is its surface along the
+        // line of centres. See PropPhysics.StrikePoint for the measurement behind it.
+        Shape3D? moverShape = Body.GetNodeOrNull<CollisionShape3D>("CollisionShape3D")?.Shape;
+        Vector3 strike = moverShape is SphereShape3D sphere && toward.LengthSquared() > 1e-8f
+            ? Body.GlobalPosition + toward.Normalized() * sphere.Radius
+            : PropPhysics.StrikePoint(Body.GlobalTransform,
+                moverShape != null ? PlacementIntegrity.HalfExtentsOf(moverShape) : Vector3.One * 0.05f,
+                toward);
+        Vector3 spent = mgr.ServerBumpProp(other, Body.Mass > 0f ? (float)Body.Mass : 0f, approach,
+            toward, strike);
+
+        // THE FROZEN WALL ATE THE MOVER'S MOMENTUM, AND THIS GIVES IT BACK -- PHYS-2 (2026-09-21),
+        // and the row of dominoes did not fall until it did. A Resting prop is a frozen KINEMATIC
+        // body on every peer: infinite mass to the solver. So in the step that reports this
+        // contact the mover has already been stopped dead against it -- a box shoved at 2.8 m/s
+        // reads ~0 here -- and the wake that follows hands the neighbour a FRACTION of the
+        // approach speed (ContactImpulse's share) while the mover keeps nothing. Measured: the
+        // funnel woke boxes 2, 3 and 4 at 1.66, 0.99 and 0.34 m/s, each stopped in turn by the
+        // next frozen one, and not one tilted. Talon's sentence is "fall over like dominoes", and
+        // a domino keeps leaning on the next one after the first touch.
+        //
+        // So when -- and only when -- the neighbour actually woke, the mover is given back the
+        // velocity it carried INTO the step less the share it just handed over, and its spin
+        // whole. Next tick both bodies are dynamic and the solver resolves the contact between
+        // two real masses, which is what P1 promised and a frozen first touch could not deliver.
+        // Nothing woken = the wall was real (below threshold, cooling down, or not Resting) and
+        // the mover stays stopped, exactly as before.
+        if (spent.LengthSquared() > 0f && !Body.IsHeld && !Body.Freeze && Body.Mass > 0f)
+        {
+            Body.LinearVelocity = Body.ApproachVelocity - spent / (float)Body.Mass;
+            Body.AngularVelocity = Body.ApproachAngularVelocity;
+        }
     }
 
     /// <summary>

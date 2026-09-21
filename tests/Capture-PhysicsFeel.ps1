@@ -8,18 +8,18 @@
     port). Both take the machine-wide mutex, so they can never co-exist, and only the registered
     half is in Run-AllTests.ps1.
 
-    Three passes, three fixtures, one windowed first-person bot each:
-
-      domino   five cereal boxes 2 cm apart in the z = 0 walkway; the bot carries CARRY-1's crate
-               straight down its own walkway into them. Marks are on a 0.25 s grid across the
-               moment of contact, because DOOR-1 measured that a 0.1 s grid QUEUES (a viewport
-               capture costs ~0.18 s) and reports times that are up to a second wrong.
+    Three passes, three fixtures, one windowed first-person bot each, every fixture struck by
+    --phys-shove on the server (PHYS-2; the walk it replaced is measured at the $passes block):
+      domino   five cereal boxes 2 cm apart in the z = 0 walkway; the row's head is struck at
+               2.8 m/s into the other four. Marks are on a 0.5 s grid across the moment of
+               contact, because DOOR-1 measured that a 0.1 s grid QUEUES (a viewport capture
+               costs ~0.18 s) and reports times that are up to a second wrong.
       pyramid  six cans stacked 3-2-1 at the end of the aisle, and a seventh can on the floor
-               that the bot shoves into them. This is the fixture Run-PhysicsFeelTest does NOT
-               stage: the suite's bars are an angle and a distance, and a pyramid is a picture.
-      roll     one can on an empty stretch of the z = 0 walkway, shoved and then watched over
-               three frames a second apart as it rolls away down the aisle.
-
+               that is laid down and rolled into them. This is the fixture Run-PhysicsFeelTest
+               does NOT stage: the suite's bars are an angle and a distance, and a pyramid is a
+               picture.
+      roll     one can on an empty stretch of the z = 0 walkway, laid down, rolled at 1 m/s and
+               watched over frames a second apart as it rolls away down the aisle.
     EACH PASS HAS ITS OWN BOT NAME, and that is not cosmetic: BotHarness names a frame
     <stem>-<mark>s.png with the stem defaulting to --name, so three passes sharing one name and
     overlapping mark grids would silently overwrite each other's frames.
@@ -48,19 +48,59 @@ if ($OutDir -eq "") { $OutDir = Join-Path $script:Root "docs/qa/2026-09-20-phys-
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 
 # Fixtures. Ids are assigned from 1 in seed order by --seed-test-props.
-$DominoSeed = "41.00,0.14,0,box;41.21,0.14,0,box;41.42,0.14,0,box;41.63,0.14,0,box;41.84,0.14,0,box"
+# PHYS-2 (2026-09-21): THE SHOVE IS THE SERVER'S, NOT A WALK, AND THE CAMERA NEVER MOVES.
+# Two runs of this harness measured why, in order:
+#   1. PHYS-1's walking holder grabbed the crate at x = 36 and stopped dead at x = 37.74 against
+#      Prop_3 (1017), another of CARRY-1's crates in the same walkway -- nine `[phys] wake
+#      prop=1017` lines and never within 3 m of the row -- and the marks (4.5-5.5 s) were placed
+#      for a contact that would have been at ~9 s even unblocked. Twelve frames, three distinct
+#      byte sizes, all of a shelf face.
+#   2. Re-staged with --phys-shove and the camera PINNED to SearchSpawn_1 by --spawn-index: the
+#      avatar moved (its own samples say 44.5 then 45.9) and the first-person camera did not --
+#      every frame was shot from the join-order spawn (35.5, 1.1, 0) looking down the aisle at
+#      the bot's own avatar ten metres away. A --fp-look camera does not follow a spawn-pin
+#      teleport; Measure-ShopFloor's shots walk with --goto-script and never saw this.
+# So the camera stays where join order puts the first peer, SearchSpawn_0 at (35.5, 1.1, 0), told
+# to walk to exactly that point so BotHarness never wanders, and the FIXTURE is placed in front of
+# it: the z = 0 walkway 2.5-3.3 m east, offset to z = +0.4 (screen right for a camera looking +X)
+# so CARRY-1's crate at (36, 0.22, 0) sits below the frame rather than in it. Yaw -90 looks +X
+# (Measure-ShopFloor's ShopEast; a run of this harness at +90 photographed the drop-off bin behind
+# the camera); pitch -20 puts a floor-level fixture at 3 m in the centre of a 1.04 m eye.
+# The shove clock starts when the server's PropManager starts stepping and --capture-at counts
+# from the client's launch, ~0.5 s after the server reports listening, so the two clocks agree to
+# about a second and the mark grids are wide enough to absorb that (0.5 s steps; DOOR-1 measured
+# that a 0.1 s grid queues behind the ~0.18 s a viewport capture costs).
+#   domino   the row's head (prop 1, x = 38.00) struck EAST at 2.8 m/s with a forward pitch of
+#            8 rad/s at t = 8 s -- a hand knocking a box over, not a puck sliding into it -- and
+#            the other four are woken in turn by the shipped contact path, each by the leading
+#            edge of the one before (PropPhysics.StrikePoint).
+#   pyramid  the seventh can (prop 7) is SEEDED lying on its side (the fifth seed field, 90
+#            degrees about X; spinning an upright can over was measured not to work, see
+#            LaunchOptions.SeedTestProps) and rolled EAST at 2 m/s (omega_z = -v/r) at t = 8.5 s
+#            into the base of the 3-2-1 stack.
+#   roll     one can, seeded on its side, rolled EAST at the packet's 1 m/s at 8.5 s, away from
+#            the camera down the open walkway.
+# Edge-on (yaw 90) at a pitch of 0.10: the domino geometry Run-PhysicsFeelTest derives and measures.
+$DominoSeed = "38.00,0.14,0.4,box,0,90;38.10,0.14,0.4,box,0,90;38.20,0.14,0.4,box,0,90;38.30,0.14,0.4,box,0,90;38.40,0.14,0.4,box,0,90"
 # A 3-2-1 pyramid of cans standing on the floor plus the shove can in front of it. Rows are
 # 0.075 m apart (a can is 0.07 m across, so they touch); the upper rows sit in the valleys.
-$PyramidSeed = ("41.00,0.06,-0.075,can;41.00,0.06,0.000,can;41.00,0.06,0.075,can;" +
-                "41.00,0.18,-0.037,can;41.00,0.18,0.037,can;" +
-                "41.00,0.30,0.000,can;" +
-                "39.50,0.06,0,can")
-$RollSeed = "41.50,0.06,0,can"
-
+$PyramidSeed = ("38.80,0.06,0.325,can;38.80,0.06,0.400,can;38.80,0.06,0.475,can;" +
+                "38.80,0.18,0.363,can;38.80,0.18,0.437,can;" +
+                "38.80,0.30,0.400,can;" +
+                "37.30,0.035,0.4,can,90")
+$RollSeed = "37.50,0.035,0.4,can,90"
+$CamAt = "35.5,0"
+$LookEast = "-90,-20"
 $passes = @(
-    @{ Name = "domino";  Bot = "DominoCam";  Seed = $DominoSeed;  WalkTo = "43.0,0"; Marks = "4.5,4.75,5,5.25,5.5"; Duration = 16 }
-    @{ Name = "pyramid"; Bot = "PyramidCam"; Seed = $PyramidSeed; WalkTo = "42.5,0"; Marks = "4.5,5,5.5,6.5";       Duration = 16 }
-    @{ Name = "roll";    Bot = "RollCam";    Seed = $RollSeed;    WalkTo = "43.5,0"; Marks = "6,7,8";               Duration = 16 }
+    @{ Name = "domino";  Bot = "DominoCam";  Seed = $DominoSeed;
+       Shove = "1,2.8,0,0,8,0,0,-8";
+       Marks = "6.5,7,7.5,8,8.5,9,9.5,10,10.5"; Duration = 16 }
+    @{ Name = "pyramid"; Bot = "PyramidCam"; Seed = $PyramidSeed;
+       Shove = "7,2.0,0,0,8.5,0,0,-57.14";
+       Marks = "7.5,8,8.5,9,9.5,10,10.5,11,12"; Duration = 16 }
+    @{ Name = "roll";    Bot = "RollCam";    Seed = $RollSeed;
+       Shove = "1,1.0,0,0,8.5,0,0,-28.57";
+       Marks = "7.5,8,8.5,9,9.5,10,11,12"; Duration = 16 }
 )
 
 Write-Host "=== physics-feel captures -> $OutDir ===" -ForegroundColor White
@@ -78,22 +118,19 @@ try {
         Write-Host "--- $name ---" -ForegroundColor Cyan
         $serverOut = Join-Path $script:LogDir "physcap-$name.server.out.log"
         $server = Start-Godot @("--server", "--port", $Port, "--world", "supermarket",
-            "--spawn-room", "search", "--spawn-index", "$($pass.Bot)=0",
-            "--seed-test-props", $pass.Seed) "physcap-$name.server"
+            "--spawn-room", "search",
+            "--seed-test-props", $pass.Seed,
+            "--phys-shove", $pass.Shove) "physcap-$name.server"
         $procs += $server
         if (-not (Wait-ForLogLine $serverOut "\[server\] listening" 40)) {
             Write-Fail "server never reported listening on udp/$Port; see $serverOut"
         }
-        $crate = Get-AuthoredPropId $serverOut "SearchRoom/Prop_0"
-
         # Windowed, so Start-Godot (which always injects --headless) is bypassed deliberately.
         $botArgs = @(
             "--path", $script:Root, "--",
             "--bot", "--address", "127.0.0.1:$Port", "--name", $pass.Bot,
-            "--windowed", "--first-person-cam",
-            "--carry-script", "36,0.22,0,1.0,-1", "--carry-grab-retry", "0.6",
-            "--carry-target-prop", $crate,
-            "--carry-walk-to", $pass.WalkTo,
+            "--windowed", "--first-person-cam", "--fp-look", $LookEast,
+            "--goto-script", $CamAt,
             "--capture-dir", $OutDir, "--capture-at", $pass.Marks,
             "--world", "supermarket", "--duration", $pass.Duration,
             "--log", (Join-Path $script:LogDir "physcap-$name.jsonl"))

@@ -1,3 +1,4 @@
+using System;
 using Godot;
 
 namespace MpFoundation.Game.Props;
@@ -213,5 +214,93 @@ public static class PropPhysics
         if (len <= 0f)
             return 0f;
         return (moverVelocity - targetVelocity).Dot(normalTowardTarget / len);
+    }
+
+    /// <summary>
+    /// <b>Where a box-shaped mover reaches furthest toward what it struck</b> -- the point the
+    /// wake impulse is applied at (PHYS-2, 2026-09-21).
+    ///
+    /// <para><b>A domino is knocked over by its neighbour's TOP EDGE, and an impulse through a
+    /// box's centre cannot topple anything.</b> <c>body_entered</c> carries no contact point, and
+    /// the funnel applied every prop-on-prop wake at the struck prop's centre -- pure translation
+    /// -- so a row of cereal boxes shoved at 2.8 m/s shuffled 3 cm each and stood (measured:
+    /// <c>wake prop=2 at=2.77 -> 1.66</c>, <c>prop=3 1.65 -> 0.99</c>, <c>prop=4 0.57 -> 0.34</c>,
+    /// not one past 60 degrees). The mover's support point along the line of centres is the
+    /// honest approximation: a toppling box leads with its top-front edge, and that is high on the
+    /// neighbour; a box sliding face-first ties on all four front corners and their mean is the
+    /// face's centre, which is the flat contact it really is. <paramref name="tieM"/> is what
+    /// "ties" means -- a centimetre, under any prop's half-depth.</para>
+    /// </summary>
+    public static Vector3 StrikePoint(Transform3D moverAt, Vector3 moverHalf, Vector3 toward,
+        float tieM = 0.01f)
+    {
+        if (toward.LengthSquared() <= 1e-8f)
+            return moverAt.Origin;
+        Vector3 n = toward.Normalized();
+        Span<Vector3> corners = stackalloc Vector3[8];
+        Span<float> along = stackalloc float[8];
+        float best = float.NegativeInfinity;
+        for (int i = 0; i < 8; i++)
+        {
+            var local = new Vector3(
+                (i & 1) == 0 ? -moverHalf.X : moverHalf.X,
+                (i & 2) == 0 ? -moverHalf.Y : moverHalf.Y,
+                (i & 4) == 0 ? -moverHalf.Z : moverHalf.Z);
+            corners[i] = moverAt * local;
+            along[i] = corners[i].Dot(n);
+            if (along[i] > best)
+                best = along[i];
+        }
+        Vector3 sum = Vector3.Zero;
+        int count = 0;
+        for (int i = 0; i < 8; i++)
+        {
+            if (along[i] >= best - tieM)
+            {
+                sum += corners[i];
+                count++;
+            }
+        }
+        return sum / count;
+    }
+
+    /// <summary>
+    /// <b>Half-extents of an oriented box along the axes of another frame</b> -- the AABB of an
+    /// OBB, <c>ext_i = sum_j |B_ij| half_j</c>. Identical to sweeping the eight corners, without
+    /// the eight transforms.
+    /// </summary>
+    public static Vector3 BoxExtents(Basis basis, Vector3 half) => new(
+        Mathf.Abs(basis.Row0.X) * half.X + Mathf.Abs(basis.Row0.Y) * half.Y + Mathf.Abs(basis.Row0.Z) * half.Z,
+        Mathf.Abs(basis.Row1.X) * half.X + Mathf.Abs(basis.Row1.Y) * half.Y + Mathf.Abs(basis.Row1.Z) * half.Z,
+        Mathf.Abs(basis.Row2.X) * half.X + Mathf.Abs(basis.Row2.Y) * half.Y + Mathf.Abs(basis.Row2.Z) * half.Z);
+
+    /// <summary>
+    /// <b>Half-extents of a round shape -- a cylinder, a capsule, a sphere -- along the axes of
+    /// another frame.</b> <paramref name="axis"/> is the shape's own axis expressed in that
+    /// frame (unit), <paramref name="halfLen"/> the half-length of the straight part (a cylinder's
+    /// half-height; a capsule's half-height minus its radius; a sphere's zero), and the extent
+    /// along any axis is <c>|a_i| halfLen + r sqrt(1 - a_i^2)</c> for FLAT ends (a cylinder: the
+    /// rim of a tilted disc) and <c>|a_i| halfLen + r</c> for ROUND ends (a capsule, and a sphere
+    /// is a capsule of zero length -- its extent is its radius whichever way it is turned).
+    ///
+    /// <para><b>PHYS-2 (2026-09-21): this is what stops a rolling can or a rolled orange being
+    /// teleported home for lying on the floor.</b> REACH-1's bounds test swept the eight corners
+    /// of the shape's LOCAL bounding box, which for anything round overstates the extent by up to
+    /// sqrt(2) (a cylinder about its own axis) or sqrt(3) (a sphere) as the body rotates -- and a
+    /// body that rolls rotates. A can lying on the floor sits 1.2 cm into it (the solver's rest
+    /// penetration for a cylinder on its side, measured on every run) and its true bottom is
+    /// 0.8 cm inside the bounds slack; its corner-swept bottom at 45 degrees is 2.6 cm outside it,
+    /// and that read as OutOfBounds -> RestoredLastGood: the can jumped back to where it had
+    /// been, mid-run, in front of the camera. <c>Run-PhysicsFeelTest</c> caught the can; the
+    /// same run caught authored produce 1135 -- a sphere -- being restored 0.4 m for the same
+    /// reason, which is the shipped game doing it to a player's orange.</para>
+    /// </summary>
+    public static Vector3 RoundExtents(Vector3 axis, float halfLen, float radius, bool roundEnds)
+    {
+        Vector3 e = Vector3.Zero;
+        e.X = Mathf.Abs(axis.X) * halfLen + radius * (roundEnds ? 1f : Mathf.Sqrt(Mathf.Max(0f, 1f - axis.X * axis.X)));
+        e.Y = Mathf.Abs(axis.Y) * halfLen + radius * (roundEnds ? 1f : Mathf.Sqrt(Mathf.Max(0f, 1f - axis.Y * axis.Y)));
+        e.Z = Mathf.Abs(axis.Z) * halfLen + radius * (roundEnds ? 1f : Mathf.Sqrt(Mathf.Max(0f, 1f - axis.Z * axis.Z)));
+        return e;
     }
 }
