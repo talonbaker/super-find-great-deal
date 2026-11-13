@@ -115,3 +115,13 @@ the one in-world control this foundation ever shipped failed three playtests in 
 Ask Talon in plain conversational text, one question at a time, and wait for a plain-text answer.
 Never a multiple-choice popup, an option list or a numbered batch. Define any jargon the question
 uses.
+
+## Cross-repo map (added 2026-11-13)
+
+Talon's private repo `talonbaker/repo-map` (local clone `C:/repos/repo-map`) maps what already exists across all of his
+repos: systems, shaders, tools and assets, with where the best copy lives on GitHub and how to reuse it.
+
+Nothing to do now: work in progress carries on exactly as it is. It is there if you need it:
+
+- Before building a system from scratch, check `catalog/INDEX.md` in repo-map for an existing implementation in another repo.
+- After landing something another project could reuse, add one short note to `repo-map/inbox/` (format in `inbox/README.md`). Do not edit repo-map's `catalog/` directly; a sweep does that.
